@@ -15,6 +15,9 @@ const globalForDb = globalThis as unknown as { __db?: Promise<DB> };
 async function create(): Promise<DB> {
   const url = process.env.DATABASE_URL;
   if (url) return drizzleNeon(neon(url), { schema });
+  if (process.env.VERCEL) {
+    throw new Error("DATABASE_URL is not set. In Vercel: Storage → Create Database → Neon → connect it to this project, then redeploy.");
+  }
 
   const { PGlite } = await import("@electric-sql/pglite");
   const { drizzle } = await import("drizzle-orm/pglite");
