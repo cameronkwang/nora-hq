@@ -49,6 +49,12 @@ export const deliverables = pgTable("deliverables", {
 });
 
 export const ASK_STATUSES = ["new", "in_progress", "done", "archived"] as const;
+/** What kind of drop-in it is. "auto" = not sorted yet; Claude triages it. */
+export const ASK_KINDS = ["auto", "request", "idea", "update", "question"] as const;
+export type AskKind = (typeof ASK_KINDS)[number];
+/** Who should act on it. "auto" = let Claude route it. */
+export const ASK_FOR = ["auto", "claude", "cameron", "nora", "anyone"] as const;
+export type AskFor = (typeof ASK_FOR)[number];
 export type AskStatus = (typeof ASK_STATUSES)[number];
 
 /** Free-form drop-ins from Nora (or Cameron) for Claude to pick up. */
@@ -62,6 +68,8 @@ export const asks = pgTable(
     status: text("status").$type<AskStatus>().notNull().default("new"),
     createdBy: text("created_by").notNull(),
     claudeNote: text("claude_note"), // what Claude did / questions back
+    kind: text("kind").$type<AskKind>().notNull().default("auto"),
+    forWho: text("for_who").$type<AskFor>().notNull().default("auto"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -106,6 +114,7 @@ export const tasks = pgTable(
     month: text("month").notNull(), // "YYYY-MM" the task counts toward
     deliverableId: text("deliverable_id").references(() => deliverables.id, { onDelete: "set null" }),
     askId: text("ask_id").references(() => asks.id, { onDelete: "set null" }),
+    tag: text("tag"), // e.g. "onboarding" — groups special-purpose tasks
     createdBy: text("created_by").notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     completedAt: timestamp("completed_at", { withTimezone: true }),
@@ -121,6 +130,8 @@ export const DRAFT_KINDS = [
   "outreach_dm",
   "comment_reply",
   "report",
+  "lead_email",
+  "lead_dm",
   "other",
 ] as const;
 export type DraftKind = (typeof DRAFT_KINDS)[number];
@@ -345,3 +356,52 @@ export type MonthlyMetric = typeof monthlyMetrics.$inferSelect;
 export type Review = typeof reviews.$inferSelect;
 export type Connection = typeof connections.$inferSelect;
 export type Activity = typeof activity.$inferSelect;
+
+/* ───────────────────────── Leads (potential new clients) ───────────────────────── */
+
+/** What we could do for them: manage their Google reviews, run their social, or a creator collab with Nora. */
+export const LEAD_OPPORTUNITIES = ["google", "social", "collab"] as const;
+export type LeadOpportunity = (typeof LEAD_OPPORTUNITIES)[number];
+export const LEAD_STAGES = ["found", "qualified", "contacted", "talking", "proposal", "won", "lost", "not_a_fit"] as const;
+export type LeadStage = (typeof LEAD_STAGES)[number];
+
+/**
+ * A business that might become a client. Facts are public info gathered by Claude or a person
+ * (Google rating/review counts, IG stats); `why` explains the opportunity. Converting a won lead
+ * creates a clients row (convertedClientId) with an onboarding checklist.
+ */
+export const leads = pgTable(
+  "leads",
+  {
+    id: text("id").primaryKey(),
+    name: text("name").notNull(),
+    city: text("city"),
+    category: text("category"), // cuisine / type, e.g. "Korean BBQ", "bakery"
+    website: text("website"),
+    instagramHandle: text("instagram_handle"),
+    tiktokHandle: text("tiktok_handle"),
+    googleMapsUrl: text("google_maps_url"),
+    googleRating: real("google_rating"),
+    googleReviewCount: integer("google_review_count"),
+    replyRate: integer("reply_rate"), // % of recent Google reviews with an owner reply (estimate)
+    instagramFollowers: integer("instagram_followers"),
+    lastPostAt: timestamp("last_post_at", { withTimezone: true }),
+    opportunities: jsonb("opportunities").$type<LeadOpportunity[]>().notNull().default([]),
+    score: integer("score"), // 0-100 fit estimate
+    why: text("why"), // the pitch angle: what's weak / what we'd fix
+    stage: text("stage").$type<LeadStage>().notNull().default("found"),
+    contactName: text("contact_name"),
+    contactEmail: text("contact_email"), // only publicly listed business contacts
+    contactPhone: text("contact_phone"),
+    nextStepAt: text("next_step_at"), // "YYYY-MM-DD"
+    notes: text("notes"),
+    source: text("source"), // "claude research", "walk-in", "referral"...
+    convertedClientId: text("converted_client_id").references(() => clients.id, { onDelete: "set null" }),
+    createdBy: text("created_by").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("leads_stage_idx").on(t.stage)],
+);
+
+export type Lead = typeof leads.$inferSelect;
