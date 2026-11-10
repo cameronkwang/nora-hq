@@ -20,7 +20,18 @@ async function login(formData: FormData) {
     path: "/",
     maxAge: SESSION_MAX_AGE,
   });
-  redirect(next.startsWith("/") && !next.startsWith("//") ? next : "/");
+  redirect(safeNext(next));
+}
+
+/** Same-origin path only. Parsing against a dummy origin catches "//host", "/\host", tabs/newlines and the like. */
+function safeNext(next: string): string {
+  if (!next.startsWith("/") || /[\\\u0000-\u001f]/.test(next)) return "/";
+  try {
+    const u = new URL(next, "http://x");
+    return u.origin === "http://x" ? `${u.pathname}${u.search}${u.hash}` : "/";
+  } catch {
+    return "/";
+  }
 }
 
 export default async function LoginPage({ searchParams }: { searchParams: Promise<{ error?: string; next?: string }> }) {

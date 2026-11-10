@@ -1,0 +1,53 @@
+name: Scheduled jobs
+
+# Vercel Hobby only allows daily crons, so GitHub Actions drives the frequent ones.
+# Needs repository secrets APP_URL (e.g. https://ops.cameronwang.com) and CRON_SECRET (same value as in Vercel).
+# GitHub may delay scheduled runs by several minutes at busy times.
+
+on:
+  schedule:
+    - cron: "*/15 * * * *" # publish due Instagram posts
+    - cron: "7 * * * *" # hourly sync
+  workflow_dispatch:
+    inputs:
+      job:
+        description: "Which job to run"
+        type: choice
+        options: [publish, sync]
+        default: publish
+
+permissions: {}
+
+concurrency:
+  group: cron-${{ github.event.schedule || github.event.inputs.job }}
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Call the app
+        env:
+          APP_URL: ${{ secrets.APP_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          SCHEDULE: ${{ github.event.schedule }}
+          INPUT_JOB: ${{ github.event.inputs.job }}
+        run: |
+          if [ -z "$APP_URL" ] || [ -z "$CRON_SECRET" ]; then
+            echo "::notice::APP_URL or CRON_SECRET secret is not set — skipping."
+            exit 0
+          fi
+          if [ -n "$INPUT_JOB" ]; then JOB="$INPUT_JOB";
+          elif [ "$SCHEDULE" = "7 * * * *" ]; then JOB=sync;
+          else JOB=publish; fi
+          URL="${APP_URL%/}/api/cron/$JOB"
+          echo "Calling /api/cron/$JOB"
+          STATUS=$(curl -sS -o response.json -w "%{http_code}" --max-time 90 \
+            -H "Authorization: Bearer $CRON_SECRET" "$URL" || echo "000")
+          cat response.json || true
+          echo
+          if [ "$STATUS" -ge 400 ] || [ "$STATUS" = "000" ]; then
+            echo "::error::/api/cron/$JOB returned HTTP $STATUS"
+            exit 1
+          fi

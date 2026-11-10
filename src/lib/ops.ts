@@ -1,5 +1,5 @@
 import "server-only";
-import { and, eq, inArray, lte, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, lt, lte, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import { getDb, schema } from "./db";
 import { newId, slugify } from "./ids";
@@ -8,6 +8,7 @@ import { logActivity } from "./activity";
 import { publishInstagramPost, replyToInstagramComment } from "./integrations/instagram";
 import { replyToGoogleReview } from "./integrations/google";
 import { sendOutreachEmail } from "./integrations/gmail";
+import { postReviewKey } from "./post-key";
 import type { IntegrationResult } from "./integrations/types";
 
 /**
@@ -227,19 +228,30 @@ export async function updatePost(id: string, patch: Partial<z.input<typeof PostI
   if (v.mediaUrls !== undefined) set.mediaUrls = v.mediaUrls;
   if (v.scheduledFor !== undefined) set.scheduledFor = v.scheduledFor ?? null;
   if (v.publishMode !== undefined) set.publishMode = v.publishMode;
+  // Conditional on the current status: nothing changes while a post is publishing, and a published post can't be
+  // moved back to an earlier status (a stale page would otherwise make it eligible to post a second time).
+  let from: schema.PostStatus[] = ["idea", "drafted", "approved", "scheduled", "failed", "published"];
   if (patch.status !== undefined && v.status) {
     if (v.status === "scheduled" || v.status === "publishing") throw new OpsError("Use approveDraft / schedulePost to schedule");
     set.status = v.status;
     if (v.status === "published") set.publishedAt = new Date();
+    else from = ["idea", "drafted", "approved", "scheduled", "failed"];
   }
   if (patch.permalink !== undefined) set.permalink = d(patch.permalink);
-  const [row] = await db.update(schema.contentPosts).set(set).where(eq(schema.contentPosts.id, id)).returning();
-  if (!row) throw new OpsError(`post ${id} not found`);
+  const [row] = await db.update(schema.contentPosts).set(set)
+    .where(and(eq(schema.contentPosts.id, id), inArray(schema.contentPosts.status, from))).returning();
+  if (!row) {
+    const [cur] = await db.select({ status: schema.contentPosts.status }).from(schema.contentPosts).where(eq(schema.contentPosts.id, id));
+    if (!cur) throw new OpsError(`post ${id} not found`);
+    throw new OpsError(cur.status === "publishing" ? "This post is publishing to Instagram right now — wait for it to finish." : `This post is already ${cur.status} — reload the page.`);
+  }
   if (row.platform === "tiktok" && row.publishMode === "auto") await db.update(schema.contentPosts).set({ publishMode: "manual" }).where(eq(schema.contentPosts.id, id));
   await logActivity({ actor, action: "post.updated", entityType: "post", entityId: id, clientId: row.clientId, summary: set.status ? `Calendar post → ${set.status}` : "Edited calendar post" });
   if (set.status === "published" && row.taskId) await updateTask(row.taskId, { status: "done" }, actor);
   return row;
 }
+
+const SCHEDULABLE: schema.PostStatus[] = ["idea", "drafted", "approved", "failed"];
 
 /** Human-only: put an approved Instagram auto-publish post on the schedule. */
 export async function schedulePost(id: string, actor: string) {
@@ -250,7 +262,10 @@ export async function schedulePost(id: string, actor: string) {
   if (!row.scheduledFor) throw new OpsError("Set a date/time first");
   if (row.platform !== "instagram" || row.publishMode !== "auto") throw new OpsError("Only Instagram posts set to auto-publish can be scheduled");
   if (row.mediaUrls.length === 0) throw new OpsError("Add at least one media URL");
-  await db.update(schema.contentPosts).set({ status: "scheduled", error: null }).where(eq(schema.contentPosts.id, id));
+  // Conditional on the current status so a stale page can't put a published (or in-flight) post back on the schedule.
+  const [ok] = await db.update(schema.contentPosts).set({ status: "scheduled", error: null })
+    .where(and(eq(schema.contentPosts.id, id), inArray(schema.contentPosts.status, SCHEDULABLE))).returning({ id: schema.contentPosts.id });
+  if (!ok) throw new OpsError(`This post is already ${row.status === "publishing" ? "publishing" : row.status === "published" ? "published" : "scheduled"} — reload the page.`);
   await logActivity({ actor, action: "post.scheduled", entityType: "post", entityId: id, clientId: row.clientId, summary: `Scheduled Instagram ${row.format} for ${row.scheduledFor.toISOString()}` });
 }
 
@@ -260,28 +275,63 @@ export async function deletePost(id: string, actor: string) {
   if (row) await logActivity({ actor, action: "post.deleted", entityType: "post", entityId: id, clientId: row.clientId, summary: `Removed ${row.platform} post from calendar` });
 }
 
-/** Called by the cron route. Claims each due post (scheduled → publishing) before calling Instagram, so overlapping runs can't double-post. */
-export async function publishDuePosts(now = new Date()) {
+/** A post left in "publishing" longer than this was abandoned by a killed run (the cron function caps at 60s). */
+const STUCK_PUBLISHING_MS = 10 * 60_000;
+
+/**
+ * Called by the cron route (maxDuration 60s). Claims each due post (scheduled → publishing) before calling Instagram,
+ * so overlapping runs can't double-post. The whole run shares one time budget: it stops claiming posts when there
+ * isn't time to finish another, so nothing is claimed and then killed mid-publish. Posts still left in
+ * "publishing" by a crash are moved to failed on the next run.
+ */
+export async function publishDuePosts(now = new Date(), budgetMs = 50_000) {
   const db = await getDb();
+  const runDeadline = Date.now() + budgetMs;
+
+  // Recovery: anything claimed long ago (or claimed before claimedAt existed) and never finished.
+  const stuck = await db.update(schema.contentPosts)
+    .set({ status: "failed", claimedAt: null, error: "Publishing was interrupted. Check the Instagram account before retrying — it may already have posted." })
+    .where(and(
+      eq(schema.contentPosts.status, "publishing"),
+      or(isNull(schema.contentPosts.claimedAt), lt(schema.contentPosts.claimedAt, new Date(now.getTime() - STUCK_PUBLISHING_MS))),
+    )).returning({ id: schema.contentPosts.id, clientId: schema.contentPosts.clientId });
+  for (const p of stuck)
+    await logActivity({ actor: "system", action: "post.failed", entityType: "post", entityId: p.id, clientId: p.clientId, summary: "Instagram publish was interrupted; marked failed" });
+
   const due = await db.select().from(schema.contentPosts).where(and(
     eq(schema.contentPosts.status, "scheduled"), eq(schema.contentPosts.publishMode, "auto"),
     eq(schema.contentPosts.platform, "instagram"), lte(schema.contentPosts.scheduledFor, now),
-  ));
-  const results: Array<{ id: string; ok: boolean; error?: string }> = [];
+  )).orderBy(asc(schema.contentPosts.scheduledFor));
+  const results: Array<{ id: string; ok: boolean; error?: string; retrying?: boolean }> = [];
   for (const p of due) {
-    const [claimed] = await db.update(schema.contentPosts).set({ status: "publishing" })
+    // media_publish (≤20s) + permalink (≤5s) come after polling; don't start a post that can't get ~10s of polling too.
+    if (runDeadline - Date.now() < 35_000) break; // the next run (15 min) picks the rest up
+    const [claimed] = await db.update(schema.contentPosts).set({ status: "publishing", claimedAt: new Date() })
       .where(and(eq(schema.contentPosts.id, p.id), eq(schema.contentPosts.status, "scheduled"))).returning();
     if (!claimed) continue;
-    const r = await publishInstagramPost(claimed);
-    if (r.ok) {
-      await db.update(schema.contentPosts).set({ status: "published", publishedAt: new Date(), externalId: r.externalId ?? null, permalink: r.permalink ?? null, error: null }).where(eq(schema.contentPosts.id, p.id));
-      await logActivity({ actor: "system", action: "post.published", entityType: "post", entityId: p.id, clientId: p.clientId, summary: `Published to Instagram${r.permalink ? `: ${r.permalink}` : ""}` });
-      if (p.taskId) await updateTask(p.taskId, { status: "done" }, "system");
-    } else {
-      await db.update(schema.contentPosts).set({ status: "failed", error: r.error }).where(eq(schema.contentPosts.id, p.id));
-      await logActivity({ actor: "system", action: "post.failed", entityType: "post", entityId: p.id, clientId: p.clientId, summary: `Instagram publish failed: ${r.error}` });
+    let r: IntegrationResult;
+    try {
+      r = await publishInstagramPost(claimed, { deadline: runDeadline - 25_000 });
+    } catch (e) {
+      r = { ok: false, error: e instanceof Error ? e.message : String(e) };
     }
-    results.push({ id: p.id, ok: r.ok, error: r.ok ? undefined : r.error });
+    try {
+      if (r.ok) {
+        await db.update(schema.contentPosts).set({ status: "published", publishedAt: new Date(), externalId: r.externalId ?? null, permalink: r.permalink ?? null, error: null, claimedAt: null, igContainer: null }).where(eq(schema.contentPosts.id, p.id));
+        await logActivity({ actor: "system", action: "post.published", entityType: "post", entityId: p.id, clientId: p.clientId, summary: `Published to Instagram${r.permalink ? `: ${r.permalink}` : ""}` });
+        if (p.taskId) await updateTask(p.taskId, { status: "done" }, "system");
+      } else if (r.pendingContainer) {
+        // Still processing on Instagram's side: back on the schedule, resume polling the same container next run.
+        await db.update(schema.contentPosts).set({ status: "scheduled", error: r.error, claimedAt: null, igContainer: r.pendingContainer }).where(eq(schema.contentPosts.id, p.id));
+      } else {
+        await db.update(schema.contentPosts).set({ status: "failed", error: r.error, claimedAt: null }).where(eq(schema.contentPosts.id, p.id));
+        await logActivity({ actor: "system", action: "post.failed", entityType: "post", entityId: p.id, clientId: p.clientId, summary: `Instagram publish failed: ${r.error}` });
+      }
+    } catch (e) {
+      // Bookkeeping failed; don't abort the run. The stuck-publishing recovery above handles this post next time.
+      console.error("[publish] bookkeeping failed for", p.id, e);
+    }
+    results.push({ id: p.id, ok: r.ok, error: r.ok ? undefined : r.error, retrying: !r.ok && !!r.pendingContainer });
   }
   return results;
 }
@@ -348,7 +398,10 @@ export async function reviseDraft(id: string, patch: { body?: string; title?: st
   if (patch.body !== undefined) set.body = patch.body;
   if (patch.title !== undefined) set.title = patch.title;
   if (patch.meta !== undefined) set.meta = { ...cur.meta, ...patch.meta };
-  if (actor === "claude" && cur.status === "rejected") set.status = "needs_review"; // resubmission
+  if (actor === "claude" && cur.status === "rejected") {
+    if (cur.kind === "outreach_email" || cur.kind === "outreach_dm") await assertContactable(cur);
+    set.status = "needs_review"; // resubmission
+  }
   await db.update(schema.drafts).set(set).where(eq(schema.drafts.id, id));
   if ((cur.kind === "instagram_post" || cur.kind === "tiktok_post") && patch.body !== undefined && cur.meta.postId)
     await db.update(schema.contentPosts).set({ caption: patch.body }).where(eq(schema.contentPosts.id, String(cur.meta.postId)));
@@ -370,9 +423,19 @@ export type ApproveOutcome = { status: schema.DraftStatus; message: string };
  * Human approval. Claims the draft atomically (needs_review|failed → approved) so two people
  * clicking Approve at once can't double-send, then performs the side effect for its kind.
  */
-export async function approveDraft(id: string, actor: string, opts: { body?: string } = {}): Promise<ApproveOutcome> {
+export async function approveDraft(id: string, actor: string, opts: { body?: string; postKey?: string } = {}): Promise<ApproveOutcome> {
   if (actor === "claude" || actor === "system") throw new OpsError("Only a person can approve");
   const db = await getDb();
+  const [cur] = await db.select().from(schema.drafts).where(eq(schema.drafts.id, id));
+  if (!cur) throw new OpsError("draft not found");
+  if (cur.kind === "outreach_email" || cur.kind === "outreach_dm") await assertContactable(cur);
+  if ((cur.kind === "instagram_post" || cur.kind === "tiktok_post") && cur.meta.postId) {
+    // The reviewer approved what the review page showed them. If the post's media, time or format changed since
+    // (e.g. Claude edited it), refuse rather than schedule something the person never saw.
+    const [post] = await db.select().from(schema.contentPosts).where(eq(schema.contentPosts.id, String(cur.meta.postId)));
+    if (post && opts.postKey !== postReviewKey(post))
+      throw new OpsError("The post's photos/video, time or format changed since this page loaded. Reload and review it again before approving.");
+  }
   const [draft] = await db.update(schema.drafts)
     .set({ status: "approved", reviewedBy: actor, reviewedAt: new Date(), error: null, updatedAt: new Date(), ...(opts.body !== undefined ? { body: opts.body } : {}) })
     .where(and(eq(schema.drafts.id, id), inArray(schema.drafts.status, ["needs_review", "failed"]))).returning();
@@ -381,7 +444,7 @@ export async function approveDraft(id: string, actor: string, opts: { body?: str
 
   const finish = async (r: IntegrationResult, okMsg: string, manualMsg: string): Promise<ApproveOutcome> => {
     if (r.ok) {
-      await markDraftSent(id, actor, { threadId: r.threadId, permalink: r.permalink });
+      await markDraftSent(id, actor, { threadId: r.threadId, permalink: r.permalink, sentByApi: true });
       return { status: "sent", message: okMsg };
     }
     if (r.notConfigured) return { status: "approved", message: manualMsg };
@@ -414,9 +477,10 @@ export async function approveDraft(id: string, actor: string, opts: { body?: str
     case "instagram_post":
     case "tiktok_post": {
       const postId = String(draft.meta.postId);
-      await db.update(schema.contentPosts).set({ caption: draft.body, status: "approved" }).where(eq(schema.contentPosts.id, postId));
+      await db.update(schema.contentPosts).set({ caption: draft.body, status: "approved" })
+        .where(and(eq(schema.contentPosts.id, postId), inArray(schema.contentPosts.status, [...SCHEDULABLE, "scheduled"])));
       const [post] = await db.select().from(schema.contentPosts).where(eq(schema.contentPosts.id, postId));
-      if (post && post.platform === "instagram" && post.publishMode === "auto" && post.scheduledFor && post.mediaUrls.length > 0) {
+      if (post && post.status === "approved" && post.platform === "instagram" && post.publishMode === "auto" && post.scheduledFor && post.mediaUrls.length > 0) {
         await schedulePost(postId, actor);
         return { status: "approved", message: `Approved and scheduled for ${post.scheduledFor.toLocaleString("en-US")}.` };
       }
@@ -429,10 +493,43 @@ export async function approveDraft(id: string, actor: string, opts: { body?: str
   }
 }
 
+/**
+ * Refuses outreach to a creator who opted out (do-not-contact) or whose relationship is declined.
+ * Checked at draft creation AND again at approve / mark-sent, since the opt-out can arrive in between.
+ */
+async function assertContactable(draft: Pick<schema.Draft, "meta">) {
+  const db = await getDb();
+  const [row] = await db.select({ o: schema.outreach, c: schema.creators }).from(schema.outreach)
+    .innerJoin(schema.creators, eq(schema.creators.id, schema.outreach.creatorId))
+    .where(eq(schema.outreach.id, String(draft.meta.outreachId ?? "")));
+  if (!row) throw new OpsError("The outreach record for this draft is missing");
+  if (row.c.doNotContact) throw new OpsError(`${row.c.name} is marked do-not-contact — don't send this.`);
+  if (row.o.stage === "declined") throw new OpsError(`${row.c.name} declined — don't send this. Move the outreach out of “declined” first if that's wrong.`);
+}
+
+/** When a creator opts out: pull every unsent outreach draft to them out of the queue (status rejected, with a note). */
+async function withdrawOutreachDrafts(creatorId: string, actor: string) {
+  const db = await getDb();
+  const outs = await db.select({ id: schema.outreach.id }).from(schema.outreach).where(eq(schema.outreach.creatorId, creatorId));
+  if (outs.length === 0) return;
+  const rows = await db.update(schema.drafts)
+    .set({ status: "rejected", reviewedBy: actor, reviewedAt: new Date(), reviewNote: "Creator is do-not-contact — don't send or revise this.", updatedAt: new Date() })
+    .where(and(
+      inArray(schema.drafts.kind, ["outreach_email", "outreach_dm"]),
+      inArray(schema.drafts.status, ["needs_review", "approved", "failed"]),
+      inArray(sql`${schema.drafts.meta}->>'outreachId'`, outs.map((o) => o.id)),
+    )).returning({ id: schema.drafts.id, title: schema.drafts.title, clientId: schema.drafts.clientId });
+  for (const r of rows)
+    await logActivity({ actor, action: "draft.withdrawn", entityType: "draft", entityId: r.id, clientId: r.clientId, summary: `Withdrew “${r.title}” — creator is do-not-contact` });
+}
+
 /** After a manual send (or a successful API send): record downstream effects. Idempotent. */
-export async function markDraftSent(id: string, actor: string, extra: { threadId?: string; permalink?: string } = {}) {
+export async function markDraftSent(id: string, actor: string, extra: { threadId?: string; permalink?: string; sentByApi?: boolean } = {}) {
   if (actor === "claude") throw new OpsError("Only a person can mark something as sent");
   const db = await getDb();
+  const [cur] = await db.select().from(schema.drafts).where(eq(schema.drafts.id, id));
+  if (!cur) throw new OpsError("draft not found");
+  if (cur.status === "approved" && (cur.kind === "outreach_email" || cur.kind === "outreach_dm") && !extra.sentByApi) await assertContactable(cur);
   const [draft] = await db.update(schema.drafts).set({ status: "sent", sentAt: new Date(), updatedAt: new Date() })
     .where(and(eq(schema.drafts.id, id), eq(schema.drafts.status, "approved"))).returning();
   if (!draft) return;
@@ -505,6 +602,7 @@ export async function upsertCreator(input: z.input<typeof CreatorInput>, actor: 
   if (existing) {
     await db.update(schema.creators).set(values).where(eq(schema.creators.id, existing.id));
     await logActivity({ actor, action: "creator.updated", entityType: "creator", entityId: existing.id, summary: `Updated creator ${v.name}` });
+    if (v.doNotContact === true) await withdrawOutreachDrafts(existing.id, actor);
     return existing.id;
   }
   const id = newId("cr_");
@@ -604,16 +702,136 @@ export async function generateMonthTasks(clientId: string, month: string, actor:
   let created = 0;
   for (const dl of dels) {
     const want = Math.max(1, dl.targetPerMonth);
-    const [{ n }] = await db.select({ n: sql<number>`count(*)::int` }).from(schema.tasks)
+    const existing = await db.select({ id: schema.tasks.id, title: schema.tasks.title }).from(schema.tasks)
       .where(and(eq(schema.tasks.deliverableId, dl.id), eq(schema.tasks.month, month)));
-    for (let i = n; i < want; i++) {
-      await db.insert(schema.tasks).values({
-        id: newId("tsk_"), clientId, month, deliverableId: dl.id, platform: dl.platform, createdBy: actor,
-        title: dl.targetPerMonth === 0 ? `${dl.title} (all, as they come in)` : `${dl.title} — ${i + 1} of ${dl.targetPerMonth}`,
-      });
-      created++;
+    if (existing.length >= want) continue;
+    // Each slot has a deterministic id, so two concurrent runs (or a double-submit) pick the same ids for the same
+    // gaps and the primary key makes the second insert a no-op instead of a duplicate.
+    const ids = new Set(existing.map((t) => t.id));
+    const titles = new Set(existing.map((t) => t.title));
+    const titleFor = (i: number) => (dl.targetPerMonth === 0 ? `${dl.title} (all, as they come in)` : `${dl.title} — ${i + 1} of ${dl.targetPerMonth}`);
+    const rows: Array<typeof schema.tasks.$inferInsert> = [];
+    for (let i = 0; rows.length < want - existing.length && i < want + 2 * existing.length; i++) {
+      const id = `tsk_gen_${dl.id}_${month}_${i}`;
+      if (ids.has(id) || titles.has(titleFor(i))) continue;
+      rows.push({ id, clientId, month, deliverableId: dl.id, platform: dl.platform, createdBy: actor, title: titleFor(i) });
     }
+    if (rows.length === 0) continue;
+    const inserted = await db.insert(schema.tasks).values(rows).onConflictDoNothing({ target: schema.tasks.id }).returning({ id: schema.tasks.id });
+    created += inserted.length;
   }
   if (created) await logActivity({ actor, action: "tasks.generated", entityType: "client", entityId: clientId, clientId, summary: `Created ${created} checklist task${created === 1 ? "" : "s"} for ${month}` });
   return created;
+}
+
+/* ───────────────────────── Creators: explicit edits ───────────────────────── */
+
+/**
+ * Edits one known creator. Unlike upsertCreator (merge-only, used for imports/research), a field passed as
+ * null or "" is cleared here; fields left undefined are untouched. Refuses handles/emails another creator has.
+ */
+export async function updateCreator(id: string, input: Omit<Partial<z.input<typeof CreatorInput>>, "id">, actor: string) {
+  const v = CreatorInput.omit({ id: true }).partial().parse(input);
+  const db = await getDb();
+  const [cur] = await db.select().from(schema.creators).where(eq(schema.creators.id, id));
+  if (!cur) throw new OpsError("creator not found");
+  const set: Partial<typeof schema.creators.$inferInsert> = {};
+  if (v.name !== undefined) set.name = v.name.trim();
+  if (v.instagramHandle !== undefined) set.instagramHandle = handle(v.instagramHandle);
+  if (v.tiktokHandle !== undefined) set.tiktokHandle = handle(v.tiktokHandle);
+  if (v.email !== undefined) set.email = d(v.email)?.toLowerCase() ?? null;
+  const dupes: Array<[keyof typeof set, string]> = [["instagramHandle", "Instagram handle"], ["tiktokHandle", "TikTok handle"], ["email", "email"]];
+  for (const [key, label] of dupes) {
+    const val = set[key];
+    if (typeof val !== "string" || val === cur[key as keyof schema.Creator]) continue;
+    const col = schema.creators[key as "instagramHandle" | "tiktokHandle" | "email"];
+    const [other] = await db.select({ id: schema.creators.id, name: schema.creators.name }).from(schema.creators).where(eq(col, val));
+    if (other && other.id !== id) throw new OpsError(`${other.name} already has that ${label}`);
+  }
+  if (v.city !== undefined) set.city = d(v.city);
+  if (v.niche !== undefined) set.niche = d(v.niche);
+  if (v.notes !== undefined) set.notes = d(v.notes);
+  if (v.source !== undefined) set.source = d(v.source);
+  if (v.doNotContact !== undefined) set.doNotContact = v.doNotContact;
+  let statsChanged = false;
+  if (v.instagramFollowers !== undefined && (v.instagramFollowers ?? null) !== cur.instagramFollowers) { set.instagramFollowers = v.instagramFollowers ?? null; statsChanged = true; }
+  if (v.tiktokFollowers !== undefined && (v.tiktokFollowers ?? null) !== cur.tiktokFollowers) { set.tiktokFollowers = v.tiktokFollowers ?? null; statsChanged = true; }
+  if (v.engagementRate !== undefined && (v.engagementRate ?? null) !== cur.engagementRate) { set.engagementRate = v.engagementRate ?? null; statsChanged = true; }
+  if (statsChanged) set.statsUpdatedAt = new Date();
+  if (Object.keys(set).length === 0) return id;
+  await db.update(schema.creators).set(set).where(eq(schema.creators.id, id));
+  const name = set.name ?? cur.name;
+  const summary = v.doNotContact !== undefined && v.doNotContact !== cur.doNotContact
+    ? `${name} ${v.doNotContact ? "marked do-not-contact" : "cleared from do-not-contact"}`
+    : `Updated creator ${name}`;
+  await logActivity({ actor, action: v.doNotContact !== undefined && v.doNotContact !== cur.doNotContact ? "creator.do_not_contact" : "creator.updated", entityType: "creator", entityId: id, summary });
+  if (v.doNotContact === true) await withdrawOutreachDrafts(id, actor);
+  return id;
+}
+
+/* ───────────────────────── Third-party connections ───────────────────────── */
+
+export const ConnectionInput = z.object({
+  provider: z.enum(schema.PROVIDERS),
+  clientId: z.string().nullish(), // null = shared (Google Business, Gmail outreach inbox)
+  label: z.string().min(1),
+  externalId: z.string().min(1),
+  tokens: z.record(z.string(), z.unknown()),
+  scopes: z.string().nullish(),
+  expiresAt: z.coerce.date().nullish(),
+});
+
+/**
+ * Stores (or replaces) an OAuth connection after a successful sign-in. Tokens are encrypted here and never
+ * leave the server. One connection per (provider, business): connecting a different account for the same
+ * business — or for a shared provider — replaces the old one.
+ */
+export async function saveConnection(input: z.input<typeof ConnectionInput>, actor: string) {
+  const v = ConnectionInput.parse(input);
+  const { encryptJson } = await import("./crypto");
+  const db = await getDb();
+  const clientId = v.clientId || null;
+  const tokenEnc = encryptJson(v.tokens);
+  const now = new Date();
+  const vals = { clientId, label: v.label.trim(), tokenEnc, scopes: d(v.scopes), expiresAt: v.expiresAt ?? null, status: "ok" as const, lastError: null, updatedAt: now };
+  const [row] = await db.insert(schema.connections).values({ id: newId("con_"), provider: v.provider, externalId: v.externalId, ...vals })
+    .onConflictDoUpdate({ target: [schema.connections.provider, schema.connections.externalId], set: vals }).returning();
+  // Drop any other account previously connected for the same slot.
+  await db.delete(schema.connections).where(and(
+    eq(schema.connections.provider, v.provider),
+    sql`${schema.connections.id} <> ${row.id}`,
+    clientId ? eq(schema.connections.clientId, clientId) : sql`${schema.connections.clientId} is null`,
+  ));
+  await logActivity({ actor, action: "connection.connected", entityType: "connection", entityId: row.id, clientId, summary: `Connected ${v.provider === "gmail" ? "Gmail" : v.provider === "google" ? "Google Business Profile" : v.provider === "instagram" ? "Instagram" : v.provider}: ${vals.label}` });
+  return row.id;
+}
+
+/** Routine token refresh (cron / on-demand). Not logged — it happens constantly and isn't a human decision. */
+export async function updateConnectionTokens(id: string, patch: { tokens: Record<string, unknown>; expiresAt?: Date | null }) {
+  const { encryptJson } = await import("./crypto");
+  const db = await getDb();
+  const set: Partial<typeof schema.connections.$inferInsert> = { tokenEnc: encryptJson(patch.tokens), status: "ok", lastError: null, updatedAt: new Date() };
+  if (patch.expiresAt !== undefined) set.expiresAt = patch.expiresAt;
+  await db.update(schema.connections).set(set).where(eq(schema.connections.id, id));
+}
+
+/** Records a connection problem (or recovery). Logs only when the status actually changes. */
+export async function setConnectionStatus(id: string, status: "ok" | "error" | "expired", lastError: string | null, actor = "system") {
+  if (!["ok", "error", "expired"].includes(status)) throw new OpsError(`bad status ${status}`);
+  const db = await getDb();
+  const [cur] = await db.select().from(schema.connections).where(eq(schema.connections.id, id));
+  if (!cur) return;
+  const err = lastError ? lastError.slice(0, 500) : null;
+  if (cur.status === status && cur.lastError === err) return;
+  await db.update(schema.connections).set({ status, lastError: err, updatedAt: new Date() }).where(eq(schema.connections.id, id));
+  if (cur.status !== status) {
+    await logActivity({ actor, action: `connection.${status}`, entityType: "connection", entityId: id, clientId: cur.clientId, summary: status === "ok" ? `${cur.label} connection is working again` : `${cur.label} connection ${status === "expired" ? "expired" : "has a problem"}${err ? `: ${err}` : ""}` });
+  }
+}
+
+export async function deleteConnection(id: string, actor: string) {
+  if (actor === "claude") throw new OpsError("Only a person can disconnect an account");
+  const db = await getDb();
+  const [row] = await db.delete(schema.connections).where(eq(schema.connections.id, id)).returning();
+  if (row) await logActivity({ actor, action: "connection.disconnected", entityType: "connection", entityId: id, clientId: row.clientId, summary: `Disconnected ${row.provider}: ${row.label}` });
 }

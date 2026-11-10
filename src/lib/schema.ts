@@ -167,11 +167,18 @@ export const contentPosts = pgTable(
     taskId: text("task_id").references(() => tasks.id, { onDelete: "set null" }),
     publishedAt: timestamp("published_at", { withTimezone: true }),
     error: text("error"),
+    /** When the publish cron claimed it (status → publishing). Lets the cron recover posts left stuck by a killed run. */
+    claimedAt: timestamp("claimed_at", { withTimezone: true }),
+    /** Instagram media container still processing (e.g. a long reel). Reused on the next run instead of creating a new one. */
+    igContainer: jsonb("ig_container").$type<IgContainer | null>(),
     createdBy: text("created_by").notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [index("posts_client_sched_idx").on(t.clientId, t.scheduledFor)],
 );
+
+/** `key` fingerprints the caption/media/format the container was built from, so an edited post never publishes a stale container. */
+export type IgContainer = { id: string; key: string; createdAt: string };
 
 export const creators = pgTable("creators", {
   id: text("id").primaryKey(),

@@ -92,3 +92,11 @@ body { font-family: var(--font-sans); -webkit-font-smoothing: antialiased; }
 .input:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
 textarea.input { min-height: 6rem; resize: vertical; }
 .label { display: block; font-size: 0.75rem; font-weight: 600; color: var(--muted); margin-bottom: 0.25rem; }
+
+/* Grid items default to min-width:auto, so one long word, chart or form can push a single-column grid
+   wider than the phone screen. Let them shrink; anything that must scroll does so in its own container. */
+@layer base {
+  .grid > * {
+    min-width: 0;
+  }
+}

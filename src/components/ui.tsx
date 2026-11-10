@@ -144,7 +144,7 @@ export function ProgressBar({ value, max }: { value: number; max: number }) {
 export function formatNumber(n: number | null | undefined): string {
   if (n == null) return "—";
   if (Math.abs(n) >= 1_000_000) return `${(n / 1_000_000).toFixed(1).replace(/\.0$/, "")}M`;
-  if (Math.abs(n) >= 10_000) return `${Math.round(n / 1000)}K`;
+  if (Math.abs(n) >= 100_000) return `${Math.round(n / 1000)}K`;
   if (Math.abs(n) >= 1_000) return `${(n / 1000).toFixed(1).replace(/\.0$/, "")}K`;
   return n.toLocaleString("en-US");
 }

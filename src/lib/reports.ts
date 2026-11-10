@@ -1,7 +1,8 @@
 import "server-only";
 import { and, asc, desc, eq, gte, inArray, isNull, lt, ne, sql } from "drizzle-orm";
 import { getDb, schema } from "./db";
-import { addMonths, lastMonths } from "./dates";
+import { lastMonths } from "./dates";
+import { monthBounds } from "./integrations/time";
 
 /**
  * Read model for one business in one month. Used by the business page, the home overview
@@ -11,8 +12,8 @@ import { addMonths, lastMonths } from "./dates";
  */
 export async function getClientMonth(clientId: string, month: string) {
   const db = await getDb();
-  const monthStart = new Date(`${month}-01T00:00:00Z`);
-  const nextStart = new Date(`${addMonths(month, 1)}-01T00:00:00Z`);
+  // Month edges in the app timezone (America/New_York), matching the calendar and Instagram insights.
+  const { start: monthStart, end: nextStart } = monthBounds(month);
 
   const [client] = await db.select().from(schema.clients).where(eq(schema.clients.id, clientId));
   if (!client) return null;
