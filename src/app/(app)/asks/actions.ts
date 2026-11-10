@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { requireUser } from "@/lib/auth";
-import { createAsk, updateAsk } from "@/lib/ops";
+import { OpsError, addAskMessage, createAsk, updateAsk } from "@/lib/ops";
 import { ASK_STATUSES, type AskStatus, type Attachment } from "@/lib/schema";
 import { UploadError, attachmentsFromJson, filesFrom, saveUpload } from "@/lib/uploads";
 
@@ -50,4 +50,24 @@ export async function setAskClient(formData: FormData) {
   if (!id) return;
   await updateAsk(id, { clientId: str(formData.get("clientId")) || null }, user.email);
   revalidatePath("/", "layout");
+}
+
+export type AskReplyState = { error?: string; ok?: number } | undefined;
+
+/** Nora/Cameron answers Claude (or adds a note) on an ask's conversation. */
+export async function replyToAskAction(_prev: AskReplyState, formData: FormData): Promise<AskReplyState> {
+  const user = await requireUser();
+  const id = str(formData.get("id"));
+  const body = str(formData.get("body"));
+  if (!id) return { error: "Something went wrong. Reload and try again." };
+  if (!body) return { error: "Write a reply first." };
+  if (body.length > 4000) return { error: "That’s a bit long — keep it under 4000 characters." };
+  try {
+    await addAskMessage(id, body, user.email);
+  } catch (e) {
+    if (e instanceof OpsError) return { error: e.message };
+    throw e;
+  }
+  revalidatePath("/", "layout");
+  return { ok: Date.now() };
 }

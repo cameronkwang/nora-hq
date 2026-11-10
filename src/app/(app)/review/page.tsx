@@ -92,7 +92,7 @@ export default async function ReviewPage({ searchParams }: { searchParams: Promi
         </div>
       ) : (
         <>
-          <nav aria-label="Queue" className="-mx-4 mb-4 overflow-x-auto px-4 md:mx-0 md:px-0">
+          <nav aria-label="Queue" className="relative -mx-4 mb-4 overflow-x-auto px-4 md:mx-0 md:px-0">
             <ul className="flex min-w-max gap-1 border-b border-border">
               {REVIEW_TABS.map((t) => {
                 const active = t.key === tab;
@@ -103,7 +103,7 @@ export default async function ReviewPage({ searchParams }: { searchParams: Promi
                       href={qs({ tab: t.key === "needs_review" ? "" : t.key })}
                       aria-current={active ? "page" : undefined}
                       className={cx(
-                        "-mb-px flex items-center gap-1.5 border-b-2 px-3 py-2 text-sm",
+                        "-mb-px flex items-center gap-1.5 border-b-2 px-3 py-2 text-sm pointer-coarse:min-h-11",
                         active ? "border-accent font-semibold text-accent" : "border-transparent text-muted hover:text-text",
                       )}
                     >

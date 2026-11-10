@@ -7,7 +7,7 @@ What Claude can do through it:
 - read the queue: new asks from Nora, drafts that were sent back, tasks, follow-ups, unreplied Google reviews
 - read each business: brand voice, monthly plan and progress, outstanding tasks, creator outreach, monthly views, calendar
 - write **drafts** (captions, review replies, creator emails/DMs, recaps), tasks, calendar ideas, creators and outreach (sourced or shortlisted only), and monthly numbers Nora pastes in
-- leave a note on each ask saying what it did, or what it needs to know
+- talk with Nora on each ask: ask questions when something is unclear, read her answers, and leave a short note saying what it did
 
 What Claude **cannot** do: approve, reject, mark sent, schedule, publish or send anything. There are no tools for those. Every outbound message or post waits for Cameron or Nora in the app's Review queue. Claude also can't see OAuth tokens or connection settings.
 
@@ -63,6 +63,12 @@ Claude calls `get_briefing` first. That returns the working rules, new asks, dra
 3. picks up open tasks and due follow-ups
 4. updates every ask it touched with a status and a short note
 
+### Questions and answers on asks
+
+Each ask has a simple conversation. When an ask is unclear, Claude asks with `reply_to_ask` and sets the ask to **In progress**. The ask list shows **Claude asked a question**. Nora opens the ask and types her answer in the box at the bottom.
+
+When a person replies to an **In progress** ask and Claude spoke last, the ask goes back to **New** and shows **Replied**. Claude's next `get_briefing` lists it under new asks with `needsYourReply: true` and the full thread. Replies on new asks just add to the thread. Done or archived asks have to be reopened before anyone can reply.
+
 Then open **Review** in the app to approve, edit or send things back.
 
 Other useful prompts:
@@ -85,7 +91,8 @@ You are working Nora HQ's queue through the "Nora HQ" connector. Nothing you do 
 4. For each new ask, oldest first:
    - Read the business with get_client_month (brand voice first).
    - Do the work as drafts (create_draft) linked with ask_id, and task_id where a checklist task fits.
-   - If the ask is unclear or missing information, don't guess. Call update_ask with status in_progress and a note listing your questions.
+   - Read the ask's thread first. If needsYourReply is true, Nora answered your questions there.
+   - If the ask is unclear or missing information, don't guess. Call reply_to_ask with your questions and status in_progress.
    - Otherwise call update_ask with status done and a one- or two-line note on what you drafted.
 5. Work through tasksForClaude the same way.
 6. For each item in followUpsDue without a pendingFollowUpDraft, draft one short follow-up on the same channel.
@@ -144,9 +151,11 @@ curl -s http://localhost:3000/api/mcp \
 
 | Tool | What it does |
 | --- | --- |
-| `get_briefing` | Start here: rules, new asks, sent-back drafts, tasks due, follow-ups, per-business summary |
+| `get_briefing` | Start here: rules, new asks (with their conversation and `needsYourReply`), sent-back drafts, tasks due, follow-ups, per-business summary |
 | `list_clients`, `get_client_month` | Businesses, brand voice, plan progress, tasks, outreach, metrics, posts |
-| `list_asks`, `update_ask` | Read asks, and set status plus a note for Nora |
+| `list_asks` | Read asks with their conversation thread and `needsYourReply` (a person wrote after Claude) |
+| `reply_to_ask` | Add a message to an ask's conversation: questions for Nora or a progress update (optionally set status) |
+| `update_ask` | Set status, business, and a short summary note (the note replaces the previous one) |
 | `list_tasks`, `create_task`, `update_task`, `generate_month_tasks` | Checklist |
 | `list_drafts`, `create_draft`, `revise_draft` | Drafts for approval |
 | `list_calendar`, `create_post`, `update_post` | Calendar ideas (no scheduling or publishing) |

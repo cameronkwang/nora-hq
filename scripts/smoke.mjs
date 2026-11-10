@@ -1,5 +1,5 @@
 // Smoke test for Nora HQ. Usage:
-//   BASE_URL=http://localhost:3200 NODE_PATH=$(npm root -g) node scripts/smoke.mjs [crawl|flows|all]
+//   BASE_URL=http://localhost:3200 NODE_PATH=$(npm root -g) node scripts/smoke.mjs [crawl|flows|all|responsive]
 // Optional: SHOTS_DIR=/path to save screenshots, MCP_TOKEN=... to exercise /api/mcp in the flows.
 import { createRequire } from "node:module";
 const require = createRequire(import.meta.url);
@@ -10,7 +10,8 @@ const MODE = process.argv[2] ?? "all";
 const EMAIL = process.env.SMOKE_EMAIL ?? "nora@local";
 const PASSWORD = process.env.SMOKE_PASSWORD ?? "dev";
 const CLIENT_IDS = ["yummy-red-bowl-richmond", "yummy-red-bowl-sc", "crab-o-clock", "poke-bros", "maxs-virginia-beach", "snf-kingdom"];
-const ROUTES = ["/", "/asks", "/asks/new", "/tasks", "/review", "/calendar", "/calendar/new", "/creators", "/creators/new", "/reviews", "/activity", "/settings", "/clients",
+const ROUTES = ["/", "/asks", "/asks/new", "/tasks", "/tasks?view=list", "/tasks?view=board", "/tasks?view=table", "/tasks/import", "/review", "/calendar", "/calendar/new",
+  "/creators", "/creators?view=table", "/creators?view=pipeline", "/creators/new", "/creators/import", "/numbers", "/reviews", "/activity", "/settings", "/clients",
   ...CLIENT_IDS.flatMap((id) => [`/clients/${id}`, `/clients/${id}/settings`])];
 const VIEWPORTS = [{ name: "desktop", width: 1280, height: 900 }, { name: "mobile", width: 390, height: 844 }];
 
@@ -71,7 +72,7 @@ async function crawl(browser) {
     const { errors } = watch(page);
     for (const path of ROUTES) await checkPage(page, path, vp.name, errors);
     // first creator / draft / task / ask / post detail pages, if any exist
-    for (const [list, sel] of [["/creators", "a[href^='/creators/']:not([href='/creators/new']):not([href^='/creators/export'])"], ["/tasks?status=all", "a[href^='/tasks/']"], ["/asks", "a[href^='/asks/']:not([href='/asks/new'])"], ["/calendar", "a[href^='/calendar/']:not([href^='/calendar/new'])"]]) {
+    for (const [list, sel] of [["/creators", "a[href^='/creators/']:not([href='/creators/new']):not([href^='/creators/export']):not([href^='/creators/import'])"], ["/tasks?status=all", "a[href^='/tasks/']:not([href^='/tasks/import']):not([href^='/tasks/export'])"], ["/asks", "a[href^='/asks/']:not([href='/asks/new'])"], ["/calendar", "a[href^='/calendar/']:not([href^='/calendar/new'])"]]) {
       await page.goto(BASE + list, { waitUntil: "networkidle" });
       const href = await page.locator(sel).first().getAttribute("href").catch(() => null);
       if (href) await checkPage(page, href, vp.name, errors);
@@ -294,14 +295,257 @@ async function flows(browser) {
     });
   }
 
+  /* ── new modules: tasks views, creators import, numbers sheet, ask thread ── */
+  if (process.env.MCP_TOKEN) {
+    const [tA, tB, tC] = [`Smoke drag ${stamp}`, `Smoke bulk ${stamp}`, `Smoke edit ${stamp}`];
+    const ids = {};
+    await step("mcp: create 3 tasks for the board/table flows", async () => {
+      for (const t of [tA, tB, tC]) {
+        const r = await tool("create_task", { client_id: "poke-bros", title: t });
+        ids[t] = (JSON.stringify(r).match(/"(tsk_[^"]+)"/) ?? [])[1];
+        if (!ids[t]) throw new Error(`no task id: ${JSON.stringify(r).slice(0, 200)}`);
+      }
+    });
+    const taskStatus = async (title) => {
+      const r = await tool("list_tasks", { client_id: "poke-bros", status: "done" });
+      return JSON.stringify(r).includes(title) ? "done" : "not done";
+    };
+    await step("tasks board: drag a card to Done", async () => {
+      await page.goto(`${BASE}/tasks?view=board&client=poke-bros`, { waitUntil: "networkidle" });
+      const card = page.locator("article[draggable='true']:visible", { hasText: tA }).first();
+      const done = page.locator("section[aria-label='Done']:visible").first();
+      await card.scrollIntoViewIfNeeded();
+      await card.dragTo(done, { targetPosition: { x: 40, y: 20 } }); // the column header, so long columns don't scroll mid-drag
+      await page.locator("section[aria-label='Done']:visible", { hasText: tA }).first().waitFor({ timeout: 15000 });
+      await page.waitForTimeout(1500);
+      await page.reload({ waitUntil: "networkidle" });
+      if (!(await page.locator("section[aria-label='Done']:visible", { hasText: tA }).count())) throw new Error("card not in Done after reload");
+    });
+    await step("tasks table: bulk mark done", async () => {
+      await page.goto(`${BASE}/tasks?view=table&client=poke-bros`, { waitUntil: "networkidle" });
+      await page.locator(`input[type='checkbox'][aria-label="Select “${tB}”"]:visible`).first().check({ force: true }); // the label’s tap-target ::after sits over the box by design
+      await page.locator("[aria-label='Bulk actions'] button:has-text('Mark done'):visible").first().click();
+      await page.waitForTimeout(2000);
+      const st = await taskStatus(tB);
+      if (st !== "done") throw new Error(`status is ${st}`);
+    });
+    await step("tasks table: inline-edit a title", async () => {
+      await page.goto(`${BASE}/tasks?view=table&client=poke-bros`, { waitUntil: "networkidle" });
+      const input = page.locator(`input[aria-label='Title'][value="${tC}"]:visible`).first();
+      await input.fill(`${tC} edited`);
+      await input.press("Enter");
+      await page.waitForTimeout(2000);
+      await page.goto(`${BASE}/tasks/${ids[tC]}`, { waitUntil: "networkidle" });
+      if (!(await page.locator(`input[value="${tC} edited"], :text("${tC} edited")`).count())) throw new Error("edited title not saved");
+    });
+  }
+
+  const impA = `imp_a_${stamp}`, impB = `imp_b_${stamp}`;
+  await step("creators: import 2 via pasted CSV", async () => {
+    await page.goto(`${BASE}/creators/import`, { waitUntil: "networkidle" });
+    await page.fill("#imp-text", `Name,Instagram,Followers,City\nImport A ${stamp},@${impA},12.5k,Richmond\nImport B ${stamp},@${impB},"1,200",Norfolk`);
+    const btn = page.locator("button:has-text('Import'):visible").filter({ hasNotText: "more" }).last();
+    await page.waitForFunction(() => [...document.querySelectorAll("button")].some((b) => /^Import \d/.test(b.textContent?.trim() ?? "") && !b.disabled), null, { timeout: 30000 });
+    await page.locator("button:visible", { hasText: /^Import \d/ }).first().click();
+    await page.locator("text=Import finished").waitFor({ timeout: 30000 });
+    await page.goto(`${BASE}/creators?view=table&q=${impA}`, { waitUntil: "networkidle" });
+    for (const n of [impA, impB]) {
+      await page.goto(`${BASE}/creators?view=table&q=${n}`, { waitUntil: "networkidle" });
+      if (!(await page.locator(`text=Import ${n === impA ? "A" : "B"} ${stamp}`).count()) && !(await page.locator(`input[value="Import ${n === impA ? "A" : "B"} ${stamp}"]`).count())) throw new Error(`${n} not found after import`);
+    }
+  });
+
+  await step("numbers: type a value, see it on the business page", async () => {
+    await page.goto(`${BASE}/numbers`, { waitUntil: "networkidle" });
+    const cell = page.locator("tr:has(th a[href^='/clients/poke-bros']) input[data-cell]:visible").last();
+    const label = await cell.getAttribute("aria-label");
+    const dc = await cell.getAttribute("data-cell");
+    await cell.click();
+    const v = 20000 + Math.floor(Math.random() * 9000) * 100; // unique per run so the cell really changes
+    await cell.fill(`${v / 1000}k`);
+    await cell.press("Tab");
+    await page.waitForFunction(() => /Saved/.test(document.body.innerText), null, { timeout: 15000 });
+    const href = await page.locator(`tr:has(input[data-cell="${dc}"]) th a`).first().getAttribute("href");
+    await page.goto(BASE + href.replace(/#.*/, ""), { waitUntil: "networkidle" });
+    const vals = await page.locator("#views input[name*='views']").evaluateAll((els) => els.map((e) => e.value.replace(/[,\s]/g, "")));
+    if (!vals.includes(String(v))) throw new Error(`${v} not on business page (${label}); views inputs read ${vals.join("/")}`);
+  });
+
+  if (process.env.MCP_TOKEN) {
+    let askId = "";
+    await step("ask thread: Claude asks via reply_to_ask, Nora replies in the UI", async () => {
+      const list = await tool("list_asks", {});
+      askId = (JSON.stringify(list).match(/"(ask_[^"]+)"/) ?? [])[1] ?? "";
+      if (!askId) throw new Error("no ask to reply on");
+      const q = `Which day should the crab boil post go out? (${stamp})`;
+      const r = await tool("reply_to_ask", { ask_id: askId, body: q, status: "in_progress" });
+      if (r.askStatus !== "in_progress") throw new Error(`askStatus ${r.askStatus}`);
+      await page.goto(`${BASE}/asks/${askId}`, { waitUntil: "networkidle" });
+      await page.locator(`text=${q}`).first().waitFor();
+      const ans = `Friday please (${stamp})`;
+      await page.fill("#ask-reply", ans);
+      await page.locator("form:has(#ask-reply) button[type='submit']").click();
+      await page.locator(`text=${ans}`).first().waitFor({ timeout: 15000 });
+      const again = await tool("list_asks", {});
+      const s = JSON.stringify(again);
+      if (!s.includes(ans)) throw new Error("reply not visible via MCP list_asks");
+      const b = JSON.stringify(await tool("get_briefing", {}));
+      if (!b.includes(askId) || !b.includes("needsYourReply")) throw new Error("briefing does not hand the ask back");
+    });
+  }
+
   for (const e of errors) fail(`flows: ${e}`);
   await context.close();
+}
+
+/* ── responsive QA: every route × 7 viewports × light/dark ── */
+const RESP_VIEWPORTS = [
+  { name: "375", width: 375, height: 667, touch: true },
+  { name: "390", width: 390, height: 844, touch: true },
+  { name: "430", width: 430, height: 932, touch: true },
+  { name: "768", width: 768, height: 1024 },
+  { name: "1024", width: 1024, height: 768 },
+  { name: "1280", width: 1280, height: 800 },
+  { name: "1920", width: 1920, height: 1080 },
+];
+
+async function detailRoutes(browser) {
+  const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+  await login(context);
+  const page = await context.newPage();
+  const out = [];
+  for (const [list, sel] of [
+    ["/creators?view=table", "a[href^='/creators/']:not([href='/creators/new']):not([href^='/creators/export']):not([href^='/creators/import'])"],
+    ["/tasks?status=all&view=list", "a[href^='/tasks/']:not([href^='/tasks/import']):not([href^='/tasks/export'])"],
+    ["/asks", "a[href^='/asks/']:not([href='/asks/new'])"],
+    ["/calendar", "a[href^='/calendar/']:not([href^='/calendar/new'])"],
+    ["/review", "a[href^='/review?draft=']"],
+  ]) {
+    await page.goto(BASE + list, { waitUntil: "networkidle" });
+    const href = await page.locator(sel).first().getAttribute("href").catch(() => null);
+    if (href) out.push(href);
+  }
+  await context.close();
+  return out;
+}
+
+// Runs inside the page. Returns { overflow, smallFonts, smallTargets, covered }.
+function auditPage(touch) {
+  const vis = (el) => {
+    const r = el.getBoundingClientRect();
+    if (r.width <= 1 || r.height <= 1) return false;
+    const cs = getComputedStyle(el);
+    if (cs.visibility === "hidden" || cs.display === "none" || Number(cs.opacity) === 0) return false;
+    if (el.closest("dialog:not([open]), [hidden], [aria-hidden='true']")) return false;
+    const d = el.closest("details:not([open])");
+    if (d && !el.closest("summary")) return false; // closed <details> content still has boxes in Chromium
+    if (el.checkVisibility && !el.checkVisibility({ contentVisibilityAuto: true })) return false;
+    return true;
+  };
+  const desc = (el) => {
+    const t = (el.getAttribute("aria-label") || el.textContent || el.getAttribute("placeholder") || el.getAttribute("name") || "").trim().replace(/\s+/g, " ").slice(0, 40);
+    return `${el.tagName.toLowerCase()}${el.id ? "#" + el.id : ""}${t ? ` "${t}"` : ""}`;
+  };
+  const res = { overflow: null, smallFonts: [], smallTargets: [], covered: null };
+  const sw = document.documentElement.scrollWidth, iw = window.innerWidth;
+  if (sw > iw + 1) {
+    const culprits = [];
+    for (const el of document.querySelectorAll("body *")) {
+      const r = el.getBoundingClientRect();
+      if (r.right > iw + 1 && r.width > 0 && vis(el)) culprits.push(`${desc(el)} .${String(el.className).slice(0, 50)} right=${Math.round(r.right)}`);
+      if (culprits.length > 2) break;
+    }
+    res.overflow = `${sw} > ${iw}: ${culprits.join(" | ")}`;
+  }
+  if (!touch) return res;
+  for (const el of document.querySelectorAll("input, select, textarea")) {
+    if (["checkbox", "radio", "hidden", "file", "range", "color", "submit", "button"].includes(el.type)) continue;
+    if (!vis(el)) continue;
+    const fs = parseFloat(getComputedStyle(el).fontSize);
+    if (fs < 16) res.smallFonts.push(`${desc(el)} ${fs}px`);
+  }
+  for (const el of document.querySelectorAll("button, [role=button], [role=tab], summary, a, input[type=submit]")) {
+    if (!vis(el)) continue;
+    if (el.closest("nav[aria-label='Breadcrumb']")) continue;
+    const cs = getComputedStyle(el);
+    if (el.tagName === "A") {
+      const styled = cs.backgroundColor !== "rgba(0, 0, 0, 0)" || parseFloat(cs.borderTopWidth) > 0;
+      if (cs.display === "inline" || (!styled && !el.closest("nav"))) continue; // inline / plain text links are allowed
+    }
+    let h = el.getBoundingClientRect().height;
+    const tt = el.closest(".tap-target");
+    if (tt) h = Math.max(h, parseFloat(getComputedStyle(tt, "::after").height) || 0);
+    // a control wrapped in a tall label/row counts by its hit box
+    const lab = el.closest("label");
+    if (lab) h = Math.max(h, lab.getBoundingClientRect().height);
+    if (h < 40) res.smallTargets.push(`${desc(el)} ${Math.round(h)}px`);
+  }
+  const bar = [...document.querySelectorAll("nav")].find((n) => getComputedStyle(n).position === "fixed" && vis(n));
+  const main = document.querySelector("main");
+  if (bar && main) {
+    const top = bar.getBoundingClientRect().top;
+    let maxB = -1, who = null;
+    for (const el of main.querySelectorAll("*")) {
+      if (!vis(el) || el.children.length) continue;
+      let skip = false, b = el.getBoundingClientRect().bottom;
+      for (let a = el; a && a !== main; a = a.parentElement) {
+        const s = getComputedStyle(a);
+        if (s.position === "fixed" || s.position === "sticky" || a.tagName === "DIALOG") { skip = true; break; }
+        if (a !== el && s.overflowY !== "visible") b = Math.min(b, a.getBoundingClientRect().bottom);
+      }
+      if (!skip && b > maxB) { maxB = b; who = el; }
+    }
+    if (who && maxB > top + 1) res.covered = `${desc(who)} bottom=${Math.round(maxB)} > tabbar top=${Math.round(top)}`;
+  }
+  return res;
+}
+
+async function responsive(browser) {
+  console.log("\n== responsive");
+  const routes = [...ROUTES, ...(await detailRoutes(browser))];
+  const found = new Map(); // message -> Set(viewport)
+  const note = (msg, where) => { if (!found.has(msg)) found.set(msg, new Set()); found.get(msg).add(where); };
+  let pages = 0;
+  const combos = RESP_VIEWPORTS.flatMap((vp) => ["light", "dark"].map((scheme) => ({ vp, scheme })));
+  const runCombo = async ({ vp, scheme }) => {
+    const context = await browser.newContext({
+      viewport: { width: vp.width, height: vp.height }, deviceScaleFactor: 1, colorScheme: scheme,
+      isMobile: !!vp.touch, hasTouch: !!vp.touch,
+    });
+    await login(context);
+    const page = await context.newPage();
+    const errs = [];
+    page.on("console", (m) => { if (m.type() === "error") errs.push(m.text().slice(0, 200)); });
+    page.on("pageerror", (e) => errs.push(e.message.slice(0, 200)));
+    for (const path of routes) {
+      const where = `${vp.name}${scheme === "dark" ? "d" : ""}`;
+      errs.length = 0;
+      let res;
+      try { res = await page.goto(BASE + path, { waitUntil: "networkidle", timeout: 90000 }); } catch (e) { note(`${path}: navigation ${e.message.split("\n")[0]}`, where); continue; }
+      if (res?.status() !== 200) note(`${path}: HTTP ${res?.status()}`, where);
+      await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+      await page.waitForTimeout(120);
+      const a = await page.evaluate(auditPage, !!vp.touch);
+      pages++;
+      if (a.overflow) note(`${path}: horizontal overflow ${a.overflow.replace(/\d+ > \d+: /, "")}`, where);
+      for (const f of a.smallFonts) note(`${path}: input font < 16px: ${f}`, where);
+      for (const t of a.smallTargets) note(`${path}: tap target < 40px: ${t}`, where);
+      if (a.covered) note(`${path}: tab bar covers content: ${a.covered.replace(/bottom=\d+ > tabbar top=\d+/, "")}`, where);
+      for (const e of errs) note(`${path}: console error: ${e}`, where);
+    }
+    await context.close();
+  };
+  const queue = [...combos];
+  await Promise.all(Array.from({ length: 4 }, async () => { while (queue.length) await runCombo(queue.shift()); }));
+  for (const [msg, where] of found) fail(`responsive ${msg} [${[...where].join(",")}]`);
+  console.log(`  checked ${pages} page loads (${routes.length} routes × ${combos.length} viewport/scheme combos)`);
 }
 
 const browser = await chromium.launch();
 try {
   if (MODE === "crawl" || MODE === "all") await crawl(browser);
   if (MODE === "flows" || MODE === "all") await flows(browser);
+  if (MODE === "responsive") await responsive(browser);
   if (process.env.SHOTS_DIR) await shots(browser, process.env.SHOTS_DIR);
 } finally {
   await browser.close();

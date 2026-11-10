@@ -100,7 +100,8 @@ const btnCls: Record<BtnVariant, string> = {
 export function buttonClass(variant: BtnVariant = "secondary", size: "sm" | "md" = "md") {
   return cx(
     "inline-flex items-center justify-center gap-1.5 rounded-lg font-medium transition disabled:opacity-50 disabled:pointer-events-none",
-    size === "sm" ? "px-2.5 py-1 text-xs" : "px-3.5 py-2 text-sm",
+    // .btn / .btn-sm (globals.css) raise the height to a 44px / 40px tap target on touch screens.
+    size === "sm" ? "btn-sm px-2.5 py-1 text-xs" : "btn px-3.5 py-2 text-sm",
     btnCls[variant],
   );
 }

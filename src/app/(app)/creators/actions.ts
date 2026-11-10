@@ -210,3 +210,45 @@ export async function addOutreachAction(creatorId: string, _prev: FormState, fd:
   refresh(creatorId, [clientId]);
   return { ok: true, message: "Added.", at: Date.now() };
 }
+
+/* ───────── Table: inline edits ───────── */
+
+export type CellField = "name" | "instagramHandle" | "tiktokHandle" | "email" | "city" | "niche" | "instagramFollowers" | "tiktokFollowers" | "engagementRate";
+const CELL_FIELDS: readonly CellField[] = ["name", "instagramHandle", "tiktokHandle", "email", "city", "niche", "instagramFollowers", "tiktokFollowers", "engagementRate"];
+export type CellResult = { ok: true; value: string | number | null } | { ok: false; error: string };
+
+/**
+ * Saves one table cell. Uses updateCreator (the explicit-edit twin of upsertCreator), so clearing a cell
+ * clears the field and a handle another creator already has is refused. No revalidatePath on purpose:
+ * the table keeps its own state, so rows don't jump around while you tab through cells.
+ */
+export async function saveCreatorCellAction(creatorId: string, field: CellField, raw: string): Promise<CellResult> {
+  const user = await requireUser();
+  if (!CELL_FIELDS.includes(field)) return { ok: false, error: "That column can't be edited here." };
+  const text = raw.trim();
+  let value: string | number | null;
+  if (field === "instagramFollowers" || field === "tiktokFollowers") {
+    const n = parseCount(text);
+    if (Number.isNaN(n)) return { ok: false, error: "Followers should be a number, like 12500 or 12.5k." };
+    value = n;
+  } else if (field === "engagementRate") {
+    const n = parseRate(text);
+    if (Number.isNaN(n)) return { ok: false, error: "Engagement should be a percent, like 3.4." };
+    value = n;
+  } else if (field === "name") {
+    if (!text) return { ok: false, error: "Name can't be empty." };
+    value = text;
+  } else if (field === "instagramHandle" || field === "tiktokHandle") {
+    value = normalizeHandle(text);
+  } else if (field === "email") {
+    value = text ? text.toLowerCase() : null;
+  } else {
+    value = text || null;
+  }
+  try {
+    await updateCreator(creatorId, { [field]: value }, user.email);
+  } catch (e) {
+    return { ok: false, error: errorMessage(e) };
+  }
+  return { ok: true, value };
+}

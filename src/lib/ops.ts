@@ -1,5 +1,5 @@
 import "server-only";
-import { and, asc, eq, inArray, isNull, lt, lte, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, lt, lte, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import { getDb, schema } from "./db";
 import { newId, slugify } from "./ids";
@@ -834,4 +834,82 @@ export async function deleteConnection(id: string, actor: string) {
   const db = await getDb();
   const [row] = await db.delete(schema.connections).where(eq(schema.connections.id, id)).returning();
   if (row) await logActivity({ actor, action: "connection.disconnected", entityType: "connection", entityId: id, clientId: row.clientId, summary: `Disconnected ${row.provider}: ${row.label}` });
+}
+
+/* ───────────────────────── Ask conversation ───────────────────────── */
+
+export const AskMessageInput = z.object({
+  askId: z.string().min(1),
+  body: z.string().trim().min(1, "Write something first.").max(4000, "Keep it under 4000 characters."),
+});
+
+const isClaude = (author: string | null | undefined) => author?.toLowerCase() === "claude";
+
+/**
+ * Adds a message to an ask's thread (a question/update from Claude, or an answer from a person)
+ * and bumps asks.updatedAt.
+ *
+ * Hand-back rule: when a PERSON replies to an ask that is in_progress, and the last thing in the
+ * thread before this reply was Claude's (its latest message, or — if there are no messages yet —
+ * its claudeNote), Claude asked a question and is waiting. The ask goes back to "new" so it shows up
+ * in Claude's next get_briefing. Anything else (Claude posting, a person adding a second note,
+ * replies on new/done/archived asks) leaves the status alone.
+ */
+export async function addAskMessage(askId: string, body: string, actor: string) {
+  const v = AskMessageInput.parse({ askId, body });
+  const db = await getDb();
+  const [ask] = await db.select().from(schema.asks).where(eq(schema.asks.id, v.askId));
+  if (!ask) throw new OpsError(`ask ${v.askId} not found`);
+
+  const [prev] = await db.select({ author: schema.askMessages.author }).from(schema.askMessages)
+    .where(eq(schema.askMessages.askId, ask.id)).orderBy(desc(schema.askMessages.createdAt)).limit(1);
+  const claudeWasLast = prev ? isClaude(prev.author) : !!ask.claudeNote;
+  const fromClaude = isClaude(actor);
+  const handBack = !fromClaude && ask.status === "in_progress" && claudeWasLast;
+
+  const id = newId("msg_");
+  const now = new Date();
+  await db.insert(schema.askMessages).values({ id, askId: ask.id, author: fromClaude ? "claude" : actor, body: v.body, createdAt: now });
+  await db.update(schema.asks).set({ updatedAt: now, ...(handBack ? { status: "new" as const } : {}) }).where(eq(schema.asks.id, ask.id));
+
+  const snippet = v.body.length > 80 ? `${v.body.slice(0, 80)}…` : v.body;
+  await logActivity({
+    actor,
+    action: "ask.message",
+    entityType: "ask",
+    entityId: ask.id,
+    clientId: ask.clientId,
+    summary: fromClaude ? `Claude on an ask: ${snippet}` : `Replied on an ask${handBack ? " (back to Claude)" : ""}: ${snippet}`,
+  });
+  return { id, status: handBack ? ("new" as const) : ask.status, handedBack: handBack };
+}
+
+/** One ask's thread, oldest first. */
+export async function listAskMessages(askId: string) {
+  const db = await getDb();
+  return db.select().from(schema.askMessages).where(eq(schema.askMessages.askId, askId)).orderBy(asc(schema.askMessages.createdAt));
+}
+
+/** Threads for many asks at once (oldest first per ask). */
+export async function listAskMessagesFor(askIds: string[]) {
+  const out = new Map<string, schema.AskMessage[]>();
+  if (!askIds.length) return out;
+  const db = await getDb();
+  const rows = await db.select().from(schema.askMessages).where(inArray(schema.askMessages.askId, askIds)).orderBy(asc(schema.askMessages.createdAt));
+  for (const r of rows) out.set(r.askId, [...(out.get(r.askId) ?? []), r]);
+  return out;
+}
+
+/**
+ * Where the conversation stands, from the latest message (or Claude's note when there are none):
+ *  - "claude_asked": Claude spoke last and the ask is waiting (in_progress) — Nora should answer.
+ *  - "replied": a person answered after Claude — Claude should pick it up.
+ *  - null: nothing pending in the thread.
+ */
+export type AskThreadState = "claude_asked" | "replied" | null;
+export function askThreadState(ask: Pick<schema.Ask, "status" | "claudeNote">, last: Pick<schema.AskMessage, "author"> | null | undefined, claudeSpoke = !!ask.claudeNote): AskThreadState {
+  if (ask.status === "archived") return null;
+  if (last ? isClaude(last.author) : !!ask.claudeNote) return ask.status === "in_progress" ? "claude_asked" : null;
+  if (last && claudeSpoke && ask.status !== "done") return "replied";
+  return null;
 }

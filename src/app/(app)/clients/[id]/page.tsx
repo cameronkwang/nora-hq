@@ -300,7 +300,7 @@ export default async function ClientPage({
             <ViewsChart points={points} title={`${client.name} monthly views, ${monthLabel(metrics[0].month)} to ${mon}`} />
 
             <details className="mt-5 rounded-lg border border-border" open={!cur?.instagram && !cur?.tiktok}>
-              <summary className="cursor-pointer px-3 py-2 text-sm font-medium">Enter or edit {mon} numbers</summary>
+              <summary className="cursor-pointer px-3 py-2 text-sm font-medium pointer-coarse:py-3">Enter or edit {mon} numbers</summary>
               <ActionForm action={saveMetricsAction.bind(null, client.id, month)} className="border-t border-border p-3" ariaLabel={`Numbers for ${mon}`}>
                 <div className="grid gap-4 md:grid-cols-2">
                   {(["instagram", "tiktok"] as const).map((p) => {

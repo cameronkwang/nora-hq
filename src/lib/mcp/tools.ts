@@ -8,6 +8,7 @@ import { getClientMonth } from "@/lib/reports";
 import { addMonths, currentMonth, isMonth } from "@/lib/dates";
 import {
   OpsError,
+  addAskMessage,
   createDraft,
   createPost,
   createTask,
@@ -41,6 +42,7 @@ import {
   shapeOutreach,
   shapePost,
   shapeTask,
+  threadsFor,
   type Ctx,
 } from "./queries";
 
@@ -189,11 +191,13 @@ export function registerTools(server: McpServer, ctx: Ctx) {
   server.registerTool("get_briefing", {
     title: "Get briefing (start here)",
     description:
-      "START HERE every session. Returns today's date and month, the working rules you must follow, NEW asks from Nora (full text + attachment URLs + business), " +
+      "START HERE every session. Returns today's date and month, the working rules you must follow, NEW asks from Nora (full text + attachment URLs + business + conversation thread), " +
       "drafts a person SENT BACK with a review note (revise these first with revise_draft), open tasks assigned to Claude or unassigned that are due within 7 days " +
       "(or undated for this month or earlier), creator follow-ups that are due, asks still waiting on Nora's answers, and a per-business summary for the month " +
+      "Each ask has `thread` (messages between you and Nora/Cameron, oldest first) and `needsYourReply` — true when a person answered after you; " +
+      "an ask you asked a question on comes back as NEW once Nora answers, so read its thread before working it. " +
       "(plan progress, open/overdue tasks, drafts awaiting review, unreplied Google reviews, whether this month's tasks and metrics exist). " +
-      "Suggested order: sent-back drafts → new asks → due tasks → follow-ups → unreplied reviews. Finish by calling update_ask on every ask you touched.",
+      "Suggested order: sent-back drafts → asks with needsYourReply → other new asks → due tasks → follow-ups → unreplied reviews. Finish by calling update_ask on every ask you touched.",
     inputSchema: {},
     annotations: READ,
   }, async () => run(async () => ({ rules: WORKING_RULES, ...(await getBriefingData(ctx)) })));
@@ -263,7 +267,8 @@ export function registerTools(server: McpServer, ctx: Ctx) {
     title: "List asks",
     description:
       "Lists asks — free-form requests Nora or Cameron dropped in the app (e.g. \"write 3 captions for these photos\", \"find 10 Richmond food creators\", \"here are October's numbers\"). " +
-      "Default status \"open\" = new + in_progress. Attachment URLs are photos/videos you can reference or pass as mediaUrls on post drafts.",
+      "Default status \"open\" = new + in_progress. Attachment URLs are photos/videos you can reference or pass as mediaUrls on post drafts. " +
+      "Each ask includes its conversation `thread` (oldest first) and `needsYourReply` (a person wrote after you).",
     inputSchema: {
       status: z.enum(["open", ...schema.ASK_STATUSES]).default("open").describe("open (new + in_progress), new, in_progress, done or archived."),
       client_id: clientId.optional(),
@@ -273,19 +278,39 @@ export function registerTools(server: McpServer, ctx: Ctx) {
   }, async ({ status, client_id, limit }) => run(async () => {
     const names = await clientNames();
     const rows = await listAsks({ status, clientId: client_id, limit });
-    return rows.map((a) => shapeAsk(a, names, ctx));
+    const threads = await threadsFor(rows);
+    return rows.map((a) => shapeAsk(a, names, ctx, threads.get(a.id) ?? []));
+  }));
+
+  server.registerTool("reply_to_ask", {
+    title: "Reply on an ask",
+    description:
+      "Adds a message to an ask's conversation, shown to Nora in the app as a chat bubble from Claude. Use it to ask questions when an ask is unclear " +
+      "(list them plainly, numbered if more than one) or to post a short progress update. Messages are kept — nothing is overwritten. " +
+      "When you're asking a question, also pass status in_progress so the ask waits for Nora; when she answers, the ask comes back to you as new with needsYourReply. " +
+      "Use update_ask's note only for the final one- or two-line summary of what you did.",
+    inputSchema: {
+      ask_id: z.string(),
+      body: z.string().min(1).max(4000).describe("Your message to Nora, in plain words."),
+      status: z.enum(["in_progress", "done"]).optional().describe("Optionally move the ask too: in_progress when waiting on Nora's answer."),
+    },
+    annotations: WRITE,
+  }, async ({ ask_id, body, status }) => run(async () => {
+    const msg = await addAskMessage(ask_id, body, ACTOR);
+    const row = status ? await updateAsk(ask_id, { status }, ACTOR) : null;
+    return { ok: true, messageId: msg.id, askStatus: row?.status ?? msg.status };
   }));
 
   server.registerTool("update_ask", {
     title: "Update an ask",
     description:
-      "Record progress on an ask. `note` is shown to Nora in the app under the ask — say plainly what you did (e.g. \"Drafted 3 Instagram captions — see Review\") " +
-      "or list your questions if something is unclear. The note REPLACES any earlier note, so include everything still relevant. " +
+      "Record progress on an ask. `note` is your summary shown to Nora at the top of the ask's conversation — say plainly what you did (e.g. \"Drafted 3 Instagram captions — see Review\"). " +
+      "The note REPLACES any earlier note. For questions or back-and-forth, use reply_to_ask instead (it keeps the conversation). " +
       "Use status in_progress while waiting on Nora's answers, done when the work is drafted. Set client_id if the ask didn't name a business and you worked out which one.",
     inputSchema: {
       ask_id: z.string(),
       status: z.enum(["in_progress", "done"]).optional(),
-      note: z.string().max(4000).optional().describe("What you did, or questions for Nora. Replaces the previous note."),
+      note: z.string().max(4000).optional().describe("Short summary of what you did. Replaces the previous note. Ask questions with reply_to_ask."),
       client_id: clientId.optional(),
     },
     annotations: { ...WRITE, idempotentHint: true },

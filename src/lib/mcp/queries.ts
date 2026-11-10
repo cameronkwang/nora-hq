@@ -4,6 +4,7 @@ import { getDb, schema } from "@/lib/db";
 import { getClientMonth } from "@/lib/reports";
 import { addMonths, currentMonth, today } from "@/lib/dates";
 import { monthBounds } from "@/lib/integrations/time"; // app-timezone month edges
+import { listAskMessagesFor } from "@/lib/ops";
 
 /**
  * Read-side queries for the Claude connector. Everything here returns plain, compact objects
@@ -45,7 +46,7 @@ export async function findClient(id: string) {
 
 /* ───────────── shapers ───────────── */
 
-export function shapeAsk(a: schema.Ask, names: Map<string, string>, ctx: Ctx) {
+export function shapeAsk(a: schema.Ask, names: Map<string, string>, ctx: Ctx, thread?: schema.AskMessage[]) {
   return {
     id: a.id,
     status: a.status,
@@ -57,7 +58,26 @@ export function shapeAsk(a: schema.Ask, names: Map<string, string>, ctx: Ctx) {
     claudeNote: a.claudeNote,
     createdAt: a.createdAt,
     updatedAt: a.updatedAt,
+    ...(thread ? shapeThread(a, thread) : {}),
   };
+}
+
+/**
+ * The conversation on an ask, oldest first. `needsYourReply` is true when a person wrote after Claude's
+ * last message (or after its note) — answer them / continue the work.
+ */
+export function shapeThread(a: Pick<schema.Ask, "claudeNote">, thread: schema.AskMessage[]) {
+  const last = thread.at(-1);
+  const claudeSpoke = !!a.claudeNote || thread.some((m) => m.author === "claude");
+  return {
+    thread: thread.map((m) => ({ from: m.author === "claude" ? "claude" : m.author, body: m.body, at: m.createdAt })),
+    needsYourReply: !!last && last.author !== "claude" && claudeSpoke,
+  };
+}
+
+/** Attaches each ask's thread. */
+export async function threadsFor(asks: schema.Ask[]) {
+  return listAskMessagesFor(asks.map((a) => a.id));
 }
 
 export function shapeTask(t: schema.Task, names: Map<string, string>) {
@@ -222,6 +242,8 @@ export async function getBriefingData(ctx: Ctx) {
     db.select().from(schema.clients).where(eq(schema.clients.archived, false)).orderBy(asc(schema.clients.sortOrder), asc(schema.clients.name)),
   ]);
 
+  const threads = await threadsFor([...newAsks, ...waitingAsks]);
+
   const businesses = await Promise.all(clients.map(async (c) => {
     const cm = await getClientMonth(c.id, month);
     if (!cm) return null;
@@ -246,8 +268,11 @@ export async function getBriefingData(ctx: Ctx) {
     month,
     timezone: process.env.APP_TZ ?? "America/New_York",
     now,
-    newAsks: newAsks.map((a) => shapeAsk(a, names, ctx)),
-    asksWaitingOnNora: waitingAsks.map((a) => ({ id: a.id, business: a.clientId ? names.get(a.clientId) : null, body: a.body.length > 300 ? `${a.body.slice(0, 300)}…` : a.body, claudeNote: a.claudeNote, updatedAt: a.updatedAt })),
+    newAsks: newAsks.map((a) => shapeAsk(a, names, ctx, threads.get(a.id) ?? [])),
+    asksWaitingOnNora: waitingAsks.map((a) => ({
+      id: a.id, business: a.clientId ? names.get(a.clientId) : null, body: a.body.length > 300 ? `${a.body.slice(0, 300)}…` : a.body,
+      claudeNote: a.claudeNote, updatedAt: a.updatedAt, ...shapeThread(a, threads.get(a.id) ?? []),
+    })),
     draftsSentBack: sentBack.map((d) => shapeDraft(d, names)),
     tasksForClaude: myTasks.map((t) => shapeTask(t, names)),
     followUpsDue: followUps,

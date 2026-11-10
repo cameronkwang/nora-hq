@@ -14,8 +14,9 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         clients={clients.map((c) => ({ id: c.id, name: c.name, location: c.location }))}
         counts={counts}
       />
-      <main className="min-w-0 flex-1 px-4 py-6 md:px-8 md:py-8">
-        <div className="mx-auto max-w-6xl">{children}</div>
+      {/* On phones the bottom tab bar is fixed; --tabbar-h keeps the last row of content above it. */}
+      <main className="min-w-0 flex-1 pt-5 pb-[calc(var(--tabbar-h)_+_1.5rem)] pl-[max(1rem,env(safe-area-inset-left))] pr-[max(1rem,env(safe-area-inset-right))] md:px-8 md:py-8 xl:px-10">
+        <div className="mx-auto max-w-7xl">{children}</div>
       </main>
     </div>
   );

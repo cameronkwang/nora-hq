@@ -221,8 +221,8 @@ export function ViewsChart({ points, title }: { points: ViewsPoint[]; title: str
       </div>
 
       <details className="mt-2 text-xs">
-        <summary className="cursor-pointer text-muted hover:text-text">Show as table</summary>
-        <div className="mt-2 overflow-x-auto">
+        <summary className="cursor-pointer text-muted hover:text-text pointer-coarse:py-3">Show as table</summary>
+        <div className="relative mt-2 overflow-x-auto">
           <table className="w-full min-w-72 text-left tabular-nums">
             <caption className="sr-only">{title}</caption>
             <thead className="text-muted">

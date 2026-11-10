@@ -15,6 +15,13 @@
       "when": 1794344281705,
       "tag": "0001_post_publish_recovery",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1794346415952,
+      "tag": "0002_ask_messages",
+      "breakpoints": true
     }
   ]
 }

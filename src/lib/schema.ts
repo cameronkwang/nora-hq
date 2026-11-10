@@ -70,6 +70,23 @@ export const asks = pgTable(
 
 export type Attachment = { url: string; name: string; contentType?: string };
 
+/**
+ * The back-and-forth on an ask: Claude's questions/updates and Nora's (or Cameron's) answers.
+ * `author` is a user email, or "claude". The ask's original body is the first "message";
+ * asks.claudeNote stays as Claude's latest summary (shown as its first message if present).
+ */
+export const askMessages = pgTable(
+  "ask_messages",
+  {
+    id: text("id").primaryKey(),
+    askId: text("ask_id").notNull().references(() => asks.id, { onDelete: "cascade" }),
+    author: text("author").notNull(),
+    body: text("body").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("ask_messages_ask_idx").on(t.askId, t.createdAt)],
+);
+
 export const TASK_STATUSES = ["todo", "in_progress", "needs_review", "blocked", "done"] as const;
 export type TaskStatus = (typeof TASK_STATUSES)[number];
 export const ASSIGNEES = ["nora", "cameron", "claude", "unassigned"] as const;
@@ -318,6 +335,7 @@ export const activity = pgTable(
 export type Client = typeof clients.$inferSelect;
 export type Deliverable = typeof deliverables.$inferSelect;
 export type Ask = typeof asks.$inferSelect;
+export type AskMessage = typeof askMessages.$inferSelect;
 export type Task = typeof tasks.$inferSelect;
 export type Draft = typeof drafts.$inferSelect;
 export type ContentPost = typeof contentPosts.$inferSelect;

@@ -7,7 +7,7 @@ import { headers } from "next/headers";
 import { addMonths, currentMonth, formatDate, lastMonths, monthLabel, relativeTime } from "@/lib/dates";
 import { ASSIGNEES, PLATFORMS, TASK_STATUSES } from "@/lib/schema";
 import { deleteTaskAction, saveTask } from "../actions";
-import { Button, Card, PageHeader, StatusBadge, clientLabel, cx, humanize } from "@/components/ui";
+import { Button, Card, PageHeader, StatusBadge, buttonClass, clientLabel, cx, humanize } from "@/components/ui";
 import { actorName } from "../../activity/actor";
 
 export const dynamic = "force-dynamic";
@@ -51,9 +51,9 @@ export default async function TaskPage({ params, searchParams }: { params: Promi
   const back = await backPath(id);
 
   return (
-    <div className="mx-auto max-w-2xl">
-      <Link href="/tasks" className="mb-3 inline-block text-sm text-muted hover:text-text">
-        ← All tasks
+    <div className="mx-auto max-w-5xl">
+      <Link href={back} className="mb-3 inline-flex min-h-11 items-center text-sm text-muted hover:text-text md:min-h-0">
+        ← {back.startsWith("/tasks") ? "All tasks" : "Back"}
       </Link>
       <PageHeader
         title={<span className="break-words">{task.title}</span>}
@@ -79,96 +79,118 @@ export default async function TaskPage({ params, searchParams }: { params: Promi
         </p>
       )}
 
-      <Card>
-        <form action={saveTask} className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          <input type="hidden" name="id" value={task.id} />
-          <input type="hidden" name="returnTo" value={back} />
+      <form action={saveTask} className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_20rem] lg:items-start">
+        <input type="hidden" name="id" value={task.id} />
+        <input type="hidden" name="returnTo" value={back} />
 
-          <div className="sm:col-span-2">
-            <label htmlFor="t-title" className="label">Title</label>
-            <input id="t-title" name="title" required defaultValue={task.title} className="input" />
+        {/* Main: what it is + notes */}
+        <Card>
+          <div className="flex flex-col gap-4">
+            <div>
+              <label htmlFor="t-title" className="label">Title</label>
+              <input id="t-title" name="title" required defaultValue={task.title} className="input" />
+            </div>
+            <div>
+              <label htmlFor="t-details" className="label">Notes</label>
+              <textarea
+                id="t-details"
+                name="details"
+                rows={10}
+                defaultValue={task.details ?? ""}
+                className="input min-h-48 leading-relaxed"
+                placeholder="Links, context, what’s been tried, what’s next…"
+              />
+            </div>
           </div>
+        </Card>
 
-          <div>
-            <label htmlFor="t-status" className="label">Status</label>
-            <select id="t-status" name="status" defaultValue={task.status} className="input">
-              {TASK_STATUSES.map((s) => (
-                <option key={s} value={s}>{humanize(s)}</option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label htmlFor="t-assignee" className="label">Assignee</label>
-            <select id="t-assignee" name="assignee" defaultValue={task.assignee} className="input">
-              {ASSIGNEES.map((a) => (
-                <option key={a} value={a}>{humanize(a)}</option>
-              ))}
-            </select>
-          </div>
+        {/* Side: the properties */}
+        <Card>
+          <div className="grid grid-cols-2 gap-4 lg:grid-cols-1">
+            <div>
+              <label htmlFor="t-status" className="label">Status</label>
+              <select id="t-status" name="status" defaultValue={task.status} className="input">
+                {TASK_STATUSES.map((s) => (
+                  <option key={s} value={s}>{humanize(s)}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label htmlFor="t-assignee" className="label">Assignee</label>
+              <select id="t-assignee" name="assignee" defaultValue={task.assignee} className="input">
+                {ASSIGNEES.map((a) => (
+                  <option key={a} value={a}>{humanize(a)}</option>
+                ))}
+              </select>
+            </div>
+            <div className="col-span-2 lg:col-span-1">
+              <label htmlFor="t-client" className="label">Business</label>
+              <select id="t-client" name="clientId" defaultValue={task.clientId ?? ""} className="input">
+                <option value="">No business</option>
+                {visibleClients.map((c) => (
+                  <option key={c.id} value={c.id}>{clientLabel(c)}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label htmlFor="t-due" className="label">Due date</label>
+              <input id="t-due" name="dueDate" type="date" defaultValue={task.dueDate ?? ""} className="input" />
+            </div>
+            <div>
+              <label htmlFor="t-platform" className="label">Platform</label>
+              <select id="t-platform" name="platform" defaultValue={task.platform ?? ""} className="input">
+                <option value="">None</option>
+                {PLATFORMS.map((p) => (
+                  <option key={p} value={p}>{p === "tiktok" ? "TikTok" : humanize(p)}</option>
+                ))}
+              </select>
+            </div>
 
-          <div>
-            <label htmlFor="t-client" className="label">Business</label>
-            <select id="t-client" name="clientId" defaultValue={task.clientId ?? ""} className="input">
-              <option value="">No business</option>
-              {visibleClients.map((c) => (
-                <option key={c.id} value={c.id}>{clientLabel(c)}</option>
-              ))}
-            </select>
+            <details className="col-span-2 lg:col-span-1" open={task.month !== cur || !!task.deliverableId}>
+              <summary className="no-marker flex min-h-11 items-center gap-1 text-sm font-medium text-muted hover:text-text lg:min-h-0">
+                Month &amp; monthly plan
+                <svg viewBox="0 0 16 16" aria-hidden className="size-3.5" fill="none" stroke="currentColor" strokeWidth={1.8}>
+                  <path d="M4 6l4 4 4-4" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+              </summary>
+              <div className="mt-3 flex flex-col gap-4">
+                <div>
+                  <label htmlFor="t-month" className="label">Counts toward month</label>
+                  <select id="t-month" name="month" defaultValue={task.month} className="input">
+                    {months.map((m) => (
+                      <option key={m} value={m}>{monthLabel(m)}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label htmlFor="t-deliverable" className="label">Monthly plan item</label>
+                  <select id="t-deliverable" name="deliverableId" defaultValue={task.deliverableId ?? ""} className="input" disabled={!task.clientId}>
+                    <option value="">{task.clientId ? "Not part of the monthly plan" : "Pick a business first"}</option>
+                    {deliverables.map((d) => (
+                      <option key={d.id} value={d.id}>
+                        {d.title}
+                        {d.targetPerMonth > 0 ? ` (${d.targetPerMonth}/mo)` : ""}
+                        {d.active ? "" : " — paused"}
+                      </option>
+                    ))}
+                  </select>
+                  <p className="mt-1 text-xs text-muted">Done tasks linked here count toward the business’s monthly progress. Changing the business clears this.</p>
+                </div>
+              </div>
+            </details>
           </div>
-          <div>
-            <label htmlFor="t-platform" className="label">Platform</label>
-            <select id="t-platform" name="platform" defaultValue={task.platform ?? ""} className="input">
-              <option value="">None</option>
-              {PLATFORMS.map((p) => (
-                <option key={p} value={p}>{p === "tiktok" ? "TikTok" : humanize(p)}</option>
-              ))}
-            </select>
-          </div>
+        </Card>
 
-          <div>
-            <label htmlFor="t-due" className="label">Due date</label>
-            <input id="t-due" name="dueDate" type="date" defaultValue={task.dueDate ?? ""} className="input" />
-          </div>
-          <div>
-            <label htmlFor="t-month" className="label">Counts toward month</label>
-            <select id="t-month" name="month" defaultValue={task.month} className="input">
-              {months.map((m) => (
-                <option key={m} value={m}>{monthLabel(m)}</option>
-              ))}
-            </select>
-          </div>
-
-          <div className="sm:col-span-2">
-            <label htmlFor="t-deliverable" className="label">Monthly plan item</label>
-            <select id="t-deliverable" name="deliverableId" defaultValue={task.deliverableId ?? ""} className="input" disabled={!task.clientId}>
-              <option value="">{task.clientId ? "Not part of the monthly plan" : "Pick a business first"}</option>
-              {deliverables.map((d) => (
-                <option key={d.id} value={d.id}>
-                  {d.title}
-                  {d.targetPerMonth > 0 ? ` (${d.targetPerMonth}/mo)` : ""}
-                  {d.active ? "" : " — paused"}
-                </option>
-              ))}
-            </select>
-            <p className="mt-1 text-xs text-muted">Done tasks linked here count toward this business’s monthly progress. Changing the business clears this.</p>
-          </div>
-
-          <div className="sm:col-span-2">
-            <label htmlFor="t-details" className="label">Details</label>
-            <textarea id="t-details" name="details" rows={5} defaultValue={task.details ?? ""} className="input" placeholder="Links, notes, anything useful" />
-          </div>
-
-          <div className="flex flex-wrap gap-2 sm:col-span-2">
-            <Button type="submit" variant="primary">Save</Button>
-            <Link href={back} className={cx("inline-flex items-center px-2 text-sm text-muted hover:text-text")}>
-              Cancel
-            </Link>
-          </div>
-        </form>
-      </Card>
+        <div className="sticky-actions flex items-center gap-2 rounded-xl border border-border bg-surface/95 p-2 shadow-sm backdrop-blur lg:col-span-2 lg:border-0 lg:bg-transparent lg:p-0 lg:shadow-none">
+          <Button type="submit" variant="primary" className="flex-1 sm:flex-none">Save</Button>
+          <Link href={back} className={cx(buttonClass("ghost"), "text-muted")}>
+            Cancel
+          </Link>
+        </div>
+      </form>
 
       {(ask || drafts.length > 0) && (
-        <Card title="Linked" className="mt-4">
+        <Card title="Linked" className="mt-4 lg:max-w-[calc(100%-21rem)]">
           <ul className="flex flex-col gap-2 text-sm">
             {ask && (
               <li>

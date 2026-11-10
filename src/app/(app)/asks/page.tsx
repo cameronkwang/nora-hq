@@ -2,6 +2,7 @@ import Link from "next/link";
 import { desc, eq, inArray, sql } from "drizzle-orm";
 import { getDb, schema } from "@/lib/db";
 import { relativeTime } from "@/lib/dates";
+import { askThreadState, listAskMessagesFor } from "@/lib/ops";
 import type { AskStatus } from "@/lib/schema";
 import { AskAttachments } from "@/components/ask-attachments";
 import { AskStatusButtons } from "@/components/ask-status-buttons";
@@ -35,12 +36,13 @@ export default async function AsksPage({ searchParams }: { searchParams: Promise
   ]);
 
   const ids = rows.map((r) => r.ask.id);
-  const [taskCounts, draftCounts] = ids.length
+  const [taskCounts, draftCounts, threads] = ids.length
     ? await Promise.all([
         db.select({ askId: schema.tasks.askId, n: sql<number>`count(*)::int` }).from(schema.tasks).where(inArray(schema.tasks.askId, ids)).groupBy(schema.tasks.askId),
         db.select({ askId: schema.drafts.askId, n: sql<number>`count(*)::int` }).from(schema.drafts).where(inArray(schema.drafts.askId, ids)).groupBy(schema.drafts.askId),
+        listAskMessagesFor(ids),
       ])
-    : [[], []];
+    : [[], [], new Map<string, schema.AskMessage[]>()];
   const tasksFor = (id: string) => taskCounts.find((t) => t.askId === id)?.n ?? 0;
   const draftsFor = (id: string) => draftCounts.find((t) => t.askId === id)?.n ?? 0;
   const countFor = (s: AskStatus) => counts.find((c) => c.status === s)?.n ?? 0;
@@ -50,7 +52,7 @@ export default async function AsksPage({ searchParams }: { searchParams: Promise
     <div>
       <PageHeader
         title="Asks"
-        subtitle="Quick requests for Claude. It reads new asks, does the work, and leaves a note here."
+        subtitle="Quick requests for Claude. It picks them up, does the work, and replies here."
         actions={<LinkButton href="/asks/new" variant="primary">+ New ask</LinkButton>}
       />
 
@@ -60,7 +62,7 @@ export default async function AsksPage({ searchParams }: { searchParams: Promise
         </p>
       )}
 
-      <nav aria-label="Ask status" className="-mx-4 mb-4 overflow-x-auto px-4">
+      <nav aria-label="Ask status" className="relative -mx-4 mb-4 overflow-x-auto px-4">
         <div className="flex min-w-max gap-1 rounded-lg bg-surface-2 p-1 text-sm">
           {TABS.map((t) => (
             <Link
@@ -68,7 +70,7 @@ export default async function AsksPage({ searchParams }: { searchParams: Promise
               href={t.status === "new" ? "/asks" : `/asks?status=${t.status}`}
               aria-current={t.status === status ? "page" : undefined}
               className={cx(
-                "rounded-md px-3 py-1.5 font-medium",
+                "inline-flex items-center rounded-md px-3 py-1.5 font-medium pointer-coarse:min-h-11",
                 t.status === status ? "bg-surface text-text shadow-sm" : "text-muted hover:text-text",
               )}
             >
@@ -92,6 +94,11 @@ export default async function AsksPage({ searchParams }: { searchParams: Promise
           {rows.map(({ ask, client }) => {
             const nTasks = tasksFor(ask.id);
             const nDrafts = draftsFor(ask.id);
+            const thread = threads.get(ask.id) ?? [];
+            const last = thread.at(-1);
+            const convo = askThreadState(ask, last, !!ask.claudeNote || thread.some((m) => m.author === "claude"));
+            // Preview the latest word in the conversation (a message, or Claude's note if there are none).
+            const latest = last ? { claude: last.author === "claude", who: actorName(last.author), body: last.body } : ask.claudeNote ? { claude: true, who: "Claude", body: ask.claudeNote } : null;
             return (
               <li key={ask.id} className="rounded-xl border border-border bg-surface p-4">
                 <div className="mb-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted">
@@ -118,15 +125,26 @@ export default async function AsksPage({ searchParams }: { searchParams: Promise
                   </div>
                 )}
 
-                {ask.claudeNote && (
-                  <div className="mt-3 rounded-lg border-l-4 border-accent bg-accent-soft px-3 py-2 text-sm">
-                    <p className="mb-0.5 text-xs font-semibold text-accent">Claude</p>
-                    <p className="whitespace-pre-wrap break-words">{ask.claudeNote}</p>
-                  </div>
+                {latest && (
+                  <Link
+                    href={`/asks/${ask.id}`}
+                    className={cx(
+                      "mt-3 block rounded-lg px-3 py-2 text-sm hover:opacity-90",
+                      latest.claude ? "border-l-4 border-accent bg-accent-soft" : "bg-surface-2",
+                    )}
+                  >
+                    <span className={cx("mb-0.5 block text-xs font-semibold", latest.claude ? "text-accent" : "text-muted")}>
+                      {latest.who}
+                      {thread.length > 1 && <span className="font-normal text-muted"> · {thread.length + (ask.claudeNote ? 1 : 0)} messages</span>}
+                    </span>
+                    <span className="line-clamp-3 whitespace-pre-wrap break-words">{latest.body}</span>
+                  </Link>
                 )}
 
                 <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
-                  <div className="flex flex-wrap gap-1.5">
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    {convo === "claude_asked" && <Badge tone="warn">Claude asked a question</Badge>}
+                    {convo === "replied" && <Badge tone="info">Replied</Badge>}
                     {nTasks > 0 && <Badge>{nTasks} task{nTasks === 1 ? "" : "s"}</Badge>}
                     {nDrafts > 0 && <Badge tone="warn">{nDrafts} draft{nDrafts === 1 ? "" : "s"}</Badge>}
                     <Link href={`/asks/${ask.id}`} className="text-xs font-medium text-accent hover:underline">

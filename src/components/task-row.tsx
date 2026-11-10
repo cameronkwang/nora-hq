@@ -3,6 +3,7 @@ import { toggleTaskDone } from "@/app/(app)/tasks/actions";
 import { formatDate, today } from "@/lib/dates";
 import type { Task } from "@/lib/schema";
 import { TaskToggleButton } from "./task-toggle";
+import { TaskSelectBox } from "./task-selection";
 import { PlatformTag, StatusBadge, cx, humanize } from "./ui";
 
 export function isOverdue(task: Pick<Task, "dueDate" | "status">, now = today()) {
@@ -12,14 +13,16 @@ export function isOverdue(task: Pick<Task, "dueDate" | "status">, now = today())
 /**
  * One task as a row: done toggle, title (links to the edit page), and a meta line.
  * Server component; the toggle posts to toggleTaskDone and revalidates every page.
+ * `selectable`: shows a bulk-select checkbox when the row sits inside a <TaskSelection> that is selecting.
  */
-export function TaskRow({ task, clientName, showClient = true }: { task: Task; clientName?: string | null; showClient?: boolean }) {
+export function TaskRow({ task, clientName, showClient = true, selectable = false }: { task: Task; clientName?: string | null; showClient?: boolean; selectable?: boolean }) {
   const done = task.status === "done";
   const overdue = isOverdue(task);
   const dueToday = !!task.dueDate && task.dueDate === today() && !done;
 
   return (
     <div className="flex items-start gap-3 py-3">
+      {selectable && <TaskSelectBox id={task.id} title={task.title} className="pt-0.5" />}
       <form action={toggleTaskDone} className="pt-0.5">
         <input type="hidden" name="id" value={task.id} />
         <input type="hidden" name="done" value={done ? "0" : "1"} />

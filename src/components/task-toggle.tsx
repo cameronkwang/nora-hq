@@ -2,10 +2,14 @@
 
 import { useFormStatus } from "react-dom";
 import { cx } from "./ui";
+import { useTaskSelection } from "./task-selection";
 
 /** Round checkbox-style submit button for the done toggle. Shows the new state while the action runs. */
 export function TaskToggleButton({ done, title }: { done: boolean; title: string }) {
   const { pending } = useFormStatus();
+  // While bulk-selecting, the row's select checkbox takes this spot.
+  const selection = useTaskSelection();
+  if (selection?.selecting) return null;
   const shown = pending ? !done : done;
   return (
     <button
@@ -14,7 +18,7 @@ export function TaskToggleButton({ done, title }: { done: boolean; title: string
       aria-label={done ? `Mark “${title}” not done` : `Mark “${title}” done`}
       aria-pressed={done}
       className={cx(
-        "flex size-6 shrink-0 items-center justify-center rounded-full border-2 transition",
+        "tap-target flex size-6 shrink-0 items-center justify-center rounded-full border-2 transition",
         shown ? "border-ok bg-ok text-surface" : "border-border bg-surface hover:border-ok",
         pending && "opacity-60",
       )}

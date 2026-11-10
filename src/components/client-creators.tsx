@@ -28,7 +28,7 @@ export function filterOutreach(rows: Row[], filter: CreatorFilter, monthStart: D
 export function CreatorFilterChips({ current, counts, href }: { current: CreatorFilter; counts: Record<CreatorFilter, number>; href: (f: CreatorFilter) => string }) {
   const items: Array<[CreatorFilter, string]> = [["all", "All"], ["month", "Contacted this month"], ["active", "Active"], ["posted", "Posted"]];
   return (
-    <nav aria-label="Filter creators" className="-mx-1 flex gap-1.5 overflow-x-auto px-1 pb-1">
+    <nav aria-label="Filter creators" className="relative -mx-1 flex gap-1.5 overflow-x-auto px-1 pb-1">
       {items.map(([f, label]) => (
         <Link
           key={f}
@@ -36,7 +36,7 @@ export function CreatorFilterChips({ current, counts, href }: { current: Creator
           scroll={false}
           aria-current={current === f ? "true" : undefined}
           className={cx(
-            "whitespace-nowrap rounded-full border px-3 py-1 text-xs font-medium",
+            "inline-flex items-center whitespace-nowrap rounded-full border px-3 py-1 text-xs font-medium pointer-coarse:min-h-11 pointer-coarse:px-4",
             current === f ? "border-accent bg-accent-soft text-accent" : "border-border text-muted hover:bg-surface-2",
           )}
         >

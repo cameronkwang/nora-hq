@@ -2,6 +2,7 @@ import Link from "next/link";
 import type { Creator, Outreach } from "@/lib/schema";
 import { OUTREACH_STAGES } from "@/lib/schema";
 import { formatDate } from "@/lib/dates";
+import { OutreachBoard } from "./outreach-board";
 import { OutreachStageSelect } from "./outreach-stage-select";
 import { Badge, PlatformTag, formatNumber, humanize } from "./ui";
 
@@ -12,8 +13,8 @@ const CLOSED: readonly string[] = ["declined", "no_response"];
 const COMP_SHORT: Record<string, string> = { gifted: "Gifted", paid: "Paid", affiliate: "Affiliate", tbd: "" };
 
 /**
- * Kanban-style board for one business. Columns scroll sideways inside their own container,
- * so the page itself never scrolls horizontally on a phone.
+ * Kanban-style board for one business. Desktop: columns side by side, scrolling inside their own box.
+ * Phones: one stage at a time with a stage switcher (see OutreachBoard).
  */
 export function OutreachPipeline({
   rows,
@@ -30,28 +31,25 @@ export function OutreachPipeline({
   const closed = rows.filter((r) => CLOSED.includes(r.stage));
   return (
     <div className="space-y-4">
-      <div className="-mx-4 overflow-x-auto px-4 pb-2 md:mx-0 md:px-0" role="region" aria-label="Outreach pipeline" tabIndex={0}>
-        <ol className="flex gap-3">
-          {MAIN.map((stage) => {
-            const items = byStage(stage);
-            return (
-              <li key={stage} className="flex w-64 shrink-0 flex-col rounded-xl border border-border bg-surface-2/60">
-                <h3 className="flex items-center justify-between px-3 py-2 text-xs font-semibold">
-                  <span>{humanize(stage)}</span>
-                  <span className="tabular-nums text-muted">{items.length}</span>
-                </h3>
-                <ul className="flex flex-1 flex-col gap-2 px-2 pb-2">
-                  {items.length === 0 ? (
-                    <li className="rounded-lg border border-dashed border-border px-2 py-4 text-center text-xs text-muted">Nobody here</li>
-                  ) : (
-                    items.map((r) => <PipelineCard key={r.id} row={r} back={back} moveAction={moveAction} now={now} />)
-                  )}
-                </ul>
-              </li>
-            );
-          })}
-        </ol>
-      </div>
+      <OutreachBoard
+        columns={MAIN.map((stage) => {
+          const items = byStage(stage);
+          return {
+            stage,
+            label: humanize(stage),
+            count: items.length,
+            content: (
+              <ul className="flex flex-1 flex-col gap-2">
+                {items.length === 0 ? (
+                  <li className="rounded-lg border border-dashed border-border px-2 py-4 text-center text-xs text-muted">Nobody here</li>
+                ) : (
+                  items.map((r) => <PipelineCard key={r.id} row={r} back={back} moveAction={moveAction} now={now} />)
+                )}
+              </ul>
+            ),
+          };
+        })}
+      />
 
       <details className="rounded-xl border border-border bg-surface">
         <summary className="cursor-pointer px-4 py-3 text-sm font-medium">
