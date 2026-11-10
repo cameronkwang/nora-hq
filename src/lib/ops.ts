@@ -1,0 +1,619 @@
+import "server-only";
+import { and, eq, inArray, lte, sql } from "drizzle-orm";
+import { z } from "zod";
+import { getDb, schema } from "./db";
+import { newId, slugify } from "./ids";
+import { currentMonth, isMonth, monthOfDate } from "./dates";
+import { logActivity } from "./activity";
+import { publishInstagramPost, replyToInstagramComment } from "./integrations/instagram";
+import { replyToGoogleReview } from "./integrations/google";
+import { sendOutreachEmail } from "./integrations/gmail";
+import type { IntegrationResult } from "./integrations/types";
+
+/**
+ * The ONLY place that mutates data. Both the web UI (server actions) and the Claude connector (MCP tools)
+ * call these, so behaviour, validation and the audit log stay identical.
+ * `actor` is a user email, or "claude".
+ *
+ * Safety rule: nothing here sends/publishes anything except approveDraft() and publishDuePosts(),
+ * and approveDraft() refuses actor "claude" — only a signed-in human can approve.
+ */
+
+export class OpsError extends Error {}
+
+const d = (s: string | null | undefined) => (s && s.trim() ? s.trim() : null);
+const handle = (s: string | null | undefined) => {
+  const v = d(s);
+  return v ? v.replace(/^@/, "").replace(/^https?:\/\/(www\.)?(instagram|tiktok)\.com\/@?/i, "").replace(/\/.*$/, "").toLowerCase() : null;
+};
+
+/* ───────────────────────── Clients & monthly plan ───────────────────────── */
+
+export const ClientInput = z.object({
+  name: z.string().min(1),
+  location: z.string().nullish(),
+  brand: z.string().nullish(),
+  instagramHandle: z.string().nullish(),
+  tiktokHandle: z.string().nullish(),
+  website: z.string().nullish(),
+  googleLocation: z.string().nullish(),
+  brandVoice: z.string().nullish(),
+  notes: z.string().nullish(),
+});
+
+export async function createClient(input: z.input<typeof ClientInput>, actor: string) {
+  const v = ClientInput.parse(input);
+  const db = await getDb();
+  let id = slugify(`${v.name} ${v.location ?? ""}`) || newId("c_");
+  const [exists] = await db.select({ id: schema.clients.id }).from(schema.clients).where(eq(schema.clients.id, id));
+  if (exists) id = `${id}-${newId().slice(-4).toLowerCase()}`;
+  const [{ n }] = await db.select({ n: sql<number>`count(*)::int` }).from(schema.clients);
+  const { DEFAULT_DELIVERABLES } = await import("./seed");
+  await db.insert(schema.clients).values({
+    id, name: v.name.trim(), location: d(v.location), brand: d(v.brand), instagramHandle: handle(v.instagramHandle),
+    tiktokHandle: handle(v.tiktokHandle), website: d(v.website), googleLocation: d(v.googleLocation),
+    brandVoice: d(v.brandVoice), notes: d(v.notes), sortOrder: n,
+  });
+  await db.insert(schema.deliverables).values(DEFAULT_DELIVERABLES.map((x, i) => ({ id: newId("dlv_"), clientId: id, sortOrder: i, ...x })));
+  await logActivity({ actor, action: "client.created", entityType: "client", entityId: id, clientId: id, summary: `Added business ${v.name}` });
+  return id;
+}
+
+export async function updateClient(id: string, patch: Partial<z.input<typeof ClientInput>> & { archived?: boolean }, actor: string) {
+  const db = await getDb();
+  const v = ClientInput.partial().parse(patch);
+  const set: Partial<typeof schema.clients.$inferInsert> = {};
+  if (v.name !== undefined) set.name = v.name.trim();
+  for (const k of ["location", "brand", "website", "googleLocation", "brandVoice", "notes"] as const) if (v[k] !== undefined) set[k] = d(v[k]);
+  if (v.instagramHandle !== undefined) set.instagramHandle = handle(v.instagramHandle);
+  if (v.tiktokHandle !== undefined) set.tiktokHandle = handle(v.tiktokHandle);
+  if (patch.archived !== undefined) set.archived = patch.archived;
+  if (Object.keys(set).length === 0) return;
+  await db.update(schema.clients).set(set).where(eq(schema.clients.id, id));
+  await logActivity({ actor, action: "client.updated", entityType: "client", entityId: id, clientId: id, summary: `Updated business details (${Object.keys(set).join(", ")})` });
+}
+
+export const DeliverableInput = z.object({
+  id: z.string().optional(),
+  clientId: z.string(),
+  title: z.string().min(1),
+  platform: z.enum(schema.PLATFORMS),
+  targetPerMonth: z.coerce.number().int().min(0).max(999),
+  active: z.boolean().optional(),
+});
+
+export async function upsertDeliverable(input: z.input<typeof DeliverableInput>, actor: string) {
+  const v = DeliverableInput.parse(input);
+  const db = await getDb();
+  if (v.id) {
+    await db.update(schema.deliverables)
+      .set({ title: v.title, platform: v.platform, targetPerMonth: v.targetPerMonth, ...(v.active !== undefined ? { active: v.active } : {}) })
+      .where(and(eq(schema.deliverables.id, v.id), eq(schema.deliverables.clientId, v.clientId)));
+    await logActivity({ actor, action: "deliverable.updated", entityType: "deliverable", entityId: v.id, clientId: v.clientId, summary: `Monthly plan: ${v.title} → ${v.targetPerMonth || "as needed"}/mo` });
+    return v.id;
+  }
+  const id = newId("dlv_");
+  const [{ n }] = await db.select({ n: sql<number>`count(*)::int` }).from(schema.deliverables).where(eq(schema.deliverables.clientId, v.clientId));
+  await db.insert(schema.deliverables).values({ id, clientId: v.clientId, title: v.title, platform: v.platform, targetPerMonth: v.targetPerMonth, sortOrder: n });
+  await logActivity({ actor, action: "deliverable.created", entityType: "deliverable", entityId: id, clientId: v.clientId, summary: `Monthly plan: added ${v.title} (${v.targetPerMonth || "as needed"}/mo)` });
+  return id;
+}
+
+export async function deleteDeliverable(id: string, actor: string) {
+  const db = await getDb();
+  const [row] = await db.delete(schema.deliverables).where(eq(schema.deliverables.id, id)).returning();
+  if (row) await logActivity({ actor, action: "deliverable.deleted", entityType: "deliverable", entityId: id, clientId: row.clientId, summary: `Monthly plan: removed ${row.title}` });
+}
+
+/* ───────────────────────── Asks ───────────────────────── */
+
+export const AskInput = z.object({
+  clientId: z.string().nullish(),
+  body: z.string().min(1),
+  attachments: z.array(z.object({ url: z.string(), name: z.string(), contentType: z.string().optional() })).default([]),
+});
+
+export async function createAsk(input: z.input<typeof AskInput>, actor: string) {
+  const v = AskInput.parse(input);
+  const db = await getDb();
+  const id = newId("ask_");
+  await db.insert(schema.asks).values({ id, clientId: v.clientId || null, body: v.body.trim(), attachments: v.attachments, createdBy: actor });
+  await logActivity({ actor, action: "ask.created", entityType: "ask", entityId: id, clientId: v.clientId, summary: `New ask: ${v.body.slice(0, 80)}` });
+  return id;
+}
+
+export async function updateAsk(id: string, patch: { status?: schema.AskStatus; claudeNote?: string | null; clientId?: string | null }, actor: string) {
+  const db = await getDb();
+  const set: Partial<typeof schema.asks.$inferInsert> = { updatedAt: new Date() };
+  if (patch.status) {
+    if (!schema.ASK_STATUSES.includes(patch.status)) throw new OpsError(`bad status ${patch.status}`);
+    set.status = patch.status;
+  }
+  if (patch.claudeNote !== undefined) set.claudeNote = d(patch.claudeNote);
+  if (patch.clientId !== undefined) set.clientId = patch.clientId || null;
+  const [row] = await db.update(schema.asks).set(set).where(eq(schema.asks.id, id)).returning();
+  if (!row) throw new OpsError(`ask ${id} not found`);
+  await logActivity({ actor, action: "ask.updated", entityType: "ask", entityId: id, clientId: row.clientId, summary: patch.status ? `Ask marked ${patch.status.replace("_", " ")}` : "Ask updated" });
+  return row;
+}
+
+/* ───────────────────────── Tasks ───────────────────────── */
+
+export const TaskInput = z.object({
+  clientId: z.string().nullish(),
+  title: z.string().min(1),
+  details: z.string().nullish(),
+  platform: z.enum(schema.PLATFORMS).nullish(),
+  status: z.enum(schema.TASK_STATUSES).default("todo"),
+  assignee: z.enum(schema.ASSIGNEES).default("unassigned"),
+  dueDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullish(),
+  month: z.string().refine(isMonth, "month must be YYYY-MM").nullish(),
+  deliverableId: z.string().nullish(),
+  askId: z.string().nullish(),
+});
+
+export async function createTask(input: z.input<typeof TaskInput>, actor: string) {
+  const v = TaskInput.parse(input);
+  const db = await getDb();
+  const id = newId("tsk_");
+  const month = v.month ?? (v.dueDate ? monthOfDate(v.dueDate) : currentMonth());
+  await db.insert(schema.tasks).values({
+    id, clientId: v.clientId || null, title: v.title.trim(), details: d(v.details), platform: v.platform ?? null,
+    status: v.status, assignee: v.assignee, dueDate: v.dueDate ?? null, month, deliverableId: v.deliverableId || null,
+    askId: v.askId || null, createdBy: actor, completedAt: v.status === "done" ? new Date() : null,
+  });
+  await logActivity({ actor, action: "task.created", entityType: "task", entityId: id, clientId: v.clientId, summary: `Task: ${v.title}` });
+  return id;
+}
+
+export async function updateTask(id: string, patch: Partial<z.input<typeof TaskInput>>, actor: string) {
+  const v = TaskInput.partial().parse(patch);
+  const db = await getDb();
+  const set: Partial<typeof schema.tasks.$inferInsert> = {};
+  if (v.title !== undefined) set.title = v.title.trim();
+  if (v.details !== undefined) set.details = d(v.details);
+  if (v.platform !== undefined) set.platform = v.platform ?? null;
+  if (v.assignee !== undefined) set.assignee = v.assignee;
+  if (v.clientId !== undefined) set.clientId = v.clientId || null;
+  if (v.deliverableId !== undefined) set.deliverableId = v.deliverableId || null;
+  if (v.dueDate !== undefined) set.dueDate = v.dueDate ?? null;
+  if (v.month !== undefined && v.month) set.month = v.month;
+  if (patch.status !== undefined && v.status) {
+    set.status = v.status;
+    set.completedAt = v.status === "done" ? new Date() : null;
+  }
+  const [row] = await db.update(schema.tasks).set(set).where(eq(schema.tasks.id, id)).returning();
+  if (!row) throw new OpsError(`task ${id} not found`);
+  await logActivity({ actor, action: "task.updated", entityType: "task", entityId: id, clientId: row.clientId, summary: set.status ? `Task “${row.title}” → ${set.status.replace("_", " ")}` : `Edited task “${row.title}”` });
+  return row;
+}
+
+export async function deleteTask(id: string, actor: string) {
+  const db = await getDb();
+  const [row] = await db.delete(schema.tasks).where(eq(schema.tasks.id, id)).returning();
+  if (row) await logActivity({ actor, action: "task.deleted", entityType: "task", entityId: id, clientId: row.clientId, summary: `Deleted task “${row.title}”` });
+}
+
+/* ───────────────────────── Content calendar ───────────────────────── */
+
+export const PostInput = z.object({
+  clientId: z.string(),
+  platform: z.enum(schema.POST_PLATFORMS),
+  format: z.enum(schema.POST_FORMATS).default("feed"),
+  caption: z.string().nullish(),
+  mediaUrls: z.array(z.string().url()).default([]),
+  scheduledFor: z.coerce.date().nullish(),
+  publishMode: z.enum(["auto", "manual"]).default("manual"),
+  status: z.enum(schema.POST_STATUSES).default("idea"),
+  taskId: z.string().nullish(),
+});
+
+export async function createPost(input: z.input<typeof PostInput>, actor: string) {
+  const v = PostInput.parse(input);
+  if (v.platform === "tiktok" && v.publishMode === "auto") v.publishMode = "manual"; // TikTok API posts are private-only until audited
+  const db = await getDb();
+  const id = newId("pst_");
+  await db.insert(schema.contentPosts).values({ id, ...v, caption: d(v.caption), scheduledFor: v.scheduledFor ?? null, taskId: v.taskId || null, createdBy: actor });
+  await logActivity({ actor, action: "post.created", entityType: "post", entityId: id, clientId: v.clientId, summary: `Calendar: ${v.platform} ${v.format}${v.scheduledFor ? ` for ${v.scheduledFor.toISOString().slice(0, 10)}` : ""}` });
+  return id;
+}
+
+export async function updatePost(id: string, patch: Partial<z.input<typeof PostInput>> & { permalink?: string | null }, actor: string) {
+  const v = PostInput.partial().parse(patch);
+  const db = await getDb();
+  const set: Partial<typeof schema.contentPosts.$inferInsert> = {};
+  if (v.format !== undefined) set.format = v.format;
+  if (v.caption !== undefined) set.caption = d(v.caption);
+  if (v.mediaUrls !== undefined) set.mediaUrls = v.mediaUrls;
+  if (v.scheduledFor !== undefined) set.scheduledFor = v.scheduledFor ?? null;
+  if (v.publishMode !== undefined) set.publishMode = v.publishMode;
+  if (patch.status !== undefined && v.status) {
+    if (v.status === "scheduled" || v.status === "publishing") throw new OpsError("Use approveDraft / schedulePost to schedule");
+    set.status = v.status;
+    if (v.status === "published") set.publishedAt = new Date();
+  }
+  if (patch.permalink !== undefined) set.permalink = d(patch.permalink);
+  const [row] = await db.update(schema.contentPosts).set(set).where(eq(schema.contentPosts.id, id)).returning();
+  if (!row) throw new OpsError(`post ${id} not found`);
+  if (row.platform === "tiktok" && row.publishMode === "auto") await db.update(schema.contentPosts).set({ publishMode: "manual" }).where(eq(schema.contentPosts.id, id));
+  await logActivity({ actor, action: "post.updated", entityType: "post", entityId: id, clientId: row.clientId, summary: set.status ? `Calendar post → ${set.status}` : "Edited calendar post" });
+  if (set.status === "published" && row.taskId) await updateTask(row.taskId, { status: "done" }, actor);
+  return row;
+}
+
+/** Human-only: put an approved Instagram auto-publish post on the schedule. */
+export async function schedulePost(id: string, actor: string) {
+  if (actor === "claude") throw new OpsError("Only a person can schedule a post");
+  const db = await getDb();
+  const [row] = await db.select().from(schema.contentPosts).where(eq(schema.contentPosts.id, id));
+  if (!row) throw new OpsError("post not found");
+  if (!row.scheduledFor) throw new OpsError("Set a date/time first");
+  if (row.platform !== "instagram" || row.publishMode !== "auto") throw new OpsError("Only Instagram posts set to auto-publish can be scheduled");
+  if (row.mediaUrls.length === 0) throw new OpsError("Add at least one media URL");
+  await db.update(schema.contentPosts).set({ status: "scheduled", error: null }).where(eq(schema.contentPosts.id, id));
+  await logActivity({ actor, action: "post.scheduled", entityType: "post", entityId: id, clientId: row.clientId, summary: `Scheduled Instagram ${row.format} for ${row.scheduledFor.toISOString()}` });
+}
+
+export async function deletePost(id: string, actor: string) {
+  const db = await getDb();
+  const [row] = await db.delete(schema.contentPosts).where(eq(schema.contentPosts.id, id)).returning();
+  if (row) await logActivity({ actor, action: "post.deleted", entityType: "post", entityId: id, clientId: row.clientId, summary: `Removed ${row.platform} post from calendar` });
+}
+
+/** Called by the cron route. Claims each due post (scheduled → publishing) before calling Instagram, so overlapping runs can't double-post. */
+export async function publishDuePosts(now = new Date()) {
+  const db = await getDb();
+  const due = await db.select().from(schema.contentPosts).where(and(
+    eq(schema.contentPosts.status, "scheduled"), eq(schema.contentPosts.publishMode, "auto"),
+    eq(schema.contentPosts.platform, "instagram"), lte(schema.contentPosts.scheduledFor, now),
+  ));
+  const results: Array<{ id: string; ok: boolean; error?: string }> = [];
+  for (const p of due) {
+    const [claimed] = await db.update(schema.contentPosts).set({ status: "publishing" })
+      .where(and(eq(schema.contentPosts.id, p.id), eq(schema.contentPosts.status, "scheduled"))).returning();
+    if (!claimed) continue;
+    const r = await publishInstagramPost(claimed);
+    if (r.ok) {
+      await db.update(schema.contentPosts).set({ status: "published", publishedAt: new Date(), externalId: r.externalId ?? null, permalink: r.permalink ?? null, error: null }).where(eq(schema.contentPosts.id, p.id));
+      await logActivity({ actor: "system", action: "post.published", entityType: "post", entityId: p.id, clientId: p.clientId, summary: `Published to Instagram${r.permalink ? `: ${r.permalink}` : ""}` });
+      if (p.taskId) await updateTask(p.taskId, { status: "done" }, "system");
+    } else {
+      await db.update(schema.contentPosts).set({ status: "failed", error: r.error }).where(eq(schema.contentPosts.id, p.id));
+      await logActivity({ actor: "system", action: "post.failed", entityType: "post", entityId: p.id, clientId: p.clientId, summary: `Instagram publish failed: ${r.error}` });
+    }
+    results.push({ id: p.id, ok: r.ok, error: r.ok ? undefined : r.error });
+  }
+  return results;
+}
+
+/* ───────────────────────── Drafts & approvals ───────────────────────── */
+
+export const DraftInput = z.object({
+  clientId: z.string().nullish(),
+  kind: z.enum(schema.DRAFT_KINDS),
+  title: z.string().min(1),
+  body: z.string().min(1),
+  meta: z.record(z.string(), z.unknown()).default({}),
+  taskId: z.string().nullish(),
+  askId: z.string().nullish(),
+});
+
+export async function createDraft(input: z.input<typeof DraftInput>, actor = "claude") {
+  const v = DraftInput.parse(input);
+  const db = await getDb();
+  // Validate the references each kind needs so approval can't fail later on a dangling id.
+  if (v.kind === "review_reply") {
+    const [r] = await db.select({ id: schema.reviews.id }).from(schema.reviews).where(eq(schema.reviews.id, String(v.meta.reviewId ?? "")));
+    if (!r) throw new OpsError("review_reply drafts need meta.reviewId of a synced Google review");
+  }
+  if (v.kind === "outreach_email" || v.kind === "outreach_dm") {
+    const [o] = await db.select().from(schema.outreach).where(eq(schema.outreach.id, String(v.meta.outreachId ?? "")));
+    if (!o) throw new OpsError(`${v.kind} drafts need meta.outreachId (create it with upsertOutreach first)`);
+    v.clientId = v.clientId ?? o.clientId;
+    if (v.kind === "outreach_email") {
+      const [c] = await db.select().from(schema.creators).where(eq(schema.creators.id, o.creatorId));
+      if (c?.doNotContact) throw new OpsError("This creator is marked do-not-contact");
+      if (!v.meta.to && !c?.email) throw new OpsError("No email address for this creator — set creator.email or meta.to");
+      v.meta.to = v.meta.to ?? c!.email;
+      if (!v.meta.subject) throw new OpsError("outreach_email drafts need meta.subject");
+    }
+  }
+  if (v.kind === "instagram_post" || v.kind === "tiktok_post") {
+    if (!v.meta.postId) {
+      if (!v.clientId) throw new OpsError("post drafts need clientId");
+      v.meta.postId = await createPost({
+        clientId: v.clientId, platform: v.kind === "instagram_post" ? "instagram" : "tiktok",
+        format: (v.meta.format as never) ?? (v.kind === "tiktok_post" ? "video" : "feed"),
+        caption: v.body, mediaUrls: (v.meta.mediaUrls as string[]) ?? [],
+        scheduledFor: (v.meta.scheduledFor as string) ?? null, status: "drafted", taskId: v.taskId,
+      }, actor);
+    } else {
+      await db.update(schema.contentPosts).set({ caption: v.body, status: "drafted" }).where(eq(schema.contentPosts.id, String(v.meta.postId)));
+    }
+  }
+  const id = newId("drf_");
+  await db.insert(schema.drafts).values({ id, clientId: v.clientId || null, kind: v.kind, title: v.title.trim(), body: v.body, meta: v.meta, taskId: v.taskId || null, askId: v.askId || null, createdBy: actor });
+  if (v.taskId) await db.update(schema.tasks).set({ status: "needs_review" }).where(and(eq(schema.tasks.id, v.taskId), inArray(schema.tasks.status, ["todo", "in_progress", "blocked"])));
+  await logActivity({ actor, action: "draft.created", entityType: "draft", entityId: id, clientId: v.clientId, summary: `Draft for review: ${v.title}` });
+  return id;
+}
+
+/** Edit a draft's text before approving (or Claude revising after a rejection). */
+export async function reviseDraft(id: string, patch: { body?: string; title?: string; meta?: Record<string, unknown> }, actor: string) {
+  const db = await getDb();
+  const [cur] = await db.select().from(schema.drafts).where(eq(schema.drafts.id, id));
+  if (!cur) throw new OpsError("draft not found");
+  if (cur.status === "sent") throw new OpsError("Already sent — can't edit");
+  const set: Partial<typeof schema.drafts.$inferInsert> = { updatedAt: new Date() };
+  if (patch.body !== undefined) set.body = patch.body;
+  if (patch.title !== undefined) set.title = patch.title;
+  if (patch.meta !== undefined) set.meta = { ...cur.meta, ...patch.meta };
+  if (actor === "claude" && cur.status === "rejected") set.status = "needs_review"; // resubmission
+  await db.update(schema.drafts).set(set).where(eq(schema.drafts.id, id));
+  if ((cur.kind === "instagram_post" || cur.kind === "tiktok_post") && patch.body !== undefined && cur.meta.postId)
+    await db.update(schema.contentPosts).set({ caption: patch.body }).where(eq(schema.contentPosts.id, String(cur.meta.postId)));
+  await logActivity({ actor, action: "draft.revised", entityType: "draft", entityId: id, clientId: cur.clientId, summary: `Revised draft “${cur.title}”` });
+}
+
+export async function rejectDraft(id: string, actor: string, note?: string) {
+  if (actor === "claude") throw new OpsError("Only a person can reject");
+  const db = await getDb();
+  const [row] = await db.update(schema.drafts).set({ status: "rejected", reviewedBy: actor, reviewedAt: new Date(), reviewNote: d(note), updatedAt: new Date() })
+    .where(and(eq(schema.drafts.id, id), eq(schema.drafts.status, "needs_review"))).returning();
+  if (!row) throw new OpsError("Draft is no longer awaiting review");
+  await logActivity({ actor, action: "draft.rejected", entityType: "draft", entityId: id, clientId: row.clientId, summary: `Sent back “${row.title}”${note ? `: ${note}` : ""}` });
+}
+
+export type ApproveOutcome = { status: schema.DraftStatus; message: string };
+
+/**
+ * Human approval. Claims the draft atomically (needs_review|failed → approved) so two people
+ * clicking Approve at once can't double-send, then performs the side effect for its kind.
+ */
+export async function approveDraft(id: string, actor: string, opts: { body?: string } = {}): Promise<ApproveOutcome> {
+  if (actor === "claude" || actor === "system") throw new OpsError("Only a person can approve");
+  const db = await getDb();
+  const [draft] = await db.update(schema.drafts)
+    .set({ status: "approved", reviewedBy: actor, reviewedAt: new Date(), error: null, updatedAt: new Date(), ...(opts.body !== undefined ? { body: opts.body } : {}) })
+    .where(and(eq(schema.drafts.id, id), inArray(schema.drafts.status, ["needs_review", "failed"]))).returning();
+  if (!draft) throw new OpsError("Someone already handled this draft");
+  await logActivity({ actor, action: "draft.approved", entityType: "draft", entityId: id, clientId: draft.clientId, summary: `Approved “${draft.title}”` });
+
+  const finish = async (r: IntegrationResult, okMsg: string, manualMsg: string): Promise<ApproveOutcome> => {
+    if (r.ok) {
+      await markDraftSent(id, actor, { threadId: r.threadId, permalink: r.permalink });
+      return { status: "sent", message: okMsg };
+    }
+    if (r.notConfigured) return { status: "approved", message: manualMsg };
+    await db.update(schema.drafts).set({ status: "failed", error: r.error }).where(eq(schema.drafts.id, id));
+    await logActivity({ actor: "system", action: "draft.failed", entityType: "draft", entityId: id, clientId: draft.clientId, summary: `Sending failed: ${r.error}` });
+    return { status: "failed", message: r.error };
+  };
+
+  switch (draft.kind) {
+    case "review_reply": {
+      const [review] = await db.select().from(schema.reviews).where(eq(schema.reviews.id, String(draft.meta.reviewId)));
+      if (!review) return finish({ ok: false, error: "Review no longer exists" }, "", "");
+      return finish(await replyToGoogleReview(review, draft.body), "Reply posted to Google.", "Approved. Google isn't connected yet, so copy the reply and post it from Google Maps, then click “Mark sent”.");
+    }
+    case "outreach_email": {
+      const [o] = await db.select().from(schema.outreach).where(eq(schema.outreach.id, String(draft.meta.outreachId)));
+      return finish(
+        await sendOutreachEmail({ to: String(draft.meta.to), subject: String(draft.meta.subject), body: draft.body, threadId: o?.gmailThreadId }),
+        `Email sent to ${String(draft.meta.to)}.`,
+        "Approved. Gmail isn't connected yet, so send it yourself, then click “Mark sent”.",
+      );
+    }
+    case "comment_reply": {
+      return finish(
+        await replyToInstagramComment({ clientId: draft.clientId ?? "", commentId: String(draft.meta.commentId), text: draft.body }),
+        "Reply posted on Instagram.",
+        "Approved. Reply from the Instagram app, then click “Mark sent”.",
+      );
+    }
+    case "instagram_post":
+    case "tiktok_post": {
+      const postId = String(draft.meta.postId);
+      await db.update(schema.contentPosts).set({ caption: draft.body, status: "approved" }).where(eq(schema.contentPosts.id, postId));
+      const [post] = await db.select().from(schema.contentPosts).where(eq(schema.contentPosts.id, postId));
+      if (post && post.platform === "instagram" && post.publishMode === "auto" && post.scheduledFor && post.mediaUrls.length > 0) {
+        await schedulePost(postId, actor);
+        return { status: "approved", message: `Approved and scheduled for ${post.scheduledFor.toLocaleString("en-US")}.` };
+      }
+      return { status: "approved", message: "Approved. It's on the calendar — post it from the app and mark it published." };
+    }
+    case "outreach_dm":
+      return { status: "approved", message: "Approved. Copy it, send it from the app, then click “Mark sent”." };
+    default:
+      return { status: "approved", message: "Approved." };
+  }
+}
+
+/** After a manual send (or a successful API send): record downstream effects. Idempotent. */
+export async function markDraftSent(id: string, actor: string, extra: { threadId?: string; permalink?: string } = {}) {
+  if (actor === "claude") throw new OpsError("Only a person can mark something as sent");
+  const db = await getDb();
+  const [draft] = await db.update(schema.drafts).set({ status: "sent", sentAt: new Date(), updatedAt: new Date() })
+    .where(and(eq(schema.drafts.id, id), eq(schema.drafts.status, "approved"))).returning();
+  if (!draft) return;
+  const now = new Date();
+  if (draft.kind === "review_reply") {
+    await db.update(schema.reviews).set({ replyText: draft.body }).where(eq(schema.reviews.id, String(draft.meta.reviewId)));
+  }
+  if (draft.kind === "outreach_email" || draft.kind === "outreach_dm") {
+    const [o] = await db.select().from(schema.outreach).where(eq(schema.outreach.id, String(draft.meta.outreachId)));
+    if (o) {
+      const first = !o.contactedAt;
+      const early = ["sourced", "shortlisted", "contacted", "followed_up", "no_response"].includes(o.stage);
+      await db.update(schema.outreach).set({
+        stage: early ? (first ? "contacted" : "followed_up") : o.stage,
+        contactedAt: o.contactedAt ?? now,
+        lastActivityAt: now,
+        nextFollowUpAt: early ? new Date(now.getTime() + 5 * 86400_000) : o.nextFollowUpAt,
+        ...(extra.threadId ? { gmailThreadId: extra.threadId } : {}),
+      }).where(eq(schema.outreach.id, o.id));
+    }
+  }
+  if (draft.taskId) await updateTask(draft.taskId, { status: "done" }, actor);
+  await logActivity({ actor, action: "draft.sent", entityType: "draft", entityId: id, clientId: draft.clientId, summary: `Sent “${draft.title}”${extra.permalink ? ` (${extra.permalink})` : ""}` });
+}
+
+/* ───────────────────────── Creators & outreach ───────────────────────── */
+
+export const CreatorInput = z.object({
+  id: z.string().optional(),
+  name: z.string().min(1),
+  instagramHandle: z.string().nullish(),
+  tiktokHandle: z.string().nullish(),
+  email: z.string().email().nullish().or(z.literal("")),
+  city: z.string().nullish(),
+  niche: z.string().nullish(),
+  instagramFollowers: z.coerce.number().int().nonnegative().nullish(),
+  tiktokFollowers: z.coerce.number().int().nonnegative().nullish(),
+  engagementRate: z.coerce.number().nonnegative().nullish(),
+  doNotContact: z.boolean().optional(),
+  notes: z.string().nullish(),
+  source: z.string().nullish(),
+});
+
+/** Creates or updates a creator; de-dupes on IG handle, TikTok handle, or email. */
+export async function upsertCreator(input: z.input<typeof CreatorInput>, actor: string) {
+  const v = CreatorInput.parse(input);
+  const db = await getDb();
+  const ig = handle(v.instagramHandle), tt = handle(v.tiktokHandle), email = d(v.email)?.toLowerCase() ?? null;
+  let existing: schema.Creator | undefined;
+  if (v.id) [existing] = await db.select().from(schema.creators).where(eq(schema.creators.id, v.id));
+  if (!existing && ig) [existing] = await db.select().from(schema.creators).where(eq(schema.creators.instagramHandle, ig));
+  if (!existing && tt) [existing] = await db.select().from(schema.creators).where(eq(schema.creators.tiktokHandle, tt));
+  if (!existing && email) [existing] = await db.select().from(schema.creators).where(eq(schema.creators.email, email));
+  const statsTouched = v.instagramFollowers != null || v.tiktokFollowers != null || v.engagementRate != null;
+  const values = {
+    name: v.name.trim(),
+    ...(ig || !existing ? { instagramHandle: ig ?? existing?.instagramHandle ?? null } : {}),
+    ...(tt || !existing ? { tiktokHandle: tt ?? existing?.tiktokHandle ?? null } : {}),
+    ...(email || !existing ? { email: email ?? existing?.email ?? null } : {}),
+    ...(v.city !== undefined ? { city: d(v.city) } : {}),
+    ...(v.niche !== undefined ? { niche: d(v.niche) } : {}),
+    ...(v.instagramFollowers != null ? { instagramFollowers: v.instagramFollowers } : {}),
+    ...(v.tiktokFollowers != null ? { tiktokFollowers: v.tiktokFollowers } : {}),
+    ...(v.engagementRate != null ? { engagementRate: v.engagementRate } : {}),
+    ...(statsTouched ? { statsUpdatedAt: new Date() } : {}),
+    ...(v.doNotContact !== undefined ? { doNotContact: v.doNotContact } : {}),
+    ...(v.notes !== undefined ? { notes: d(v.notes) } : {}),
+    ...(v.source !== undefined ? { source: d(v.source) } : {}),
+  };
+  if (existing) {
+    await db.update(schema.creators).set(values).where(eq(schema.creators.id, existing.id));
+    await logActivity({ actor, action: "creator.updated", entityType: "creator", entityId: existing.id, summary: `Updated creator ${v.name}` });
+    return existing.id;
+  }
+  const id = newId("cr_");
+  await db.insert(schema.creators).values({ id, ...values });
+  await logActivity({ actor, action: "creator.created", entityType: "creator", entityId: id, summary: `Added creator ${v.name}` });
+  return id;
+}
+
+export const OutreachInput = z.object({
+  clientId: z.string(),
+  creatorId: z.string(),
+  channel: z.enum(schema.OUTREACH_CHANNELS),
+  stage: z.enum(schema.OUTREACH_STAGES).optional(),
+  compType: z.enum(["gifted", "paid", "affiliate", "tbd"]).optional(),
+  notes: z.string().nullish(),
+  postUrl: z.string().nullish(),
+  disclosureOk: z.boolean().nullish(),
+  nextFollowUpAt: z.coerce.date().nullish(),
+});
+
+/** One relationship per (business, creator). Stage changes bump lastActivityAt. */
+export async function upsertOutreach(input: z.input<typeof OutreachInput>, actor: string) {
+  const v = OutreachInput.parse(input);
+  const db = await getDb();
+  const [creator] = await db.select().from(schema.creators).where(eq(schema.creators.id, v.creatorId));
+  if (!creator) throw new OpsError("creator not found");
+  const [existing] = await db.select().from(schema.outreach).where(and(eq(schema.outreach.clientId, v.clientId), eq(schema.outreach.creatorId, v.creatorId)));
+  const now = new Date();
+  const contacting = v.stage && ["contacted", "followed_up"].includes(v.stage);
+  if (creator.doNotContact && contacting) throw new OpsError(`${creator.name} is marked do-not-contact`);
+  if (existing) {
+    const set: Partial<typeof schema.outreach.$inferInsert> = { channel: v.channel };
+    if (v.stage) { set.stage = v.stage; set.lastActivityAt = now; if (contacting && !existing.contactedAt) set.contactedAt = now; }
+    if (v.compType) set.compType = v.compType;
+    if (v.notes !== undefined) set.notes = d(v.notes);
+    if (v.postUrl !== undefined) set.postUrl = d(v.postUrl);
+    if (v.disclosureOk !== undefined) set.disclosureOk = v.disclosureOk;
+    if (v.nextFollowUpAt !== undefined) set.nextFollowUpAt = v.nextFollowUpAt;
+    await db.update(schema.outreach).set(set).where(eq(schema.outreach.id, existing.id));
+    await logActivity({ actor, action: "outreach.updated", entityType: "outreach", entityId: existing.id, clientId: v.clientId, summary: `${creator.name}: ${v.stage ? `→ ${v.stage.replace("_", " ")}` : "updated"}` });
+    return existing.id;
+  }
+  const id = newId("out_");
+  await db.insert(schema.outreach).values({
+    id, clientId: v.clientId, creatorId: v.creatorId, channel: v.channel, stage: v.stage ?? "sourced", compType: v.compType ?? "tbd",
+    notes: d(v.notes), postUrl: d(v.postUrl), disclosureOk: v.disclosureOk ?? null, nextFollowUpAt: v.nextFollowUpAt ?? null,
+    contactedAt: contacting ? now : null, lastActivityAt: now,
+  });
+  await logActivity({ actor, action: "outreach.created", entityType: "outreach", entityId: id, clientId: v.clientId, summary: `${creator.name} added to outreach (${v.channel.replace("_", " ")})` });
+  return id;
+}
+
+/* ───────────────────────── Monthly metrics ───────────────────────── */
+
+export const MetricInput = z.object({
+  clientId: z.string(),
+  month: z.string().refine(isMonth, "month must be YYYY-MM"),
+  platform: z.enum(["instagram", "tiktok", "google"]),
+  views: z.coerce.number().int().nonnegative().nullish(),
+  reach: z.coerce.number().int().nonnegative().nullish(),
+  followers: z.coerce.number().int().nonnegative().nullish(),
+  engagements: z.coerce.number().int().nonnegative().nullish(),
+  source: z.enum(["manual", "api"]).default("manual"),
+});
+
+export async function upsertMetric(input: z.input<typeof MetricInput>, actor: string) {
+  const v = MetricInput.parse(input);
+  const db = await getDb();
+  const vals = { views: v.views ?? null, reach: v.reach ?? null, followers: v.followers ?? null, engagements: v.engagements ?? null, source: v.source, updatedAt: new Date() };
+  await db.insert(schema.monthlyMetrics).values({ id: newId("met_"), clientId: v.clientId, month: v.month, platform: v.platform, ...vals })
+    .onConflictDoUpdate({ target: [schema.monthlyMetrics.clientId, schema.monthlyMetrics.month, schema.monthlyMetrics.platform], set: vals });
+  if (v.source === "manual") await logActivity({ actor, action: "metric.updated", entityType: "metric", entityId: `${v.clientId}:${v.month}:${v.platform}`, clientId: v.clientId, summary: `${v.platform} ${v.month}: ${v.views ?? "—"} views` });
+}
+
+/* ───────────────────────── Google reviews (sync) ───────────────────────── */
+
+export async function upsertReviews(rows: Array<Omit<typeof schema.reviews.$inferInsert, "syncedAt">>) {
+  const db = await getDb();
+  for (const r of rows) {
+    const { id: _id, ...rest } = r;
+    await db.insert(schema.reviews).values({ ...r, syncedAt: new Date() })
+      .onConflictDoUpdate({ target: schema.reviews.id, set: { ...rest, syncedAt: new Date() } });
+  }
+}
+
+/* ───────────────────────── Monthly checklist ───────────────────────── */
+
+/**
+ * Turns a client's monthly plan into concrete tasks for `month`, topping up to each deliverable's target.
+ * Idempotent: re-running only adds what's missing. targetPerMonth 0 ("as needed") yields one umbrella task.
+ */
+export async function generateMonthTasks(clientId: string, month: string, actor: string) {
+  if (!isMonth(month)) throw new OpsError("month must be YYYY-MM");
+  const db = await getDb();
+  const dels = await db.select().from(schema.deliverables)
+    .where(and(eq(schema.deliverables.clientId, clientId), eq(schema.deliverables.active, true)));
+  let created = 0;
+  for (const dl of dels) {
+    const want = Math.max(1, dl.targetPerMonth);
+    const [{ n }] = await db.select({ n: sql<number>`count(*)::int` }).from(schema.tasks)
+      .where(and(eq(schema.tasks.deliverableId, dl.id), eq(schema.tasks.month, month)));
+    for (let i = n; i < want; i++) {
+      await db.insert(schema.tasks).values({
+        id: newId("tsk_"), clientId, month, deliverableId: dl.id, platform: dl.platform, createdBy: actor,
+        title: dl.targetPerMonth === 0 ? `${dl.title} (all, as they come in)` : `${dl.title} — ${i + 1} of ${dl.targetPerMonth}`,
+      });
+      created++;
+    }
+  }
+  if (created) await logActivity({ actor, action: "tasks.generated", entityType: "client", entityId: clientId, clientId, summary: `Created ${created} checklist task${created === 1 ? "" : "s"} for ${month}` });
+  return created;
+}
