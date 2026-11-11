@@ -1,5 +1,5 @@
 import "server-only";
-import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, ne, sql } from "drizzle-orm";
 import { z } from "zod";
 import { getDb, schema } from "./db";
 import { newId } from "./ids";
@@ -109,7 +109,8 @@ export async function findClientMatch(v: { name: string; city?: string | null; i
   const db = await getDb();
   const clients = await db
     .select({ id: schema.clients.id, name: schema.clients.name, location: schema.clients.location, instagramHandle: schema.clients.instagramHandle, website: schema.clients.website })
-    .from(schema.clients);
+    .from(schema.clients)
+    .where(ne(schema.clients.kind, "creator")); // Nora's own workspace is never a lead's business
   const ig = normalizeHandle(v.instagramHandle), host = websiteHost(v.website), key = nameCityKey(v.name, v.city);
   const bare = nameCityKey(v.name, "");
   return (
@@ -150,7 +151,7 @@ export type UpsertLeadResult = { id: string; created: boolean; name: string; sta
  * Opportunities are combined; notes are appended. Stage is applied to new leads, and to existing
  * leads still in found / qualified (a merge never drags a lead back from contacted or later).
  */
-export async function upsertLead(input: LeadInputT, actor: string): Promise<UpsertLeadResult> {
+export async function upsertLead(input: LeadInputT, actor: string, opts: { fillOnly?: boolean } = {}): Promise<UpsertLeadResult> {
   const v = LeadInput.parse(input);
   if (v.stage && isClaude(actor) && !(CLAUDE_STAGES as readonly string[]).includes(v.stage))
     throw new OpsError(`Claude can only set a lead to ${CLAUDE_STAGES.map((s) => STAGE_LABEL[s]).join(", ")}. A person moves it further.`);
@@ -162,6 +163,34 @@ export async function upsertLead(input: LeadInputT, actor: string): Promise<Upse
   if (!existing) {
     const match = (await leadIndex())({ website: c.website, instagramHandle: c.instagramHandle, name: v.name, city: c.city });
     if (match) [existing] = await db.select().from(schema.leads).where(eq(schema.leads.id, match.id));
+  }
+
+  if (existing && opts.fillOnly) {
+    // Untrusted input (the public collab form): never change what we know about an existing lead.
+    // Only empty descriptive fields are filled, "collab" is added, and the note (which carries the submitted
+    // contact details) is appended. Contact details, website, why, stats and stage are left alone, and a lead
+    // past qualified only gets the note.
+    const set: Partial<typeof schema.leads.$inferInsert> = {};
+    const early = ["found", "qualified"].includes(existing.stage);
+    if (early) {
+      for (const k of ["city", "category", "instagramHandle", "tiktokHandle", "googleMapsUrl"] as const) {
+        const val = c[k];
+        if (val && !existing[k]) set[k] = val;
+      }
+      if (v.opportunities?.length) {
+        const merged = schema.LEAD_OPPORTUNITIES.filter((o) => existing!.opportunities.includes(o) || v.opportunities!.includes(o));
+        if (merged.length !== existing.opportunities.length) set.opportunities = merged;
+      }
+    }
+    if (c.notes && !(existing.notes ?? "").includes(c.notes)) set.notes = existing.notes ? `${existing.notes}\n\n${c.notes}` : c.notes;
+    if (Object.keys(set).length === 0) return { id: existing.id, created: false, name: existing.name, stage: existing.stage };
+    set.updatedAt = new Date();
+    await db.update(schema.leads).set(set).where(eq(schema.leads.id, existing.id));
+    await logActivity({
+      actor, action: "lead.updated", entityType: "lead", entityId: existing.id,
+      summary: `Updated lead ${existing.name} (${Object.keys(set).filter((k) => k !== "updatedAt").join(", ")})`,
+    });
+    return { id: existing.id, created: false, name: existing.name, stage: existing.stage };
   }
 
   if (existing) {
@@ -303,8 +332,7 @@ export async function convertLead(id: string, actor: string, opts: z.input<typeo
     { name: lead.name, location: lead.city, instagramHandle: lead.instagramHandle, tiktokHandle: lead.tiktokHandle, website: lead.website, services, notes, leadId: lead.id },
     actor,
   );
-  await db.update(schema.leads).set({ stage: "won", convertedClientId: clientId, updatedAt: new Date() }).where(eq(schema.leads.id, id));
-  await logActivity({ actor, action: "lead.converted", entityType: "lead", entityId: id, clientId, summary: `Won: ${lead.name} is now a business we manage` });
+  // onboardClient marks the lead won, links it and logs lead.converted itself.
   return clientId;
 }
 

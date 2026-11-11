@@ -1,8 +1,8 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { requireUser, assigneeFor } from "@/lib/auth";
-import { getClientMonth } from "@/lib/reports";
-import { addMonths, currentMonth, formatDate, isMonth, monthLabel } from "@/lib/dates";
+import { getClientMonth, type ClientMonth } from "@/lib/reports";
+import { addMonths, currentMonth, formatDate, isMonth, monthLabel, today } from "@/lib/dates";
 import { schema } from "@/lib/db";
 import { Badge, Card, EmptyState, LinkButton, PlatformTag, ProgressBar, StatusBadge, cx, formatNumber, humanize } from "@/components/ui";
 import { MonthPicker } from "@/components/month-picker";
@@ -15,6 +15,10 @@ import type { Task } from "@/lib/schema";
 import { generateChecklistAction, quickAddTaskAction, saveMetricsAction } from "../actions";
 import { monthBounds } from "@/lib/integrations/time";
 import { getOnboardingStatus } from "@/lib/ops-onboarding";
+import { getCreatorStats } from "@/lib/ops-creator";
+import { activeCollabLeads, noraUnfiledTasks, openCollabRequests } from "@/lib/data";
+import { OnboardWelcome } from "@/components/onboard-welcome";
+import { CollabLeadsCard, CollabRequestsCard, CreatorHeader, CreatorRow, CreatorStatsCard } from "@/components/creator-workspace-cards";
 
 export const dynamic = "force-dynamic";
 
@@ -29,7 +33,7 @@ export default async function ClientPage({
   searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ month?: string; creators?: string }>;
+  searchParams: Promise<{ month?: string; creators?: string; welcome?: string; lead?: string }>;
 }) {
   const [{ id }, sp, user] = await Promise.all([params, searchParams, requireUser()]);
   const now = currentMonth();
@@ -38,6 +42,8 @@ export default async function ClientPage({
 
   const [data, onboarding] = await Promise.all([getClientMonth(id, month), getOnboardingStatus(id)]);
   if (!data) notFound();
+  // Nora's own workspace gets its own layout: collabs, her plan & tasks, stats. No reviews or creator outreach.
+  if (data.client.kind === "creator") return <CreatorWorkspace data={data} month={month} now={now} />;
   const { client, plan, outreach, metrics, posts } = data;
   // While Getting started is showing, its steps live in that card rather than twice on the page.
   const openTasks = onboarding.active ? data.openTasks.filter((t) => t.tag !== "onboarding") : data.openTasks;
@@ -57,18 +63,6 @@ export default async function ClientPage({
 
   /* plan */
   const needsChecklist = plan.some((p) => p.planned < Math.max(1, p.target));
-  const totalTarget = plan.reduce((a, p) => a + p.target, 0);
-  const totalDone = plan.reduce((a, p) => a + (p.target > 0 ? Math.min(p.done, p.target) : 0), 0);
-
-  /* outstanding: the plan checklist vs one-off (ad hoc) work. Ad hoc goes first when any of it is overdue. */
-  const adHoc = openTasks.filter(isAdHocTask);
-  const checklist = openTasks.filter((t) => !isAdHocTask(t));
-  const adHocFirst = adHoc.some((t) => isOverdue(t));
-  const sections = [
-    { key: "checklist", title: `${month === now ? "This month's" : `${mon}'s`} checklist`, tasks: checklist },
-    { key: "adhoc", title: "Ad hoc", tasks: adHoc },
-  ];
-  if (adHocFirst) sections.reverse();
 
   /* creators */
   const counts = Object.fromEntries(FILTERS.map((f) => [f, filterOutreach(outreach, f, monthStart, nextStart).length])) as Record<CreatorFilter, number>;
@@ -127,6 +121,8 @@ export default async function ClientPage({
         <MonthPicker month={month} current={now} />
       </div>
 
+      {sp.welcome === "1" && <OnboardWelcome name={client.name} fromLead={sp.lead === "1"} />}
+
       <div className="grid gap-6">
         {onboarding.active && (
           <Card
@@ -147,114 +143,20 @@ export default async function ClientPage({
 
         <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
           {/* a. Plan */}
-          <Card
-            title={`${month === now ? "This month's" : `${mon}'s`} plan`}
-            actions={<Link href={`/clients/${client.id}/settings#plan`} className="text-xs text-accent hover:underline">Edit plan</Link>}
-          >
-            {plan.length === 0 ? (
-              <EmptyState title="No monthly plan yet">
-                <Link href={`/clients/${client.id}/settings#plan`} className="text-accent hover:underline">Set what you deliver each month</Link> (posts, stories, videos, outreach…).
-              </EmptyState>
-            ) : (
-              <>
-                {totalTarget > 0 && (
-                  <p className="mb-3 text-sm">
-                    <span className="font-semibold tabular-nums">{totalDone} of {totalTarget}</span>{" "}
-                    <span className="text-muted">planned items done</span>
-                  </p>
-                )}
-                <ul className="flex flex-col gap-3">
-                  {plan.map((p) => (
-                    <li key={p.deliverable.id}>
-                      <div className="mb-1 flex items-baseline justify-between gap-3">
-                        <div className="min-w-0">
-                          <p className="truncate text-sm font-medium">{p.deliverable.title}</p>
-                          <PlatformTag platform={p.deliverable.platform} />
-                        </div>
-                        <p className="shrink-0 text-sm tabular-nums">
-                          {p.target > 0 ? (
-                            <><span className="font-semibold">{p.done}</span><span className="text-muted"> / {p.target}</span></>
-                          ) : (
-                            <span className="text-muted"><span className="font-semibold text-text">{p.done}</span> done · as needed</span>
-                          )}
-                        </p>
-                      </div>
-                      <ProgressBar value={p.done} max={p.target} />
-                    </li>
-                  ))}
-                </ul>
-                {needsChecklist && (
-                  <form action={generateChecklistAction.bind(null, client.id, month)} className="mt-4 rounded-lg bg-surface-2 p-3">
-                    <p className="mb-2 text-xs text-muted">
-                      Turn the plan into tasks for {mon} so progress can be tracked. Only adds what&apos;s missing.
-                    </p>
-                    <SubmitButton size="sm" pendingLabel="Creating…">Create {month === now ? "this month's" : `${monthLabel(month, "short")}`} checklist</SubmitButton>
-                  </form>
-                )}
-              </>
-            )}
-          </Card>
+          <PlanCard clientId={client.id} plan={plan} month={month} now={now} />
 
           {/* b. Outstanding */}
-          <Card title={`Outstanding${openTasks.length ? ` (${openTasks.length})` : ""}`} padded={false}>
-            {(data.pendingDrafts > 0 || data.unrepliedReviews > 0) && (
-              <div className="flex flex-wrap gap-2 border-b border-border px-4 py-3">
-                {data.pendingDrafts > 0 && (
-                  <Link href={`/review?client=${client.id}`} className="rounded-full bg-warn-soft px-3 py-1 text-xs font-medium text-warn hover:opacity-90">
-                    {data.pendingDrafts} draft{data.pendingDrafts === 1 ? "" : "s"} waiting for review →
-                  </Link>
-                )}
-                {data.unrepliedReviews > 0 && (
-                  <Link href={`/reviews?client=${client.id}`} className="rounded-full bg-info-soft px-3 py-1 text-xs font-medium text-info hover:opacity-90">
-                    {data.unrepliedReviews} Google review{data.unrepliedReviews === 1 ? "" : "s"} without a reply →
-                  </Link>
-                )}
-              </div>
-            )}
-
-            <div className="px-4 py-3">
-              {openTasks.length === 0 ? (
-                <EmptyState title="Nothing outstanding">
-                  {needsChecklist && plan.length > 0 ? "Create the checklist from the plan, or add a task below." : "All caught up. Add a task below if something comes up."}
-                </EmptyState>
-              ) : (
-                <div className="flex flex-col gap-5">
-                  {sections.filter((sec) => sec.tasks.length > 0).map((sec) => (
-                    <OutstandingSection key={sec.key} title={sec.title} tasks={sec.tasks} month={month} clientName={client.name} />
-                  ))}
-                </div>
-              )}
-            </div>
-
-            <div className="border-t border-border px-4 py-3">
-              <ActionForm action={quickAddTaskAction.bind(null, client.id, month)} resetOnSuccess ariaLabel="Quick add task">
-                <label className="label" htmlFor="qa-title">Add an ad hoc task for {mon}</label>
-                <div className="flex gap-2">
-                  <input id="qa-title" name="title" required className="input" placeholder="e.g. Film new menu reel" autoComplete="off" />
-                  <SubmitButton size="sm" pendingLabel="Adding…" className="shrink-0">Add</SubmitButton>
-                </div>
-                <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-3">
-                  <div>
-                    <label className="sr-only" htmlFor="qa-assignee">Assignee</label>
-                    <select id="qa-assignee" name="assignee" defaultValue={assigneeFor(user)} className="input">
-                      {schema.ASSIGNEES.map((a) => <option key={a} value={a}>{humanize(a)}</option>)}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="sr-only" htmlFor="qa-platform">Platform</label>
-                    <select id="qa-platform" name="platform" defaultValue="" className="input">
-                      <option value="">Any platform</option>
-                      {schema.PLATFORMS.map((p) => <option key={p} value={p}>{p === "tiktok" ? "TikTok" : humanize(p)}</option>)}
-                    </select>
-                  </div>
-                  <div className="col-span-2 sm:col-span-1">
-                    <label className="sr-only" htmlFor="qa-due">Due date</label>
-                    <input id="qa-due" name="dueDate" type="date" className="input" aria-label="Due date" />
-                  </div>
-                </div>
-              </ActionForm>
-            </div>
-          </Card>
+          <OutstandingCard
+            clientId={client.id}
+            clientName={client.name}
+            openTasks={openTasks}
+            month={month}
+            now={now}
+            pendingDrafts={data.pendingDrafts}
+            unrepliedReviews={data.unrepliedReviews}
+            needsChecklist={needsChecklist && plan.length > 0}
+            defaultAssignee={assigneeFor(user)}
+          />
         </div>
 
         {/* c. Creators */}
@@ -348,32 +250,7 @@ export default async function ClientPage({
         </section>
 
         {/* e. Content */}
-        <Card
-          title={`Content in ${mon}`}
-          actions={<Link href={`/calendar?client=${client.id}&month=${month}`} className="text-xs text-accent hover:underline">Open calendar</Link>}
-        >
-          {posts.length === 0 ? (
-            <EmptyState title="Nothing scheduled this month">
-              <Link href={`/calendar?client=${client.id}&month=${month}`} className="text-accent hover:underline">Plan posts on the calendar</Link>, or ask Claude to draft a month of captions.
-            </EmptyState>
-          ) : (
-            <ul className="divide-y divide-border">
-              {posts.map((p) => (
-                <li key={p.id}>
-                  <Link href={`/calendar?client=${client.id}&month=${month}`} className="flex flex-col gap-1 py-2.5 hover:bg-surface-2 sm:flex-row sm:items-center sm:gap-4 -mx-2 px-2 rounded-md">
-                    <span className="w-24 shrink-0 text-sm tabular-nums text-muted">{formatDate(p.scheduledFor)}</span>
-                    <span className="flex w-36 shrink-0 items-center gap-2">
-                      <PlatformTag platform={p.platform} />
-                      <span className="text-xs text-muted">{humanize(p.format)}</span>
-                    </span>
-                    <span className={cx("min-w-0 flex-1 truncate text-sm", !p.caption && "italic text-muted")}>{p.caption ? p.caption : "No caption yet"}</span>
-                    <span className="shrink-0"><StatusBadge status={p.status} /></span>
-                  </Link>
-                </li>
-              ))}
-            </ul>
-          )}
-        </Card>
+        <ContentCard clientId={client.id} posts={posts} month={month} />
       </div>
     </>
   );
@@ -426,5 +303,242 @@ function MetricTile({ label, value, prev, prevLabel, synced }: { label: string; 
       </p>
       <p className="mt-0.5 text-xs">{delta}</p>
     </div>
+  );
+}
+
+
+function PlanCard({ clientId, plan, month, now }: { clientId: string; plan: ClientMonth["plan"]; month: string; now: string }) {
+  const mon = monthLabel(month, "long");
+  const needsChecklist = plan.some((p) => p.planned < Math.max(1, p.target));
+  const totalTarget = plan.reduce((a, p) => a + p.target, 0);
+  const totalDone = plan.reduce((a, p) => a + (p.target > 0 ? Math.min(p.done, p.target) : 0), 0);
+  return (
+    <Card
+      title={`${month === now ? "This month's" : `${mon}'s`} plan`}
+      actions={<Link href={`/clients/${clientId}/settings#plan`} className="text-xs text-accent hover:underline">Edit plan</Link>}
+    >
+      {plan.length === 0 ? (
+        <EmptyState title="No monthly plan yet">
+          <Link href={`/clients/${clientId}/settings#plan`} className="text-accent hover:underline">Set what you deliver each month</Link> (posts, stories, videos, outreach…).
+        </EmptyState>
+      ) : (
+        <>
+          {totalTarget > 0 && (
+            <p className="mb-3 text-sm">
+              <span className="font-semibold tabular-nums">{totalDone} of {totalTarget}</span>{" "}
+              <span className="text-muted">planned items done</span>
+            </p>
+          )}
+          <ul className="flex flex-col gap-3">
+            {plan.map((p) => (
+              <li key={p.deliverable.id}>
+                <div className="mb-1 flex items-baseline justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-medium">{p.deliverable.title}</p>
+                    <PlatformTag platform={p.deliverable.platform} />
+                  </div>
+                  <p className="shrink-0 text-sm tabular-nums">
+                    {p.target > 0 ? (
+                      <><span className="font-semibold">{p.done}</span><span className="text-muted"> / {p.target}</span></>
+                    ) : (
+                      <span className="text-muted"><span className="font-semibold text-text">{p.done}</span> done · as needed</span>
+                    )}
+                  </p>
+                </div>
+                <ProgressBar value={p.done} max={p.target} />
+              </li>
+            ))}
+          </ul>
+          {needsChecklist && (
+            <form action={generateChecklistAction.bind(null, clientId, month)} className="mt-4 rounded-lg bg-surface-2 p-3">
+              <p className="mb-2 text-xs text-muted">
+                Turn the plan into tasks for {mon} so progress can be tracked. Only adds what&apos;s missing.
+              </p>
+              <SubmitButton size="sm" pendingLabel="Creating…">Create {month === now ? "this month's" : `${monthLabel(month, "short")}`} checklist</SubmitButton>
+            </form>
+          )}
+        </>
+      )}
+    </Card>
+  );
+}
+
+function OutstandingCard({
+  clientId,
+  clientName,
+  openTasks,
+  month,
+  now,
+  pendingDrafts,
+  unrepliedReviews,
+  needsChecklist,
+  defaultAssignee,
+  placeholder = "e.g. Film new menu reel",
+}: {
+  clientId: string;
+  clientName: string;
+  openTasks: Task[];
+  month: string;
+  now: string;
+  pendingDrafts: number;
+  unrepliedReviews: number;
+  needsChecklist: boolean;
+  defaultAssignee: string;
+  placeholder?: string;
+}) {
+  const mon = monthLabel(month, "long");
+  /* outstanding: the plan checklist vs one-off (ad hoc) work. Ad hoc goes first when any of it is overdue. */
+  const adHoc = openTasks.filter(isAdHocTask);
+  const checklist = openTasks.filter((t) => !isAdHocTask(t));
+  const adHocFirst = adHoc.some((t) => isOverdue(t));
+  const sections = [
+    { key: "checklist", title: `${month === now ? "This month's" : `${mon}'s`} checklist`, tasks: checklist },
+    { key: "adhoc", title: "Ad hoc", tasks: adHoc },
+  ];
+  if (adHocFirst) sections.reverse();
+  return (
+    <Card title={`Outstanding${openTasks.length ? ` (${openTasks.length})` : ""}`} padded={false}>
+      {(pendingDrafts > 0 || unrepliedReviews > 0) && (
+        <div className="flex flex-wrap gap-2 border-b border-border px-4 py-3">
+          {pendingDrafts > 0 && (
+            <Link href={`/review?client=${clientId}`} className="rounded-full bg-warn-soft px-3 py-1 text-xs font-medium text-warn hover:opacity-90">
+              {pendingDrafts} draft{pendingDrafts === 1 ? "" : "s"} waiting for review →
+            </Link>
+          )}
+          {unrepliedReviews > 0 && (
+            <Link href={`/reviews?client=${clientId}`} className="rounded-full bg-info-soft px-3 py-1 text-xs font-medium text-info hover:opacity-90">
+              {unrepliedReviews} Google review{unrepliedReviews === 1 ? "" : "s"} without a reply →
+            </Link>
+          )}
+        </div>
+      )}
+
+      <div className="px-4 py-3">
+        {openTasks.length === 0 ? (
+          <EmptyState title="Nothing outstanding">
+            {needsChecklist ? "Create the checklist from the plan, or add a task below." : "All caught up. Add a task below if something comes up."}
+          </EmptyState>
+        ) : (
+          <div className="flex flex-col gap-5">
+            {sections.filter((sec) => sec.tasks.length > 0).map((sec) => (
+              <OutstandingSection key={sec.key} title={sec.title} tasks={sec.tasks} month={month} clientName={clientName} />
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div className="border-t border-border px-4 py-3">
+        <ActionForm action={quickAddTaskAction.bind(null, clientId, month)} resetOnSuccess ariaLabel="Quick add task">
+          <label className="label" htmlFor="qa-title">Add an ad hoc task for {mon}</label>
+          <div className="flex gap-2">
+            <input id="qa-title" name="title" required className="input" placeholder={placeholder} autoComplete="off" />
+            <SubmitButton size="sm" pendingLabel="Adding…" className="shrink-0">Add</SubmitButton>
+          </div>
+          <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-3">
+            <div>
+              <label className="sr-only" htmlFor="qa-assignee">Assignee</label>
+              <select id="qa-assignee" name="assignee" defaultValue={defaultAssignee} className="input">
+                {schema.ASSIGNEES.map((a) => <option key={a} value={a}>{humanize(a)}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="sr-only" htmlFor="qa-platform">Platform</label>
+              <select id="qa-platform" name="platform" defaultValue="" className="input">
+                <option value="">Any platform</option>
+                {schema.PLATFORMS.map((p) => <option key={p} value={p}>{p === "tiktok" ? "TikTok" : humanize(p)}</option>)}
+              </select>
+            </div>
+            <div className="col-span-2 sm:col-span-1">
+              <label className="sr-only" htmlFor="qa-due">Due date</label>
+              <input id="qa-due" name="dueDate" type="date" className="input" aria-label="Due date" />
+            </div>
+          </div>
+        </ActionForm>
+      </div>
+    </Card>
+  );
+}
+
+function ContentCard({ clientId, posts, month }: { clientId: string; posts: ClientMonth["posts"]; month: string }) {
+  const mon = monthLabel(month, "long");
+  return (
+    <Card
+      title={`Content in ${mon}`}
+      actions={<Link href={`/calendar?client=${clientId}&month=${month}`} className="text-xs text-accent hover:underline">Open calendar</Link>}
+    >
+      {posts.length === 0 ? (
+        <EmptyState title="Nothing scheduled this month">
+          <Link href={`/calendar?client=${clientId}&month=${month}`} className="text-accent hover:underline">Plan posts on the calendar</Link>, or ask Claude to draft a month of captions.
+        </EmptyState>
+      ) : (
+        <ul className="divide-y divide-border">
+          {posts.map((p) => (
+            <li key={p.id}>
+              <Link href={`/calendar?client=${clientId}&month=${month}`} className="flex flex-col gap-1 py-2.5 hover:bg-surface-2 sm:flex-row sm:items-center sm:gap-4 -mx-2 px-2 rounded-md">
+                <span className="w-24 shrink-0 text-sm tabular-nums text-muted">{formatDate(p.scheduledFor)}</span>
+                <span className="flex w-36 shrink-0 items-center gap-2">
+                  <PlatformTag platform={p.platform} />
+                  <span className="text-xs text-muted">{humanize(p.format)}</span>
+                </span>
+                <span className={cx("min-w-0 flex-1 truncate text-sm", !p.caption && "italic text-muted")}>{p.caption ? p.caption : "No caption yet"}</span>
+                <span className="shrink-0"><StatusBadge status={p.status} /></span>
+              </Link>
+            </li>
+          ))}
+        </ul>
+      )}
+    </Card>
+  );
+}
+
+/* ------------------------------------------------------------ Nora's own section */
+
+/**
+ * /clients/noraeatsgood: Nora's creator business in one place. Top to bottom: collab requests,
+ * this month's plan + her own tasks, stats, collab leads, content. Same plan/task/content cards as a business.
+ */
+async function CreatorWorkspace({ data, month, now }: { data: ClientMonth; month: string; now: string }) {
+  const { client, plan, posts } = data;
+  const [collabs, stats, leads, unfiled] = await Promise.all([
+    openCollabRequests(5),
+    getCreatorStats({ days: 31 }),
+    activeCollabLeads(5),
+    noraUnfiledTasks(month),
+  ]);
+  // Her tasks: everything filed under her workspace, plus anything assigned to her with no business attached.
+  const seen = new Set(data.openTasks.map((t) => t.id));
+  const tasks = [...data.openTasks, ...unfiled.filter((t) => !seen.has(t.id))];
+  const needsChecklist = plan.some((p) => p.planned < Math.max(1, p.target));
+
+  return (
+    <>
+      <CreatorHeader client={client} />
+      <div className="grid gap-6">
+        <CollabRequestsCard newCount={collabs.newCount} reviewingCount={collabs.reviewingCount} latest={collabs.latest} />
+
+        <CreatorRow>
+          <PlanCard clientId={client.id} plan={plan} month={month} now={now} />
+          <OutstandingCard
+            clientId={client.id}
+            clientName={client.name}
+            openTasks={tasks}
+            month={month}
+            now={now}
+            pendingDrafts={data.pendingDrafts}
+            unrepliedReviews={0}
+            needsChecklist={needsChecklist && plan.length > 0}
+            defaultAssignee="nora"
+            placeholder="e.g. Edit the ramen reel"
+          />
+        </CreatorRow>
+
+        <CreatorRow>
+          <CreatorStatsCard platforms={[stats.platforms.instagram, stats.platforms.tiktok]} />
+          <CollabLeadsCard rows={leads.rows} total={leads.total} today={today()} />
+        </CreatorRow>
+
+        <ContentCard clientId={client.id} posts={posts} month={month} />
+      </div>
+    </>
   );
 }

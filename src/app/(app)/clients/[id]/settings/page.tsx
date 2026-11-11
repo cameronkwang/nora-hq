@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { getClient } from "@/lib/data";
+import { getClient, isCreatorClient } from "@/lib/data";
 import { schema } from "@/lib/db";
 import { Badge, Card, EmptyState, PageHeader, humanize } from "@/components/ui";
 import { ActionForm, ConfirmButton, SubmitButton } from "@/components/client-form";
@@ -71,7 +71,7 @@ export default async function ClientSettingsPage({ params }: { params: Promise<{
               </div>
             </div>
 
-            <div>
+            <div hidden={client.kind === "creator"}>
               <label className="label" htmlFor="s-gloc">Google Business location</label>
               <input id="s-gloc" name="googleLocation" defaultValue={client.googleLocation ?? ""} className="input font-mono text-xs" placeholder="accounts/123…/locations/456…" autoCapitalize="none" spellCheck={false} />
               <p className="mt-1 text-xs text-muted">
@@ -183,7 +183,8 @@ export default async function ClientSettingsPage({ params }: { params: Promise<{
             </Card>
           </section>
 
-          {/* Archive */}
+          {/* Archive — never offered for Nora's own workspace (only a restore, if it was archived before). */}
+          {(!isCreatorClient(client) || client.archived) && (
           <Card title={client.archived ? "Archived" : "Archive"}>
             <form action={setArchivedAction.bind(null, client.id, !client.archived)} className="flex flex-col items-start gap-3">
               <p className="text-sm text-muted">
@@ -198,6 +199,7 @@ export default async function ClientSettingsPage({ params }: { params: Promise<{
               )}
             </form>
           </Card>
+          )}
         </div>
       </div>
     </>

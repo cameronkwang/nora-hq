@@ -1,8 +1,8 @@
 import Link from "next/link";
-import { listClients } from "@/lib/data";
+import { isCreatorClient, listClients } from "@/lib/data";
 import { currentMonth, monthLabel } from "@/lib/dates";
-import { Badge, Card, EmptyState, LinkButton, PageHeader, ProgressBar, cx } from "@/components/ui";
-import { ClientAddForm } from "@/components/client-add-form";
+import { Badge, EmptyState, PageHeader, ProgressBar, cx } from "@/components/ui";
+import { NewClientLink } from "@/components/onboard-link";
 import { clientSummaries } from "./queries";
 
 export const dynamic = "force-dynamic";
@@ -11,7 +11,10 @@ export default async function ClientsPage({ searchParams }: { searchParams: Prom
   const sp = await searchParams;
   const showArchived = sp.archived === "1";
   const month = currentMonth();
-  const all = await listClients({ includeArchived: true });
+  const everyone = await listClients({ includeArchived: true });
+  // Nora's own workspace isn't a business: it gets a pinned link above the grid instead of a card.
+  const creator = everyone.find((c) => isCreatorClient(c)) ?? null; // pinned even if archived
+  const all = everyone.filter((c) => !isCreatorClient(c));
   const archivedCount = all.filter((c) => c.archived).length;
   const clients = showArchived ? all : all.filter((c) => !c.archived);
   const summaries = await clientSummaries(clients.map((c) => c.id), month);
@@ -28,19 +31,31 @@ export default async function ClientsPage({ searchParams }: { searchParams: Prom
                 {showArchived ? "Hide archived" : `Show archived (${archivedCount})`}
               </Link>
             )}
-            {clients.length > 0 && (
-              <LinkButton href="#add" variant="primary" size="sm" className="lg:hidden">Add business</LinkButton>
-            )}
+            <NewClientLink />
           </div>
         }
       />
 
-      <div className="grid gap-6 lg:grid-cols-[1fr_20rem]">
-        <div>
+      <div>
+        <div className="flex flex-col gap-3">
+          {creator && (
+            <Link
+              href={`/clients/${creator.id}`}
+              className="flex min-h-11 items-center justify-between gap-3 rounded-xl border border-accent/40 bg-accent-soft px-4 py-3 text-sm transition hover:border-accent"
+            >
+              <span className="min-w-0">
+                <span className="font-semibold text-accent">{creator.name}</span>{" "}
+                <span className="text-muted">· {creator.location ?? "own content"}</span>
+              </span>
+              <span className="shrink-0 text-xs font-medium text-accent">Own content &amp; collabs →</span>
+            </Link>
+          )}
           {clients.length === 0 ? (
-            <EmptyState title="No businesses yet">Add the first one with the form here — it sets up a plan and a getting-started checklist.</EmptyState>
+            <EmptyState title="No businesses yet">
+              <Link href="/clients/new" className="text-accent hover:underline">Add your first client</Link> — a name is enough. It sets up a plan and a short checklist, and Claude does the research.
+            </EmptyState>
           ) : (
-            <ul className="grid gap-3 sm:grid-cols-2">
+            <ul className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
               {clients.map((c) => {
                 const s = summaries.get(c.id)!;
                 const pct = s.target > 0 ? Math.round((s.done / s.target) * 100) : 0;
@@ -81,12 +96,6 @@ export default async function ClientsPage({ searchParams }: { searchParams: Prom
               })}
             </ul>
           )}
-        </div>
-
-        <div id="add" className="scroll-mt-4 lg:sticky lg:top-4 lg:self-start">
-          <Card title="Add business">
-            <ClientAddForm />
-          </Card>
         </div>
       </div>
     </>

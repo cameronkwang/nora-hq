@@ -68,7 +68,13 @@ export async function updateClient(id: string, patch: Partial<z.input<typeof Cli
   for (const k of ["location", "brand", "website", "googleLocation", "brandVoice", "notes"] as const) if (v[k] !== undefined) set[k] = d(v[k]);
   if (v.instagramHandle !== undefined) set.instagramHandle = handle(v.instagramHandle);
   if (v.tiktokHandle !== undefined) set.tiktokHandle = handle(v.tiktokHandle);
-  if (patch.archived !== undefined) set.archived = patch.archived;
+  if (patch.archived !== undefined) {
+    if (patch.archived) {
+      const [cur] = await db.select({ kind: schema.clients.kind }).from(schema.clients).where(eq(schema.clients.id, id));
+      if (cur?.kind === "creator") throw new OpsError("Nora's own workspace can't be archived.");
+    }
+    set.archived = patch.archived;
+  }
   if (Object.keys(set).length === 0) return;
   await db.update(schema.clients).set(set).where(eq(schema.clients.id, id));
   await logActivity({ actor, action: "client.updated", entityType: "client", entityId: id, clientId: id, summary: `Updated business details (${Object.keys(set).join(", ")})` });
@@ -174,7 +180,8 @@ export async function updateTask(id: string, patch: Partial<z.input<typeof TaskI
   if (v.title !== undefined) set.title = v.title.trim();
   if (v.details !== undefined) set.details = d(v.details);
   if (v.platform !== undefined) set.platform = v.platform ?? null;
-  if (v.assignee !== undefined) set.assignee = v.assignee;
+  // zod defaults still apply under .partial(), so only take assignee when the caller actually sent one.
+  if (patch.assignee !== undefined && v.assignee !== undefined) set.assignee = v.assignee;
   if (v.clientId !== undefined) set.clientId = v.clientId || null;
   if (v.deliverableId !== undefined) set.deliverableId = v.deliverableId || null;
   if (v.dueDate !== undefined) set.dueDate = v.dueDate ?? null;

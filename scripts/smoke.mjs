@@ -11,8 +11,9 @@ const EMAIL = process.env.SMOKE_EMAIL ?? "nora@local";
 const PASSWORD = process.env.SMOKE_PASSWORD ?? "dev";
 const CLIENT_IDS = ["yummy-red-bowl-richmond", "yummy-red-bowl-sc", "crab-o-clock", "poke-bros", "maxs-virginia-beach", "snf-kingdom"];
 const ROUTES = ["/", "/asks", "/asks/new", "/tasks", "/tasks?view=list", "/tasks?view=board", "/tasks?view=table", "/tasks/import", "/review", "/calendar", "/calendar/new",
-  "/creators", "/creators?view=table", "/creators?view=pipeline", "/creators/new", "/creators/import", "/leads", "/leads?view=board", "/leads/new", "/leads/import", "/numbers", "/reviews", "/activity", "/settings", "/settings/capture", "/stats", "/tasks?scope=adhoc", "/tasks?scope=plan", "/tasks?scope=all", "/clients",
+  "/creators", "/creators?view=table", "/creators?view=pipeline", "/creators/new", "/creators/import", "/leads", "/leads?view=board", "/leads/new", "/leads/import", "/numbers", "/reviews", "/activity", "/settings", "/settings/capture", "/stats", "/tasks?scope=adhoc", "/tasks?scope=plan", "/tasks?scope=all", "/clients", "/clients/new", "/clients/noraeatsgood", "/clients/noraeatsgood/settings", "/collabs",
   ...CLIENT_IDS.flatMap((id) => [`/clients/${id}`, `/clients/${id}/settings`])];
+const PUBLIC_ROUTES = ["/collab"];
 const VIEWPORTS = [{ name: "desktop", width: 1280, height: 900 }, { name: "mobile", width: 390, height: 844 }];
 
 const failures = [];
@@ -72,12 +73,18 @@ async function crawl(browser) {
     const { errors } = watch(page);
     for (const path of ROUTES) await checkPage(page, path, vp.name, errors);
     // first creator / draft / task / ask / post detail pages, if any exist
-    for (const [list, sel] of [["/creators", "a[href^='/creators/']:not([href='/creators/new']):not([href^='/creators/export']):not([href^='/creators/import'])"], ["/tasks?status=all", "a[href^='/tasks/']:not([href^='/tasks/import']):not([href^='/tasks/export'])"], ["/asks", "a[href^='/asks/']:not([href='/asks/new'])"], ["/calendar", "a[href^='/calendar/']:not([href^='/calendar/new'])"], ["/leads", "a[href^='/leads/']:not([href='/leads/new']):not([href^='/leads/import']):not([href^='/leads/export'])"]]) {
+    for (const [list, sel] of [["/creators", "a[href^='/creators/']:not([href='/creators/new']):not([href^='/creators/export']):not([href^='/creators/import'])"], ["/tasks?status=all", "a[href^='/tasks/']:not([href^='/tasks/import']):not([href^='/tasks/export'])"], ["/asks", "a[href^='/asks/']:not([href='/asks/new'])"], ["/calendar", "a[href^='/calendar/']:not([href^='/calendar/new'])"], ["/leads", "a[href^='/leads/']:not([href='/leads/new']):not([href^='/leads/import']):not([href^='/leads/export'])"], ["/collabs", "a[href^='/collabs/']"]]) {
       await page.goto(BASE + list, { waitUntil: "networkidle" });
       const href = await page.locator(sel).first().getAttribute("href").catch(() => null);
       if (href) await checkPage(page, href, vp.name, errors);
     }
     await context.close();
+    // public pages, logged out
+    const pub = await browser.newContext({ viewport: { width: vp.width, height: vp.height }, deviceScaleFactor: 1 });
+    const pp = await pub.newPage();
+    const pw = watch(pp);
+    for (const path of PUBLIC_ROUTES) await checkPage(pp, path, `${vp.name} logged-out`, pw.errors);
+    await pub.close();
   }
 }
 
@@ -497,32 +504,37 @@ async function flows(browser) {
       ]);
       await page.waitForTimeout(1000);
       await page.goto(`${BASE}/leads/${leadId}`, { waitUntil: "networkidle" });
-      const btn = page.locator("button:has-text('Start managing')").first();
-      await btn.waitFor({ timeout: 15000 });
-      await btn.click();
-      await page.waitForURL(/\/clients\/[^/?]+/, { timeout: 60000 });
+      const link = page.locator("a:has-text('Start managing')").first();
+      await link.waitFor({ timeout: 15000 });
+      await link.click();
+      await page.waitForURL(/\/clients\/new\?lead=/, { timeout: 60000 });
+      await page.waitForLoadState("networkidle");
+      if ((await page.locator("#onb-q").inputValue()) === "") throw new Error("New client form not prefilled from the lead");
+      await page.locator("button[type='submit']:has-text('Start managing')").click();
+      await page.waitForURL(/\/clients\/(?!new)[^/?]+\?welcome=1&lead=1/, { timeout: 60000 });
       await page.waitForLoadState("networkidle");
       const t = await page.locator("main").innerText();
       if (!t.includes("Getting started")) throw new Error("no Getting started card");
       if (!t.includes("Owner adds Nora as Manager on the Google Business Profile")) throw new Error("google step missing");
-      if (!t.includes("Get TikTok access")) throw new Error("social step missing");
+      if (!t.includes("Get Instagram & TikTok access")) throw new Error("social step missing");
+      if (!t.includes("Lead marked Won")) throw new Error("welcome banner missing");
       if (t.includes("Agree collab terms")) throw new Error("collab step shown though collab wasn't picked");
       const l = JSON.stringify(await tool("get_lead", { lead_id: leadId }));
       if (!l.includes('"stage":"won"') || !l.includes("convertedClientId")) throw new Error("lead not won/converted");
     });
 
     await step("Add business form creates a business with an onboarding checklist", async () => {
-      await page.goto(`${BASE}/clients`, { waitUntil: "networkidle" });
-      await page.fill("#new-name", `Sample Taco Stand ${stamp}`);
-      await page.fill("#new-location", "Norfolk");
-      for (const [v, on] of [["social", false], ["google", false], ["collab", true]]) await page.locator(`input[name='services'][value='${v}']`).setChecked(on);
-      await page.locator("button[type='submit']:has-text('Add business')").click();
-      await page.waitForURL(/\/clients\/(?!$)[^/?]+/, { timeout: 60000 });
+      await page.goto(`${BASE}/clients/new`, { waitUntil: "networkidle" });
+      await page.fill("#onb-q", `Sample Taco Stand ${stamp}`);
+      await page.fill("#onb-city", "Norfolk");
+      for (const [v, on] of [["social", false], ["google", false], ["collab", true]]) await page.locator(`input[name='services'][value='${v}']`).setChecked(on, { force: true });
+      await page.locator("button[type='submit']:has-text('Add client')").click();
+      await page.waitForURL(/\/clients\/(?!new)[^/?]+\?welcome=1/, { timeout: 60000 });
       await page.waitForLoadState("networkidle");
       const t = await page.locator("main").innerText();
       if (!t.includes(`Sample Taco Stand ${stamp}`)) throw new Error("not on the new business page");
       if (!t.includes("Getting started") || !t.includes("Agree collab terms")) throw new Error("collab onboarding checklist missing");
-      if (t.includes("Get TikTok access")) throw new Error("social steps shown though social wasn't picked");
+      if (t.includes("Get Instagram & TikTok access")) throw new Error("social steps shown though social wasn't picked");
     });
   }
 
@@ -587,7 +599,7 @@ async function flows(browser) {
       fd.append("file", new Blob([jpeg], { type: "image/jpeg" }), "bowl.jpg");
       const r = await capture(fd);
       if (r.status !== 200 || !r.json?.ok) throw new Error(`HTTP ${r.status} ${JSON.stringify(r.json)}`);
-      const asks = await tool("list_asks", {});
+      const asks = await tool("list_asks", { limit: 100 });
       const list = Array.isArray(asks) ? asks : asks.asks ?? asks.items ?? [];
       const a = list.find((x) => x.body?.includes(t)) ?? null;
       if (!a) throw new Error("captured ask not in list_asks");
@@ -652,6 +664,200 @@ async function flows(browser) {
   await context.close();
 }
 
+/* ── Nora's section, the public collab form, quick onboarding ── */
+const randIp = () => `10.${Math.floor(Math.random() * 250)}.${Math.floor(Math.random() * 250)}.${Math.floor(Math.random() * 250) + 1}`;
+
+/** Fills all three steps of /collab like a person would and sends it. Returns the text shown after sending. */
+async function fillCollab(page, opts) {
+  for (let attempt = 0; ; attempt++) {
+    try { return await fillCollabOnce(page, opts); } catch (e) {
+      if (attempt >= 2 || opts.sent?.flag) throw e;
+      await waitForServer();
+    }
+  }
+}
+async function tick(page, sel) {
+  const box = page.locator(sel).first();
+  if (await box.isChecked()) return;
+  await page.locator(`label:has(${sel})`).first().click();
+  if (!(await box.isChecked())) await box.check({ force: true });
+}
+async function fillCollabOnce(page, { business, contact = "Test Person", email, honeypot = false, wait = 4300, sent }) {
+  await page.goto(`${BASE}/collab`, { waitUntil: "networkidle" });
+  const t0 = Date.now();
+  await page.fill("input[name='businessName']", business);
+  await page.fill("input[name='contactName']", contact);
+  await page.fill("input[name='email']", email);
+  await page.fill("input[name='city']", "Testville");
+  await page.fill("input[name='instagram']", `@test_${business.replace(/\W+/g, "_").toLowerCase().slice(-24)}`);
+  if (honeypot) await page.evaluate(() => { const h = document.querySelector("input[name='homepage']"); if (h) h.value = "http://spam.example"; });
+  await page.locator("button:has-text('Next')").click();
+  await tick(page, "input[name='interests'][value='dine_in']");
+  await tick(page, "input[name='deliverables'][value='ig_reel']");
+  await tick(page, "input[name='compensation'][value='paid']");
+  await page.locator("select[name='budget']").selectOption("500_1000");
+  await page.locator("button:has-text('Next')").click();
+  await page.fill("textarea[name='special']", "Smoke test only - fake sample data. Wood-fired test dumplings.");
+  await tick(page, "input[name='ackDisclosure']");
+  await tick(page, "input[name='ackHonest']");
+  const left = wait - (Date.now() - t0);
+  if (left > 0) await page.waitForTimeout(left);
+  await page.locator("button[type='submit']:has-text('Send request')").click();
+  if (sent) sent.flag = true;
+  const done = page.locator("text=/Thanks, |Looks like a few requests|need a look|Something went wrong/").first();
+  await done.waitFor({ timeout: 30000 });
+  return done.innerText();
+}
+
+async function noraFlows(browser) {
+  console.log("\n== nora: collab form, Nora's section, quick onboarding");
+  const stamp = Date.now().toString(36);
+  const ip = randIp();
+  const pub = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, extraHTTPHeaders: { "x-forwarded-for": ip } });
+  const pp = await pub.newPage();
+  const pubErrs = watch(pp).errors;
+  const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+  await login(context);
+  const page = await context.newPage();
+  const { errors } = watch(page);
+  page.setDefaultTimeout(30000);
+
+  const biz = `Smoke Test Kitchen ${stamp}`;
+  let reqId = "", leadId = "";
+  await step("/collab logged out: 3 steps → thank-you", async () => {
+    const msg = await fillCollab(pp, { business: biz, email: `test+${stamp}@example.com`, sent: {} });
+    if (!/Thanks, Test!/.test(msg)) throw new Error(`no thank-you: ${msg}`);
+    if (new URL(pp.url()).pathname !== "/collab") throw new Error(`redirected to ${pp.url()}`);
+  });
+  await step("request shows in /collabs, Nora's section, For Nora asks and as a collab lead", async () => {
+    await page.goto(`${BASE}/collabs`, { waitUntil: "networkidle" });
+    const a = page.locator(`a[href^='/collabs/']`, { hasText: biz }).first();
+    await a.waitFor({ timeout: 15000 });
+    reqId = (await a.getAttribute("href")).split("/").pop().split("?")[0];
+    await page.goto(`${BASE}/clients/noraeatsgood`, { waitUntil: "networkidle" });
+    if (!(await page.locator(`text=${biz}`).count())) throw new Error("not on Nora's Collab requests card");
+    await page.goto(`${BASE}/asks?tab=nora`, { waitUntil: "networkidle" });
+    if (!(await page.locator(`text=${biz}`).count())) throw new Error("no ask in For Nora");
+    const r = await tool("get_collab_request", { id: reqId });
+    leadId = r.leadId ?? r.request?.leadId ?? "";
+    if (!leadId) throw new Error(`no leadId: ${JSON.stringify(r).slice(0, 300)}`);
+    const l = JSON.stringify(await tool("get_lead", { lead_id: leadId }));
+    if (!l.includes('"collab"') || !l.includes('"stage":"qualified"')) throw new Error(`lead not a qualified collab lead: ${l.slice(0, 300)}`);
+    await page.goto(`${BASE}/leads?opp=collab`, { waitUntil: "networkidle" });
+    if (!(await page.locator(`text=${biz}`).count())) throw new Error("not on /leads?opp=collab");
+  });
+  await step("Home: Nora's card first, with the new-requests chip", async () => {
+    await page.goto(`${BASE}/`, { waitUntil: "networkidle" });
+    const first = page.locator("main a[href^='/clients/']").filter({ hasNotText: /^New client$/ }).first();
+    const href = await first.getAttribute("href");
+    if (href !== "/clients/noraeatsgood") throw new Error(`first business card is ${href}`);
+    if (!(await page.locator("a[href='/collabs']", { hasText: /new collab request/ }).count())) throw new Error("no 'new collab requests' chip");
+  });
+  await step("honeypot-filled submit looks fine but stores nothing", async () => {
+    const bot = `Smoke Bot Diner ${stamp}`;
+    const p2 = await pub.newPage();
+    const msg = await fillCollab(p2, { business: bot, email: `bot+${stamp}@example.com`, honeypot: true });
+    await p2.close();
+    if (!/Thanks/.test(msg)) throw new Error(`bot didn't see thank-you: ${msg}`);
+    const list = JSON.stringify(await tool("list_collab_requests", { limit: 100 }));
+    if (list.includes(bot)) throw new Error("honeypot submission was stored");
+  });
+  await step("too-fast submit (<4s) is dropped silently", async () => {
+    const fast = `Smoke Fast Diner ${stamp}`;
+    const p2 = await pub.newPage();
+    const msg = await fillCollab(p2, { business: fast, email: `fast+${stamp}@example.com`, wait: 0 });
+    await p2.close();
+    if (!/Thanks/.test(msg)) throw new Error(`no thank-you: ${msg}`);
+    if (JSON.stringify(await tool("list_collab_requests", { limit: 100 })).includes(fast)) throw new Error("too-fast submission was stored");
+  });
+  await step("6th submit from the same IP within an hour is rate-limited", async () => {
+    let last = "";
+    for (let i = 2; i <= 6; i++) {
+      const p2 = await pub.newPage();
+      last = await fillCollab(p2, { business: `Smoke Rate Cafe ${stamp} #${i}`, email: `rate${i}+${stamp}@example.com`, sent: {} });
+      await p2.close();
+      if (i < 6 && !/Thanks/.test(last)) throw new Error(`submit ${i} refused early: ${last}`);
+    }
+    if (!/Looks like a few requests/.test(last)) throw new Error(`6th not limited: ${last}`);
+    const list = JSON.stringify(await tool("list_collab_requests", { limit: 100 }));
+    if (list.includes(`Smoke Rate Cafe ${stamp} #6`)) throw new Error("6th request was stored");
+    // a different address is still welcome
+    const other = await browser.newContext({ extraHTTPHeaders: { "x-forwarded-for": randIp() } });
+    const op = await other.newPage();
+    const m = await fillCollab(op, { business: `Smoke Other Cafe ${stamp}`, email: `other+${stamp}@example.com` });
+    await other.close();
+    if (!/Thanks/.test(m)) throw new Error(`other IP refused: ${m}`);
+  });
+  await step("/collabs/[id]: Accept → lead Talking, request Accepted", async () => {
+    await page.goto(`${BASE}/collabs/${reqId}`, { waitUntil: "networkidle" });
+    const t = await page.locator("main").innerText();
+    if (!t.includes(biz) || !t.includes("Wood-fired test dumplings")) throw new Error("answers not shown");
+    await page.locator("button:has-text('Accept')").first().click();
+    await page.locator("text=/Accepted/").first().waitFor({ timeout: 15000 });
+    await page.waitForTimeout(800);
+    const l = JSON.stringify(await tool("get_lead", { lead_id: leadId }));
+    if (!l.includes('"stage":"talking"')) throw new Error(`lead not talking: ${l.slice(0, 300)}`);
+    const r = JSON.stringify(await tool("get_collab_request", { id: reqId }));
+    if (!r.includes('"status":"accepted"')) throw new Error("request not accepted");
+  });
+  await step("/collabs stays private when logged out", async () => {
+    const res = await pp.goto(`${BASE}/collabs`, { waitUntil: "networkidle" });
+    if (!new URL(pp.url()).pathname.startsWith("/login")) throw new Error(`not redirected to login (HTTP ${res?.status()}, ${pp.url()})`);
+  });
+
+  await step("/clients/new: pasted Instagram link + name → business, IG handle, checklist, Claude ask", async () => {
+    const name = `Sample Tacos ${stamp}`;
+    await page.goto(`${BASE}/clients/new`, { waitUntil: "networkidle" });
+    await page.fill("#onb-q", "https://www.instagram.com/sampletacos/");
+    await page.locator("#onb-name").waitFor();
+    if (!(await page.locator("text=sampletacos").count())) throw new Error("no parsed-handle chip");
+    await page.fill("#onb-name", name);
+    await page.fill("#onb-city", "Testville");
+    await page.locator("button[type='submit']:has-text('Add client')").click();
+    await page.waitForURL(/\/clients\/(?!new)[^/?]+\?welcome=1/, { timeout: 60000 });
+    await page.waitForLoadState("networkidle");
+    const t = await page.locator("main").innerText();
+    if (!t.includes(name)) throw new Error("not on the new business page");
+    if (!t.includes("is set up")) throw new Error("no welcome banner");
+    if (!t.includes("@sampletacos")) throw new Error("IG handle not saved");
+    if (!t.includes("Getting started") || !t.includes("Kickoff call")) throw new Error("onboarding checklist missing");
+    const asks = JSON.stringify(await tool("list_asks", { limit: 100 }));
+    if (!asks.includes(name)) throw new Error("no Claude ask for the new business");
+  });
+  await step("/clients/new?lead=<id> converts a lead", async () => {
+    const lead = await tool("add_lead", { name: `Sample Bao Bar ${stamp}`, city: "Testville", website: `https://sample-bao-${stamp}.example.com`, opportunities: ["social"] });
+    await page.goto(`${BASE}/clients/new?lead=${lead.leadId}`, { waitUntil: "networkidle" });
+    if (!(await page.locator("#onb-q").inputValue()).includes("Sample Bao Bar")) throw new Error("name not prefilled");
+    await page.locator("button[type='submit']:has-text('Start managing')").click();
+    await page.waitForURL(/\/clients\/(?!new)[^/?]+\?welcome=1&lead=1/, { timeout: 60000 });
+    const l = JSON.stringify(await tool("get_lead", { lead_id: lead.leadId }));
+    if (!l.includes('"stage":"won"') || !l.includes("convertedClientId")) throw new Error(`lead not won: ${l.slice(0, 300)}`);
+    // double submit is safe: revisiting redirects to the business
+    await page.goto(`${BASE}/clients/new?lead=${lead.leadId}`, { waitUntil: "networkidle" });
+    if (new URL(page.url()).pathname === "/clients/new") throw new Error("converted lead didn't redirect to its business");
+  });
+  await step("Nora is pinned, not in the Businesses list", async () => {
+    await page.goto(`${BASE}/clients`, { waitUntil: "networkidle" });
+    const n = await page.locator("main a[href='/clients/noraeatsgood']").count();
+    if (n !== 1) throw new Error(`${n} links to Nora on /clients (want 1 pinned)`);
+    const sideBiz = await page.locator("aside a[href='/clients/noraeatsgood'], nav a[href='/clients/noraeatsgood']").count();
+    if (sideBiz < 1) throw new Error("no pinned Nora entry in the sidebar");
+    const listed = await page.evaluate(() => {
+      const h = [...document.querySelectorAll("p")].find((p) => p.textContent?.trim() === "Businesses");
+      const list = h?.parentElement?.parentElement;
+      return list ? !!list.querySelector("a[href='/clients/noraeatsgood']") : null;
+    });
+    if (listed) throw new Error("Nora listed under Businesses in the sidebar");
+    if (!(await page.locator("a[href='/clients/new']").count())) throw new Error("no New client link");
+  });
+
+  // `next dev` occasionally restarts itself near its memory limit; dropped connections aren't app bugs.
+  for (const e of errors) if (!DEV_BLIP.test(e)) fail(`nora flows: ${e}`);
+  for (const e of pubErrs) if (!DEV_BLIP.test(e)) fail(`nora flows (public): ${e}`);
+  await pub.close();
+  await context.close();
+}
+
 /* ── responsive QA: every route × 7 viewports × light/dark ── */
 const RESP_VIEWPORTS = [
   { name: "375", width: 375, height: 667, touch: true },
@@ -675,6 +881,7 @@ async function detailRoutes(browser) {
     ["/calendar", "a[href^='/calendar/']:not([href^='/calendar/new'])"],
     ["/review", "a[href^='/review?draft=']"],
     ["/leads", "a[href^='/leads/']:not([href='/leads/new']):not([href^='/leads/import']):not([href^='/leads/export'])"],
+    ["/collabs", "a[href^='/collabs/']"],
   ]) {
     await page.goto(BASE + list, { waitUntil: "networkidle" });
     const href = await page.locator(sel).first().getAttribute("href").catch(() => null);
@@ -775,12 +982,17 @@ async function responsive(browser) {
       viewport: { width: vp.width, height: vp.height }, deviceScaleFactor: 1, colorScheme: scheme,
       isMobile: !!vp.touch, hasTouch: !!vp.touch,
     });
+    const pub = await browser.newContext({
+      viewport: { width: vp.width, height: vp.height }, deviceScaleFactor: 1, colorScheme: scheme,
+      isMobile: !!vp.touch, hasTouch: !!vp.touch,
+    });
     await login(context);
-    const page = await context.newPage();
+    for (const [ctx, list] of [[context, routes], [pub, PUBLIC_ROUTES]]) {
+    const page = await ctx.newPage();
     const errs = [];
     page.on("console", (m) => { if (m.type() === "error") errs.push(m.text().slice(0, 200)); });
     page.on("pageerror", (e) => errs.push(e.message.slice(0, 200)));
-    for (const path of routes) {
+    for (const path of list) {
       const where = `${vp.name}${scheme === "dark" ? "d" : ""}`;
       let res, a, navErr = null;
       // `next dev` restarts itself when it nears its memory limit; that drops connections mid-run.
@@ -806,18 +1018,21 @@ async function responsive(browser) {
       if (a.covered) note(`${path}: tab bar covers content: ${a.covered.replace(/bottom=\d+ > tabbar top=\d+/, "")}`, where);
       for (const e of errs) note(`${path}: console error: ${e}`, where);
     }
+    }
     await context.close();
+    await pub.close();
   };
   const queue = [...combos];
   await Promise.all(Array.from({ length: 4 }, async () => { while (queue.length) await runCombo(queue.shift()); }));
   for (const [msg, where] of found) fail(`responsive ${msg} [${[...where].join(",")}]`);
-  console.log(`  checked ${pages} page loads (${routes.length} routes × ${combos.length} viewport/scheme combos)`);
+  console.log(`  checked ${pages} page loads (${routes.length} routes + ${PUBLIC_ROUTES.length} logged-out × ${combos.length} viewport/scheme combos)`);
 }
 
 const browser = await chromium.launch();
 try {
   if (MODE === "crawl" || MODE === "all") await crawl(browser);
   if (MODE === "flows" || MODE === "all") await flows(browser);
+  if (MODE === "flows" || MODE === "all" || MODE === "nora") await noraFlows(browser);
   if (MODE === "responsive") await responsive(browser);
   if (process.env.SHOTS_DIR) await shots(browser, process.env.SHOTS_DIR);
 } finally {

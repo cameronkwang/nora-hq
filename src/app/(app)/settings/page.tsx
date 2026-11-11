@@ -1,7 +1,7 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
 import { requireUser } from "@/lib/auth";
-import { listClients } from "@/lib/data";
+import { isCreatorClient, listClients } from "@/lib/data";
 import { relativeTime } from "@/lib/dates";
 import { listConnectionSummaries, type ConnectionSummary } from "@/lib/integrations/connections";
 import { envStatus } from "@/lib/integrations/env";
@@ -250,7 +250,7 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
                 <p className="text-sm text-muted">This Google account doesn&apos;t manage any Business Profiles yet. Ask each restaurant to add it as a manager, then reload.</p>
               )}
               <div className="grid gap-4 sm:grid-cols-2">
-                {clients.map((c) => {
+                {clients.filter((c) => !isCreatorClient(c)).map((c) => {
                   const id = `loc-${c.id}`;
                   const current = c.googleLocation ?? "";
                   const known = locations?.some((l) => l.name === current);
