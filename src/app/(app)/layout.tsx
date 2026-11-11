@@ -1,6 +1,7 @@
 import { requireUser } from "@/lib/auth";
 import { listClients, navCounts } from "@/lib/data";
 import { Sidebar } from "@/components/sidebar";
+import { LiveRefresh } from "@/components/live-refresh";
 
 export const dynamic = "force-dynamic";
 
@@ -18,6 +19,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       <main className="min-w-0 flex-1 pt-5 pb-[calc(var(--tabbar-h)_+_1.5rem)] pl-[max(1rem,env(safe-area-inset-left))] pr-[max(1rem,env(safe-area-inset-right))] md:px-8 md:py-8 xl:px-10">
         <div className="mx-auto max-w-7xl">{children}</div>
       </main>
+      <LiveRefresh />
     </div>
   );
 }
