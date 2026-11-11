@@ -321,6 +321,8 @@ export const connections = pgTable(
     expiresAt: timestamp("expires_at", { withTimezone: true }),
     status: text("status").$type<"ok" | "error" | "expired">().notNull().default("ok"),
     lastError: text("last_error"),
+    /** "client" = a managed business's account; "creator" = Nora's own @noraeatsgood accounts. */
+    purpose: text("purpose").$type<"client" | "creator">().notNull().default("client"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -405,3 +407,83 @@ export const leads = pgTable(
 );
 
 export type Lead = typeof leads.$inferSelect;
+
+/* ───────────────────────── Quick capture (iPhone Shortcut / Siri) ───────────────────────── */
+
+/** Per-person, revocable tokens for POST /api/asks/capture. Only a SHA-256 hash is stored. */
+export const captureTokens = pgTable("capture_tokens", {
+  id: text("id").primaryKey(),
+  userEmail: text("user_email").notNull(),
+  label: text("label").notNull(), // e.g. "Nora's iPhone"
+  tokenHash: text("token_hash").notNull().unique(),
+  lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
+  revokedAt: timestamp("revoked_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+/* ───────────────────────── Nora's own creator stats (@noraeatsgood) ───────────────────────── */
+
+export const CREATOR_PLATFORMS = ["instagram", "tiktok"] as const;
+export type CreatorPlatform = (typeof CREATOR_PLATFORMS)[number];
+
+/**
+ * One row per platform per day. Platforms only expose current totals (IG follower history is ~30 days,
+ * TikTok none), so a daily snapshot is the only way to build long-term growth history.
+ * Daily-flow metrics (views/reach/profileViews/newFollows) are for that day; totals are as of that day.
+ */
+export const creatorSnapshots = pgTable(
+  "creator_snapshots",
+  {
+    id: text("id").primaryKey(),
+    platform: text("platform").$type<CreatorPlatform>().notNull(),
+    date: text("date").notNull(), // "YYYY-MM-DD" (America/New_York)
+    followers: integer("followers"),
+    following: integer("following"),
+    posts: integer("posts"),
+    likesTotal: integer("likes_total"), // TikTok lifetime likes
+    views: integer("views"),
+    reach: integer("reach"),
+    profileViews: integer("profile_views"),
+    interactions: integer("interactions"),
+    newFollows: integer("new_follows"), // IG follower_count metric = gross new follows that day
+    source: text("source").$type<"api" | "manual">().notNull().default("api"),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("creator_snapshots_platform_date_uq").on(t.platform, t.date)],
+);
+
+/** Latest stats per post/video, refreshed by the daily sync. */
+export const creatorMedia = pgTable(
+  "creator_media",
+  {
+    id: text("id").primaryKey(),
+    platform: text("platform").$type<CreatorPlatform>().notNull(),
+    externalId: text("external_id").notNull(),
+    permalink: text("permalink"),
+    thumbnailUrl: text("thumbnail_url"),
+    caption: text("caption"),
+    mediaType: text("media_type"), // reel, carousel, image, video
+    postedAt: timestamp("posted_at", { withTimezone: true }),
+    views: integer("views"),
+    reach: integer("reach"),
+    likes: integer("likes"),
+    comments: integer("comments"),
+    shares: integer("shares"),
+    saves: integer("saves"),
+    clientId: text("client_id").references(() => clients.id, { onDelete: "set null" }), // tag a collab post to a business
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("creator_media_platform_ext_uq").on(t.platform, t.externalId)],
+);
+
+/** Audience breakdowns (city/age/gender), captured weekly. Shape: { city: [{key, value}], age: [...], gender: [...] }. */
+export const creatorAudience = pgTable("creator_audience", {
+  id: text("id").primaryKey(),
+  platform: text("platform").$type<CreatorPlatform>().notNull(),
+  capturedAt: timestamp("captured_at", { withTimezone: true }).notNull().defaultNow(),
+  data: jsonb("data").$type<Record<string, Array<{ key: string; value: number }>>>().notNull(),
+});
+
+export type CaptureToken = typeof captureTokens.$inferSelect;
+export type CreatorSnapshot = typeof creatorSnapshots.$inferSelect;
+export type CreatorMedia = typeof creatorMedia.$inferSelect;
