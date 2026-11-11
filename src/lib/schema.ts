@@ -33,6 +33,8 @@ export const clients = pgTable("clients", {
   brandVoice: text("brand_voice"), // tone, do/don't, signature dishes — fed to Claude
   notes: text("notes"),
   archived: boolean("archived").notNull().default(false),
+  /** "business" = a managed client; "creator" = Nora's own @noraeatsgood workspace (exactly one, pinned). */
+  kind: text("kind").$type<"business" | "creator">().notNull().default("business"),
   sortOrder: integer("sort_order").notNull().default(0),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
@@ -487,3 +489,38 @@ export const creatorAudience = pgTable("creator_audience", {
 export type CaptureToken = typeof captureTokens.$inferSelect;
 export type CreatorSnapshot = typeof creatorSnapshots.$inferSelect;
 export type CreatorMedia = typeof creatorMedia.$inferSelect;
+
+/* ───────────────────────── Collab intake (public form) ───────────────────────── */
+
+export const COLLAB_REQUEST_STATUSES = ["new", "reviewing", "accepted", "declined", "spam"] as const;
+export type CollabRequestStatus = (typeof COLLAB_REQUEST_STATUSES)[number];
+
+/**
+ * A submission from the public "Collab with Nora" form (/collab). Each one also upserts a lead
+ * (opportunity "collab") and drops an ask for Nora, so it shows up where she already looks.
+ * `answers` keeps the full form payload; the typed columns are what lists need.
+ */
+export const collabRequests = pgTable(
+  "collab_requests",
+  {
+    id: text("id").primaryKey(),
+    businessName: text("business_name").notNull(),
+    contactName: text("contact_name").notNull(),
+    email: text("email").notNull(),
+    city: text("city"),
+    instagramHandle: text("instagram_handle"),
+    collabType: text("collab_type"),
+    compensation: text("compensation"),
+    budget: text("budget"),
+    timeline: text("timeline"),
+    answers: jsonb("answers").$type<Record<string, unknown>>().notNull(),
+    status: text("status").$type<CollabRequestStatus>().notNull().default("new"),
+    leadId: text("lead_id").references(() => leads.id, { onDelete: "set null" }),
+    askId: text("ask_id").references(() => asks.id, { onDelete: "set null" }),
+    ipHash: text("ip_hash"), // salted hash for rate limiting only
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("collab_requests_status_idx").on(t.status)],
+);
+
+export type CollabRequest = typeof collabRequests.$inferSelect;
