@@ -1,9 +1,8 @@
 import Link from "next/link";
 import { listClients } from "@/lib/data";
 import { currentMonth, monthLabel } from "@/lib/dates";
-import { Badge, Card, EmptyState, PageHeader, ProgressBar, cx } from "@/components/ui";
-import { ActionForm, SubmitButton } from "@/components/client-form";
-import { createClientAction } from "./actions";
+import { Badge, Card, EmptyState, LinkButton, PageHeader, ProgressBar, cx } from "@/components/ui";
+import { ClientAddForm } from "@/components/client-add-form";
 import { clientSummaries } from "./queries";
 
 export const dynamic = "force-dynamic";
@@ -23,18 +22,23 @@ export default async function ClientsPage({ searchParams }: { searchParams: Prom
         title="Businesses"
         subtitle={`${clients.filter((c) => !c.archived).length} active · progress for ${monthLabel(month)}`}
         actions={
-          archivedCount > 0 ? (
-            <Link href={showArchived ? "/clients" : "/clients?archived=1"} className="text-sm text-muted underline-offset-2 hover:text-text hover:underline">
-              {showArchived ? "Hide archived" : `Show archived (${archivedCount})`}
-            </Link>
-          ) : null
+          <div className="flex items-center gap-3">
+            {archivedCount > 0 && (
+              <Link href={showArchived ? "/clients" : "/clients?archived=1"} className="text-sm text-muted underline-offset-2 hover:text-text hover:underline">
+                {showArchived ? "Hide archived" : `Show archived (${archivedCount})`}
+              </Link>
+            )}
+            {clients.length > 0 && (
+              <LinkButton href="#add" variant="primary" size="sm" className="lg:hidden">Add business</LinkButton>
+            )}
+          </div>
         }
       />
 
       <div className="grid gap-6 lg:grid-cols-[1fr_20rem]">
         <div>
           {clients.length === 0 ? (
-            <EmptyState title="No businesses yet">Add your first one with the form on this page.</EmptyState>
+            <EmptyState title="No businesses yet">Add the first one with the form here — it sets up a plan and a getting-started checklist.</EmptyState>
           ) : (
             <ul className="grid gap-3 sm:grid-cols-2">
               {clients.map((c) => {
@@ -79,34 +83,11 @@ export default async function ClientsPage({ searchParams }: { searchParams: Prom
           )}
         </div>
 
-        <Card title="Add business">
-          <ActionForm action={createClientAction} className="flex flex-col gap-3" ariaLabel="Add business">
-            <div>
-              <label className="label" htmlFor="new-name">Name</label>
-              <input id="new-name" name="name" required className="input" placeholder="e.g. Poke Bros" autoComplete="off" />
-            </div>
-            <div>
-              <label className="label" htmlFor="new-location">Location</label>
-              <input id="new-location" name="location" className="input" placeholder="e.g. Richmond" autoComplete="off" />
-            </div>
-            <div>
-              <label className="label" htmlFor="new-brand">Brand group <span className="font-normal">(optional)</span></label>
-              <input id="new-brand" name="brand" className="input" placeholder="Same name for every location" autoComplete="off" />
-            </div>
-            <div className="grid grid-cols-2 gap-2">
-              <div>
-                <label className="label" htmlFor="new-ig">Instagram</label>
-                <input id="new-ig" name="instagramHandle" className="input" placeholder="@handle" autoComplete="off" autoCapitalize="none" />
-              </div>
-              <div>
-                <label className="label" htmlFor="new-tt">TikTok</label>
-                <input id="new-tt" name="tiktokHandle" className="input" placeholder="@handle" autoComplete="off" autoCapitalize="none" />
-              </div>
-            </div>
-            <p className="text-xs text-muted">Starts with a default monthly plan you can edit on its settings page.</p>
-            <SubmitButton pendingLabel="Adding…">Add business</SubmitButton>
-          </ActionForm>
-        </Card>
+        <div id="add" className="scroll-mt-4 lg:sticky lg:top-4 lg:self-start">
+          <Card title="Add business">
+            <ClientAddForm />
+          </Card>
+        </div>
       </div>
     </>
   );

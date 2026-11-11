@@ -9,19 +9,22 @@ export const KIND_LABELS: Record<string, string> = {
   review_reply: "Review reply",
   outreach_email: "Outreach email",
   outreach_dm: "Outreach DM",
+  lead_email: "Pitch email",
+  lead_dm: "Pitch DM",
   comment_reply: "Comment reply",
   report: "Report",
   other: "Other",
 };
 
 /** Kinds that end up "approved" and wait for a person to send them by hand. */
-export const MANUAL_SEND_KINDS = ["review_reply", "outreach_email", "outreach_dm", "comment_reply"] as const;
+export const MANUAL_SEND_KINDS = ["review_reply", "outreach_email", "outreach_dm", "lead_email", "lead_dm", "comment_reply"] as const;
 
 export function kindLabel(kind: string, meta?: Record<string, unknown>) {
-  if (kind === "outreach_dm") {
+  if (kind === "outreach_dm" || kind === "lead_dm") {
+    const base = kind === "lead_dm" ? "Pitch DM" : "Outreach DM";
     const ch = meta?.channel;
-    if (ch === "instagram_dm") return "Outreach DM (Instagram)";
-    if (ch === "tiktok_dm") return "Outreach DM (TikTok)";
+    if (ch === "instagram_dm") return `${base} (Instagram)`;
+    if (ch === "tiktok_dm") return `${base} (TikTok)`;
   }
   return KIND_LABELS[kind] ?? kind.replace(/_/g, " ");
 }
@@ -38,6 +41,7 @@ export function textLimit(kind: string, meta?: Record<string, unknown>): { max: 
     case "comment_reply":
       return { max: 2200, label: "Instagram comment", hard: true };
     case "outreach_dm":
+    case "lead_dm":
       return meta?.channel === "instagram_dm" ? { max: 1000, label: "Instagram DM", hard: false } : null;
     default:
       return null;
@@ -77,5 +81,7 @@ export function draftWarnings(kind: string, body: string, meta?: Record<string, 
     if (!hasDisclosureLanguage(body))
       out.push({ tone: "warn", text: "No disclosure language. Mention it's gifted/a partnership and that posts need #ad or a paid-partnership label." });
   }
+  if ((kind === "lead_email" || kind === "lead_dm") && /\b(buy|purchase|paid|fake)\b[^.!?\n]*\breviews?\b/i.test(body))
+    out.push({ tone: "danger", text: "This mentions buying or faking reviews. Remove it before sending." });
   return out;
 }

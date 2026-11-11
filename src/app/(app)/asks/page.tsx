@@ -1,39 +1,68 @@
 import Link from "next/link";
-import { desc, eq, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, ne, or, sql, type SQL } from "drizzle-orm";
 import { getDb, schema } from "@/lib/db";
+import { assigneeFor, requireUser } from "@/lib/auth";
 import { relativeTime } from "@/lib/dates";
 import { askThreadState, listAskMessagesFor } from "@/lib/ops";
-import type { AskStatus } from "@/lib/schema";
 import { AskAttachments } from "@/components/ask-attachments";
+import { AskRouteBadges, personKey } from "@/components/ask-route";
 import { AskStatusButtons } from "@/components/ask-status-buttons";
 import { Badge, EmptyState, LinkButton, PageHeader, clientLabel, cx } from "@/components/ui";
 import { actorName } from "../activity/actor";
 
 export const dynamic = "force-dynamic";
 
-const TABS: Array<{ status: AskStatus; label: string; empty: string }> = [
-  { status: "new", label: "New", empty: "Nothing new. Drop an ask whenever something comes up." },
-  { status: "in_progress", label: "In progress", empty: "Nothing in progress right now." },
-  { status: "done", label: "Done", empty: "No finished asks yet." },
-  { status: "archived", label: "Archived", empty: "Nothing archived." },
+type TabKey = "inbox" | "me" | "ideas" | "done" | "archived";
+
+const TABS: Array<{ key: TabKey; label: string; empty: string }> = [
+  { key: "inbox", label: "Inbox", empty: "Inbox zero. Drop an ask whenever something comes up." },
+  { key: "me", label: "For me", empty: "Nothing routed to you right now." },
+  { key: "ideas", label: "Ideas", empty: "No ideas saved yet. Pick “Just an idea” on a new ask to park one here." },
+  { key: "done", label: "Done", empty: "No finished asks yet." },
 ];
+const ARCHIVED = { key: "archived" as const, label: "Archived", empty: "Nothing archived." };
+
+/** Old links used ?status=…; map them onto the new tabs. */
+const LEGACY: Record<string, TabKey> = { new: "inbox", in_progress: "inbox", done: "done", archived: "archived" };
 
 export default async function AsksPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
+  const user = await requireUser();
   const sp = await searchParams;
-  const status = (TABS.find((t) => t.status === sp.status)?.status ?? "new") as AskStatus;
-  const created = sp.created === "1";
+  const asked = typeof sp.tab === "string" ? sp.tab : typeof sp.status === "string" ? LEGACY[sp.status] : undefined;
+  const tab = [...TABS, ARCHIVED].find((t) => t.key === asked) ?? TABS[0];
+  const me = personKey(assigneeFor(user));
   const db = await getDb();
 
-  const [rows, counts] = await Promise.all([
+  const open = inArray(schema.asks.status, ["new", "in_progress"]);
+  // "For me": routed to me, or an open task from the ask is on my list.
+  const mine: SQL = me
+    ? and(open, or(eq(schema.asks.forWho, me), inArray(schema.asks.id,
+        db.select({ id: sql<string>`${schema.tasks.askId}` }).from(schema.tasks)
+          .where(and(eq(schema.tasks.assignee, me), ne(schema.tasks.status, "done"), sql`${schema.tasks.askId} is not null`)))))!
+    : sql`false`;
+  const where: Record<TabKey, SQL> = {
+    inbox: and(open, ne(schema.asks.kind, "idea"))!,
+    me: mine,
+    ideas: and(eq(schema.asks.kind, "idea"), ne(schema.asks.status, "archived"))!,
+    done: eq(schema.asks.status, "done"),
+    archived: eq(schema.asks.status, "archived"),
+  };
+  const count = (w: SQL) => db.select({ n: sql<number>`count(*)::int` }).from(schema.asks).where(w).then((r) => r[0]?.n ?? 0);
+
+  const [rows, nInbox, nMe, nIdeas] = await Promise.all([
     db
       .select({ ask: schema.asks, client: schema.clients })
       .from(schema.asks)
       .leftJoin(schema.clients, eq(schema.asks.clientId, schema.clients.id))
-      .where(eq(schema.asks.status, status))
-      .orderBy(status === "new" ? desc(schema.asks.createdAt) : desc(schema.asks.updatedAt))
+      .where(where[tab.key])
+      .orderBy(tab.key === "inbox" || tab.key === "me" ? desc(schema.asks.createdAt) : desc(schema.asks.updatedAt))
       .limit(200),
-    db.select({ status: schema.asks.status, n: sql<number>`count(*)::int` }).from(schema.asks).groupBy(schema.asks.status),
+    count(where.inbox),
+    count(where.me),
+    count(where.ideas),
   ]);
+  const counts: Partial<Record<TabKey, number>> = { inbox: nInbox, me: nMe, ideas: nIdeas };
+  const sent = typeof sp.created === "string";
 
   const ids = rows.map((r) => r.ask.id);
   const [taskCounts, draftCounts, threads] = ids.length
@@ -45,37 +74,35 @@ export default async function AsksPage({ searchParams }: { searchParams: Promise
     : [[], [], new Map<string, schema.AskMessage[]>()];
   const tasksFor = (id: string) => taskCounts.find((t) => t.askId === id)?.n ?? 0;
   const draftsFor = (id: string) => draftCounts.find((t) => t.askId === id)?.n ?? 0;
-  const countFor = (s: AskStatus) => counts.find((c) => c.status === s)?.n ?? 0;
-  const tab = TABS.find((t) => t.status === status)!;
 
   return (
     <div>
       <PageHeader
         title="Asks"
-        subtitle="Quick requests for Claude. It picks them up, does the work, and replies here."
+        subtitle="Anything you drop in — requests, ideas, FYIs. Claude sorts them and gets to work."
         actions={<LinkButton href="/asks/new" variant="primary">+ New ask</LinkButton>}
       />
 
-      {created && (
+      {sent && (
         <p role="status" className="mb-4 rounded-lg bg-ok-soft px-3 py-2 text-sm text-ok">
-          Ask sent. Claude picks it up next time it checks the queue.
+          Sent. Claude sorts it next time it checks in.
         </p>
       )}
 
-      <nav aria-label="Ask status" className="relative -mx-4 mb-4 overflow-x-auto px-4">
+      <nav aria-label="Ask lists" className="relative -mx-4 mb-4 overflow-x-auto px-4">
         <div className="flex min-w-max gap-1 rounded-lg bg-surface-2 p-1 text-sm">
           {TABS.map((t) => (
             <Link
-              key={t.status}
-              href={t.status === "new" ? "/asks" : `/asks?status=${t.status}`}
-              aria-current={t.status === status ? "page" : undefined}
+              key={t.key}
+              href={t.key === "inbox" ? "/asks" : `/asks?tab=${t.key}`}
+              aria-current={t.key === tab.key ? "page" : undefined}
               className={cx(
                 "inline-flex items-center rounded-md px-3 py-1.5 font-medium pointer-coarse:min-h-11",
-                t.status === status ? "bg-surface text-text shadow-sm" : "text-muted hover:text-text",
+                t.key === tab.key ? "bg-surface text-text shadow-sm" : "text-muted hover:text-text",
               )}
             >
               {t.label}
-              {countFor(t.status) > 0 && <span className="ml-1.5 text-xs tabular-nums text-muted">{countFor(t.status)}</span>}
+              {(counts[t.key] ?? 0) > 0 && <span className="ml-1.5 text-xs tabular-nums text-muted">{counts[t.key]}</span>}
             </Link>
           ))}
         </div>
@@ -83,7 +110,7 @@ export default async function AsksPage({ searchParams }: { searchParams: Promise
 
       {rows.length === 0 ? (
         <EmptyState title={tab.empty}>
-          {status === "new" && (
+          {tab.key === "inbox" && (
             <LinkButton href="/asks/new" variant="primary" size="sm" className="mt-3">
               Drop an ask
             </LinkButton>
@@ -143,6 +170,7 @@ export default async function AsksPage({ searchParams }: { searchParams: Promise
 
                 <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
                   <div className="flex flex-wrap items-center gap-1.5">
+                    <AskRouteBadges ask={ask} />
                     {convo === "claude_asked" && <Badge tone="warn">Claude asked a question</Badge>}
                     {convo === "replied" && <Badge tone="info">Replied</Badge>}
                     {nTasks > 0 && <Badge>{nTasks} task{nTasks === 1 ? "" : "s"}</Badge>}
@@ -157,6 +185,21 @@ export default async function AsksPage({ searchParams }: { searchParams: Promise
             );
           })}
         </ul>
+      )}
+
+      {tab.key === "done" && (
+        <p className="mt-4 text-center text-sm">
+          <Link href="/asks?tab=archived" className="inline-flex min-h-11 items-center text-muted hover:text-text hover:underline">
+            See archived asks
+          </Link>
+        </p>
+      )}
+      {tab.key === "archived" && (
+        <p className="mb-2 mt-4 text-center text-sm">
+          <Link href="/asks?tab=done" className="inline-flex min-h-11 items-center text-muted hover:text-text hover:underline">
+            ← Back to Done
+          </Link>
+        </p>
       )}
     </div>
   );

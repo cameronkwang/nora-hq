@@ -18,6 +18,7 @@ const MAIN: Item[] = [
   { href: "/tasks", label: "Tasks", icon: "list" },
   { href: "/calendar", label: "Calendar", icon: "calendar" },
   { href: "/creators", label: "Creators", icon: "users" },
+  { href: "/leads", label: "Leads", icon: "target" },
   { href: "/numbers", label: "Numbers", icon: "chart" },
 ];
 
@@ -378,7 +379,7 @@ function useNewAskShortcut() {
 
 type IconName =
   | "home" | "inbox" | "check" | "list" | "calendar" | "users" | "chart" | "star" | "clock" | "gear"
-  | "plus" | "menu" | "chevron" | "store" | "grid" | "logout";
+  | "plus" | "menu" | "chevron" | "store" | "grid" | "logout" | "target";
 
 const PATHS: Record<IconName, ReactNode> = {
   home: <path d="M3 10.5 12 3l9 7.5M5 9v11h5v-6h4v6h5V9" />,
@@ -429,6 +430,13 @@ const PATHS: Record<IconName, ReactNode> = {
     </>
   ),
   logout: <path d="M15 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3M10 16l-4-4 4-4M6 12h10" />,
+  target: (
+    <>
+      <circle cx="12" cy="12" r="8.5" />
+      <circle cx="12" cy="12" r="4.5" />
+      <circle cx="12" cy="12" r="0.8" fill="currentColor" />
+    </>
+  ),
 };
 
 function Icon({ name, className, strokeWidth = 1.8 }: { name: IconName; className?: string; strokeWidth?: number }) {

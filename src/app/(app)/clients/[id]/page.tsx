@@ -12,6 +12,7 @@ import { ViewsChart, type ViewsPoint } from "@/components/views-chart";
 import { TaskRow } from "@/components/task-row";
 import { generateChecklistAction, quickAddTaskAction, saveMetricsAction } from "../actions";
 import { monthBounds } from "@/lib/integrations/time";
+import { getOnboardingStatus } from "@/lib/ops-onboarding";
 
 export const dynamic = "force-dynamic";
 
@@ -33,9 +34,11 @@ export default async function ClientPage({
   const month = isMonth(sp.month) ? sp.month : now;
   const filter: CreatorFilter = FILTERS.includes(sp.creators as CreatorFilter) ? (sp.creators as CreatorFilter) : "all";
 
-  const data = await getClientMonth(id, month);
+  const [data, onboarding] = await Promise.all([getClientMonth(id, month), getOnboardingStatus(id)]);
   if (!data) notFound();
-  const { client, plan, openTasks, outreach, metrics, posts } = data;
+  const { client, plan, outreach, metrics, posts } = data;
+  // While Getting started is showing, its steps live in that card rather than twice on the page.
+  const openTasks = onboarding.active ? data.openTasks.filter((t) => t.tag !== "onboarding") : data.openTasks;
 
   // Month edges in the app timezone (America/New_York), matching the calendar and Instagram insights.
   const { start: monthStart, end: nextStart } = monthBounds(month);
@@ -117,6 +120,23 @@ export default async function ClientPage({
       </div>
 
       <div className="grid gap-6">
+        {onboarding.active && (
+          <Card
+            title="Getting started"
+            actions={<span className="text-xs font-medium tabular-nums text-muted">{onboarding.done} of {onboarding.total} done</span>}
+          >
+            <p className="-mt-1 mb-3 text-sm text-muted">A few one-time steps to get {client.name} set up. This card disappears when they&apos;re all ticked off.</p>
+            <ProgressBar value={onboarding.done} max={onboarding.total} />
+            <ul className="mt-2 divide-y divide-border">
+              {onboarding.tasks.map((t) => (
+                <li key={t.id}>
+                  <TaskRow task={t} clientName={client.name} showClient={false} />
+                </li>
+              ))}
+            </ul>
+          </Card>
+        )}
+
         <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
           {/* a. Plan */}
           <Card

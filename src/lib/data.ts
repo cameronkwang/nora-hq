@@ -1,5 +1,5 @@
 import "server-only";
-import { asc, eq, and, sql } from "drizzle-orm";
+import { asc, eq, and, ne, sql } from "drizzle-orm";
 import { getDb, schema } from "./db";
 
 /** Small shared read helpers used across pages. Module-specific queries live next to their pages. */
@@ -23,7 +23,7 @@ export async function getClient(id: string) {
 export async function navCounts() {
   const db = await getDb();
   const [[asks], [drafts]] = await Promise.all([
-    db.select({ n: sql<number>`count(*)::int` }).from(schema.asks).where(eq(schema.asks.status, "new")),
+    db.select({ n: sql<number>`count(*)::int` }).from(schema.asks).where(and(eq(schema.asks.status, "new"), ne(schema.asks.kind, "idea"))),
     db.select({ n: sql<number>`count(*)::int` }).from(schema.drafts).where(and(eq(schema.drafts.status, "needs_review"))),
   ]);
   return { newAsks: asks.n, needsReview: drafts.n };

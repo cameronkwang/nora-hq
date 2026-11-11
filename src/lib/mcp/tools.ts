@@ -22,6 +22,7 @@ import {
   upsertOutreach,
 } from "@/lib/ops";
 import { WORKING_RULES } from "./rules";
+import { checkPitch, draftLeadPitch } from "./tools-leads";
 import {
   businessName,
   clientNames,
@@ -442,12 +443,14 @@ export function registerTools(server: McpServer, ctx: Ctx) {
       "• outreach_email: meta.outreachId (from upsert_outreach) + meta.subject; meta.to optional (defaults to the creator's saved public email; if given it must match it). " +
       "body = the email. Personalised, says who we are + which business, clear offer, FTC line \"If you post, please tag it as gifted/#ad\", never ask for Google/Yelp reviews.\n" +
       "• outreach_dm: meta.outreachId + meta.channel (instagram_dm|tiktok_dm); meta.profileUrl optional (filled from the creator's handle). A person copies and sends it from the app.\n" +
+      "• lead_email / lead_dm (a pitch to a potential new client from list_leads — client_id not needed): meta.leadId required. lead_email needs meta.subject and goes to the lead's saved public email; " +
+      "lead_dm needs meta.channel (instagram_dm|tiktok_dm) and a saved handle. Same rules as draft_lead_pitch (short, written as Nora, no guarantees, easy opt-out). Leads marked lost/not_a_fit or with a pending pitch are refused.\n" +
       "• report: a client recap (use get_monthly_report). • other: anything else that needs a human look.\n" +
       "Always pass task_id when the draft fulfils a checklist task (it moves to needs_review and completes on send/publish) and ask_id when it answers an ask. " +
       "Refuses duplicates when a review/outreach/post already has a pending draft — revise that one instead. Do-not-contact creators are refused.",
     inputSchema: {
-      kind: z.enum(["instagram_post", "tiktok_post", "review_reply", "outreach_email", "outreach_dm", "report", "other"]),
-      client_id: clientId,
+      kind: z.enum(["instagram_post", "tiktok_post", "review_reply", "outreach_email", "outreach_dm", "lead_email", "lead_dm", "report", "other"]),
+      client_id: clientId.optional().describe("Business id from list_clients, e.g. \"poke-bros\". Required for every kind except lead_email / lead_dm."),
       title: z.string().min(1).max(200).describe("Short label shown in the review queue, e.g. \"IG reel: spicy crab boil\"."),
       body: z.string().min(1).max(20000).describe("The exact text to be posted/sent."),
       meta: z.record(z.string(), z.unknown()).default({}).describe("Kind-specific fields; see description."),
@@ -456,6 +459,17 @@ export function registerTools(server: McpServer, ctx: Ctx) {
     },
     annotations: WRITE,
   }, async (a) => run(async () => {
+    if (a.kind === "lead_email" || a.kind === "lead_dm") {
+      const leadId = String(a.meta.leadId ?? "");
+      if (!leadId) throw new ToolError(`${a.kind} needs meta.leadId (from list_leads).`);
+      const channel = a.kind === "lead_email" ? "email" : String(a.meta.channel ?? "");
+      if (channel !== "email" && channel !== "instagram_dm" && channel !== "tiktok_dm") throw new ToolError("lead_dm needs meta.channel: instagram_dm or tiktok_dm.");
+      return draftLeadPitch({
+        lead_id: leadId, channel, title: a.title, body: a.body, ask_id: a.ask_id,
+        subject: a.meta.subject === undefined ? undefined : String(a.meta.subject),
+      });
+    }
+    if (!a.client_id) throw new ToolError(`${a.kind} needs client_id.`);
     const client = await requireClient(a.client_id);
     const db = await getDb();
     const meta: Record<string, unknown> = { ...a.meta };
@@ -564,7 +578,7 @@ export function registerTools(server: McpServer, ctx: Ctx) {
     const warnings: string[] = [];
     const meta = a.meta ? { ...a.meta } : undefined;
     if (meta) {
-      for (const key of ["reviewId", "outreachId", "postId"]) {
+      for (const key of ["reviewId", "outreachId", "postId", "leadId"]) {
         if (key in meta && String(meta[key]) !== String(cur.meta[key] ?? "")) throw new ToolError(`Can't change meta.${key} — create a new draft instead.`);
       }
       if (cur.kind === "outreach_email" && meta.to !== undefined && String(meta.to).trim().toLowerCase() !== String(cur.meta.to ?? "").toLowerCase())
@@ -596,6 +610,7 @@ export function registerTools(server: McpServer, ctx: Ctx) {
     }
     if (cur.kind === "review_reply") checkReviewReply(body, warnings);
     if (cur.kind === "outreach_email" || cur.kind === "outreach_dm") checkOutreach(body, warnings);
+    if (cur.kind === "lead_email" || cur.kind === "lead_dm") checkPitch(cur.kind, body, warnings);
 
     await reviseDraft(a.draft_id, { body: a.body, title: a.title, meta }, ACTOR);
     return { ok: true, draftId: a.draft_id, status: "needs_review", resubmitted: cur.status === "rejected", warnings: warnings.length ? warnings : undefined };

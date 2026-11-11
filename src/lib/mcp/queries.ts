@@ -50,6 +50,9 @@ export function shapeAsk(a: schema.Ask, names: Map<string, string>, ctx: Ctx, th
   return {
     id: a.id,
     status: a.status,
+    kind: a.kind,
+    forWho: a.forWho,
+    ...(isUntriaged(a) ? { untriaged: true } : {}),
     businessId: a.clientId,
     business: a.clientId ? names.get(a.clientId) ?? a.clientId : null,
     body: a.body,
@@ -61,6 +64,14 @@ export function shapeAsk(a: schema.Ask, names: Map<string, string>, ctx: Ctx, th
     ...(thread ? shapeThread(a, thread) : {}),
   };
 }
+
+/** Not sorted yet: Claude should triage it (triage_ask) before anything else. */
+export function isUntriaged(a: Pick<schema.Ask, "kind" | "forWho">): boolean {
+  return a.kind === "auto" || a.forWho === "auto";
+}
+
+/** Asks a person (not Claude) owns. */
+const forPerson = (a: Pick<schema.Ask, "forWho">) => a.forWho === "cameron" || a.forWho === "nora";
 
 /**
  * The conversation on an ask, oldest first. `needsYourReply` is true when a person wrote after Claude's
@@ -244,6 +255,13 @@ export async function getBriefingData(ctx: Ctx) {
 
   const threads = await threadsFor([...newAsks, ...waitingAsks]);
 
+  // New asks for Claude: untriaged first (oldest first within each group). Asks routed to Cameron/Nora are
+  // theirs — they're listed separately unless a person wrote to Claude on them.
+  const shapedNew = newAsks.map((a) => ({ a, shaped: shapeAsk(a, names, ctx, threads.get(a.id) ?? []) }));
+  const forClaude = shapedNew.filter(({ a, shaped }) => !forPerson(a) || shaped.needsYourReply);
+  forClaude.sort((x, y) => Number(isUntriaged(y.a)) - Number(isUntriaged(x.a)));
+  const routedToPeople = shapedNew.filter((x) => !forClaude.includes(x));
+
   const businesses = await Promise.all(clients.map(async (c) => {
     const cm = await getClientMonth(c.id, month);
     if (!cm) return null;
@@ -268,9 +286,14 @@ export async function getBriefingData(ctx: Ctx) {
     month,
     timezone: process.env.APP_TZ ?? "America/New_York",
     now,
-    newAsks: newAsks.map((a) => shapeAsk(a, names, ctx, threads.get(a.id) ?? [])),
+    untriagedAsks: forClaude.filter((x) => isUntriaged(x.a)).length,
+    newAsks: forClaude.map((x) => x.shaped),
+    asksRoutedToPeople: routedToPeople.map(({ a }) => ({
+      id: a.id, kind: a.kind, forWho: a.forWho, business: a.clientId ? names.get(a.clientId) : null,
+      body: a.body.length > 200 ? `${a.body.slice(0, 200)}…` : a.body, createdAt: a.createdAt,
+    })),
     asksWaitingOnNora: waitingAsks.map((a) => ({
-      id: a.id, business: a.clientId ? names.get(a.clientId) : null, body: a.body.length > 300 ? `${a.body.slice(0, 300)}…` : a.body,
+      id: a.id, kind: a.kind, forWho: a.forWho, business: a.clientId ? names.get(a.clientId) : null, body: a.body.length > 300 ? `${a.body.slice(0, 300)}…` : a.body,
       claudeNote: a.claudeNote, updatedAt: a.updatedAt, ...shapeThread(a, threads.get(a.id) ?? []),
     })),
     draftsSentBack: sentBack.map((d) => shapeDraft(d, names)),

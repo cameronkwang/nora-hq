@@ -1,9 +1,9 @@
 import "server-only";
-import { and, asc, desc, eq, inArray, isNull, lt, lte, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, lt, lte, ne, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import { getDb, schema } from "./db";
 import { newId, slugify } from "./ids";
-import { currentMonth, isMonth, monthOfDate } from "./dates";
+import { currentMonth, isMonth, monthOfDate, today } from "./dates";
 import { logActivity } from "./activity";
 import { publishInstagramPost, replyToInstagramComment } from "./integrations/instagram";
 import { replyToGoogleReview } from "./integrations/google";
@@ -186,7 +186,24 @@ export async function updateTask(id: string, patch: Partial<z.input<typeof TaskI
   const [row] = await db.update(schema.tasks).set(set).where(eq(schema.tasks.id, id)).returning();
   if (!row) throw new OpsError(`task ${id} not found`);
   await logActivity({ actor, action: "task.updated", entityType: "task", entityId: id, clientId: row.clientId, summary: set.status ? `Task “${row.title}” → ${set.status.replace("_", " ")}` : `Edited task “${row.title}”` });
+  if (set.status === "done" && row.askId) await closeAskIfRoutedTaskDone(row.askId, row.assignee, actor);
   return row;
+}
+
+/**
+ * A request routed to Cameron or Nora becomes a task on their list. When that person finishes it (and the
+ * ask has no other open tasks), the ask is done too — so nobody has to close the same thing twice.
+ */
+async function closeAskIfRoutedTaskDone(askId: string, assignee: schema.Assignee, actor: string) {
+  const db = await getDb();
+  const [ask] = await db.select().from(schema.asks).where(eq(schema.asks.id, askId));
+  if (!ask || ask.status === "done" || ask.status === "archived") return;
+  if (ask.kind !== "request" || ask.forWho !== assignee) return;
+  const [open] = await db.select({ id: schema.tasks.id }).from(schema.tasks)
+    .where(and(eq(schema.tasks.askId, askId), ne(schema.tasks.status, "done"))).limit(1);
+  if (open) return;
+  await db.update(schema.asks).set({ status: "done", updatedAt: new Date() }).where(eq(schema.asks.id, askId));
+  await logActivity({ actor, action: "ask.updated", entityType: "ask", entityId: askId, clientId: ask.clientId, summary: "Ask marked done (its task was finished)" });
 }
 
 export async function deleteTask(id: string, actor: string) {
@@ -368,6 +385,24 @@ export async function createDraft(input: z.input<typeof DraftInput>, actor = "cl
       if (!v.meta.subject) throw new OpsError("outreach_email drafts need meta.subject");
     }
   }
+  if (v.kind === "lead_email" || v.kind === "lead_dm") {
+    const lead = await assertLeadContactable(v);
+    v.clientId = v.clientId ?? lead.convertedClientId ?? null;
+    if (v.kind === "lead_email") {
+      if (!v.meta.subject || !String(v.meta.subject).trim()) throw new OpsError("lead_email drafts need meta.subject");
+      const to = String(v.meta.to ?? lead.contactEmail ?? "").trim().toLowerCase();
+      if (!to) throw new OpsError(`No email address for ${lead.name} — save their public business email on the lead or set meta.to`);
+      if (!z.email().safeParse(to).success) throw new OpsError(`“${to}” doesn't look like an email address`);
+      v.meta.to = to;
+    } else {
+      const channel = v.meta.channel;
+      if (channel !== "instagram_dm" && channel !== "tiktok_dm") throw new OpsError("lead_dm drafts need meta.channel: instagram_dm or tiktok_dm");
+      // The DM link always comes from the lead's saved handle — never from a URL passed in.
+      const url = leadProfileUrl(lead, channel);
+      if (url) v.meta.profileUrl = url;
+      else delete v.meta.profileUrl;
+    }
+  }
   if (v.kind === "instagram_post" || v.kind === "tiktok_post") {
     if (!v.meta.postId) {
       if (!v.clientId) throw new OpsError("post drafts need clientId");
@@ -394,12 +429,26 @@ export async function reviseDraft(id: string, patch: { body?: string; title?: st
   const [cur] = await db.select().from(schema.drafts).where(eq(schema.drafts.id, id));
   if (!cur) throw new OpsError("draft not found");
   if (cur.status === "sent") throw new OpsError("Already sent — can't edit");
+  if ((cur.kind === "lead_email" || cur.kind === "lead_dm") && patch.meta) {
+    if ("leadId" in patch.meta && String(patch.meta.leadId) !== String(cur.meta.leadId ?? "")) throw new OpsError("Can't change which lead a pitch is for — create a new draft instead.");
+    if (actor === "claude" && cur.kind === "lead_email" && patch.meta.to !== undefined && String(patch.meta.to).trim().toLowerCase() !== String(cur.meta.to ?? "").toLowerCase())
+      throw new OpsError("Can't change the recipient — pitches only go to the lead's saved public business email.");
+    if (cur.kind === "lead_dm" && ("channel" in patch.meta || "profileUrl" in patch.meta)) {
+      // Channel may change (IG ↔ TikTok); the profile link is always rebuilt from the lead's saved handle.
+      const channel = patch.meta.channel ?? cur.meta.channel;
+      if (channel !== "instagram_dm" && channel !== "tiktok_dm") throw new OpsError("lead_dm drafts need meta.channel: instagram_dm or tiktok_dm");
+      const [lead] = await db.select().from(schema.leads).where(eq(schema.leads.id, String(cur.meta.leadId ?? "")));
+      const url = lead ? leadProfileUrl(lead, channel) : null;
+      patch = { ...patch, meta: { ...patch.meta, channel, profileUrl: url ?? undefined } };
+    }
+  }
   const set: Partial<typeof schema.drafts.$inferInsert> = { updatedAt: new Date() };
   if (patch.body !== undefined) set.body = patch.body;
   if (patch.title !== undefined) set.title = patch.title;
   if (patch.meta !== undefined) set.meta = { ...cur.meta, ...patch.meta };
   if (actor === "claude" && cur.status === "rejected") {
     if (cur.kind === "outreach_email" || cur.kind === "outreach_dm") await assertContactable(cur);
+    if (cur.kind === "lead_email" || cur.kind === "lead_dm") await assertLeadContactable(cur);
     set.status = "needs_review"; // resubmission
   }
   await db.update(schema.drafts).set(set).where(eq(schema.drafts.id, id));
@@ -429,6 +478,7 @@ export async function approveDraft(id: string, actor: string, opts: { body?: str
   const [cur] = await db.select().from(schema.drafts).where(eq(schema.drafts.id, id));
   if (!cur) throw new OpsError("draft not found");
   if (cur.kind === "outreach_email" || cur.kind === "outreach_dm") await assertContactable(cur);
+  if (cur.kind === "lead_email" || cur.kind === "lead_dm") await assertLeadContactable(cur);
   if ((cur.kind === "instagram_post" || cur.kind === "tiktok_post") && cur.meta.postId) {
     // The reviewer approved what the review page showed them. If the post's media, time or format changed since
     // (e.g. Claude edited it), refuse rather than schedule something the person never saw.
@@ -488,6 +538,16 @@ export async function approveDraft(id: string, actor: string, opts: { body?: str
     }
     case "outreach_dm":
       return { status: "approved", message: "Approved. Copy it, send it from the app, then click “Mark sent”." };
+    case "lead_email": {
+      // Same Gmail path (and CAN-SPAM footer) as creator outreach.
+      return finish(
+        await sendOutreachEmail({ to: String(draft.meta.to), subject: String(draft.meta.subject), body: draft.body }),
+        `Email sent to ${String(draft.meta.to)}.`,
+        "Approved. Gmail isn't connected yet, so send it yourself, then click “Mark sent”.",
+      );
+    }
+    case "lead_dm":
+      return { status: "approved", message: "Approved. Copy it, send it from the app, then click “Mark sent”." };
     default:
       return { status: "approved", message: "Approved." };
   }
@@ -505,6 +565,26 @@ async function assertContactable(draft: Pick<schema.Draft, "meta">) {
   if (!row) throw new OpsError("The outreach record for this draft is missing");
   if (row.c.doNotContact) throw new OpsError(`${row.c.name} is marked do-not-contact — don't send this.`);
   if (row.o.stage === "declined") throw new OpsError(`${row.c.name} declined — don't send this. Move the outreach out of “declined” first if that's wrong.`);
+}
+
+/**
+ * Refuses pitches to a lead that's gone (deleted) or marked lost / not a fit ("not interested").
+ * Checked at draft creation, Claude's resubmission, approve and mark-sent.
+ */
+/** Profile link for a lead DM, built only from the lead's saved handle. */
+function leadProfileUrl(lead: Pick<schema.Lead, "instagramHandle" | "tiktokHandle">, channel: "instagram_dm" | "tiktok_dm"): string | null {
+  const h = channel === "instagram_dm" ? lead.instagramHandle : lead.tiktokHandle;
+  if (!h) return null;
+  return channel === "instagram_dm" ? `https://www.instagram.com/${encodeURIComponent(h)}/` : `https://www.tiktok.com/@${encodeURIComponent(h)}`;
+}
+
+async function assertLeadContactable(draft: { meta: Record<string, unknown> }) {
+  const db = await getDb();
+  const [lead] = await db.select().from(schema.leads).where(eq(schema.leads.id, String(draft.meta.leadId ?? "")));
+  if (!lead) throw new OpsError("Lead pitches need meta.leadId of an existing lead");
+  if (lead.stage === "lost" || lead.stage === "not_a_fit")
+    throw new OpsError(`${lead.name} is marked ${lead.stage === "lost" ? "lost" : "not a fit"} — don't send this. Move the lead back first if that's wrong.`);
+  return lead;
 }
 
 /** When a creator opts out: pull every unsent outreach draft to them out of the queue (status rejected, with a note). */
@@ -530,6 +610,7 @@ export async function markDraftSent(id: string, actor: string, extra: { threadId
   const [cur] = await db.select().from(schema.drafts).where(eq(schema.drafts.id, id));
   if (!cur) throw new OpsError("draft not found");
   if (cur.status === "approved" && (cur.kind === "outreach_email" || cur.kind === "outreach_dm") && !extra.sentByApi) await assertContactable(cur);
+  if (cur.status === "approved" && (cur.kind === "lead_email" || cur.kind === "lead_dm") && !extra.sentByApi) await assertLeadContactable(cur);
   const [draft] = await db.update(schema.drafts).set({ status: "sent", sentAt: new Date(), updatedAt: new Date() })
     .where(and(eq(schema.drafts.id, id), eq(schema.drafts.status, "approved"))).returning();
   if (!draft) return;
@@ -549,6 +630,18 @@ export async function markDraftSent(id: string, actor: string, extra: { threadId
         nextFollowUpAt: early ? new Date(now.getTime() + 5 * 86400_000) : o.nextFollowUpAt,
         ...(extra.threadId ? { gmailThreadId: extra.threadId } : {}),
       }).where(eq(schema.outreach.id, o.id));
+    }
+  }
+  if (draft.kind === "lead_email" || draft.kind === "lead_dm") {
+    const [lead] = await db.select().from(schema.leads).where(eq(schema.leads.id, String(draft.meta.leadId)));
+    if (lead) {
+      const early = lead.stage === "found" || lead.stage === "qualified" || lead.stage === "contacted";
+      await db.update(schema.leads).set({
+        stage: lead.stage === "found" || lead.stage === "qualified" ? "contacted" : lead.stage,
+        // Follow up in 5 days (app timezone) unless the lead is further along and already has a next step.
+        nextStepAt: early || !lead.nextStepAt ? today(new Date(now.getTime() + 5 * 86400_000)) : lead.nextStepAt,
+        updatedAt: now,
+      }).where(eq(schema.leads.id, lead.id));
     }
   }
   if (draft.taskId) await updateTask(draft.taskId, { status: "done" }, actor);

@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { requireUser } from "@/lib/auth";
 import { approveDraft, markDraftSent, rejectDraft, reviseDraft } from "@/lib/ops";
+import { MANUAL_SEND_KINDS } from "@/components/draft-checks";
 
 const str = (v: FormDataEntryValue | null) => (typeof v === "string" ? v.trim() : "");
 /** Draft text keeps its own whitespace; only normalise line endings. */
@@ -55,7 +56,7 @@ export async function approveDraftAction(formData: FormData) {
   }
   refresh();
   const kind = str(formData.get("kind"));
-  const manual = outcome.status === "approved" && ["review_reply", "outreach_email", "outreach_dm", "comment_reply"].includes(kind);
+  const manual = outcome.status === "approved" && (MANUAL_SEND_KINDS as readonly string[]).includes(kind);
   redirect(
     withFlash(back, outcome.message, outcome.status === "failed" ? "danger" : manual ? "warn" : "ok", {
       ...(manual ? { next: id } : {}),
@@ -110,7 +111,9 @@ export async function markSentAction(formData: FormData) {
   const msg =
     kind === "outreach_email" || kind === "outreach_dm"
       ? "Marked sent. Outreach stage updated and a follow-up is due in 5 days."
-      : kind === "review_reply"
+      : kind === "lead_email" || kind === "lead_dm"
+        ? "Marked sent. The lead is now Contacted, with a follow-up in 5 days."
+        : kind === "review_reply"
         ? "Marked sent. The review now shows as replied."
         : "Marked sent.";
   redirect(withFlash(back, msg, "ok"));

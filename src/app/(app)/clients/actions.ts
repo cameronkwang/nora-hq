@@ -7,7 +7,6 @@ import { requireUser } from "@/lib/auth";
 import { isMonth } from "@/lib/dates";
 import { schema } from "@/lib/db";
 import {
-  createClient,
   createTask,
   deleteDeliverable,
   generateMonthTasks,
@@ -15,6 +14,7 @@ import {
   upsertDeliverable,
   upsertMetric,
 } from "@/lib/ops";
+import { onboardClient, SERVICES, type Service } from "@/lib/ops-onboarding";
 
 /** Result shape for forms wired through <ActionForm> (useActionState). */
 export type FormState = { ok?: boolean; error?: string; message?: string; at?: number };
@@ -42,25 +42,30 @@ function refresh(clientId?: string) {
 
 /* ───────── Businesses ───────── */
 
+/** "Add business": creates it with a plan matching the services and a Getting started checklist. */
 export async function createClientAction(_prev: FormState, fd: FormData): Promise<FormState> {
   const user = await requireUser();
+  if (!str(fd, "name").trim()) return { error: "Give the business a name." };
+  const services = fd.getAll("services").filter((v): v is Service => typeof v === "string" && (SERVICES as readonly string[]).includes(v));
+  if (services.length === 0) return { error: "Pick at least one service." };
   let id: string;
   try {
-    id = await createClient(
+    id = await onboardClient(
       {
         name: str(fd, "name"),
         location: opt(fd, "location"),
-        brand: opt(fd, "brand"),
         instagramHandle: opt(fd, "instagramHandle"),
         tiktokHandle: opt(fd, "tiktokHandle"),
         website: opt(fd, "website"),
+        services,
       },
       user.email,
     );
   } catch (e) {
-    return { error: str(fd, "name").trim() ? errorMessage(e) : "Give the business a name." };
+    return { error: errorMessage(e) };
   }
   refresh(id);
+  revalidatePath("/tasks");
   redirect(`/clients/${id}`);
 }
 

@@ -11,7 +11,7 @@ const EMAIL = process.env.SMOKE_EMAIL ?? "nora@local";
 const PASSWORD = process.env.SMOKE_PASSWORD ?? "dev";
 const CLIENT_IDS = ["yummy-red-bowl-richmond", "yummy-red-bowl-sc", "crab-o-clock", "poke-bros", "maxs-virginia-beach", "snf-kingdom"];
 const ROUTES = ["/", "/asks", "/asks/new", "/tasks", "/tasks?view=list", "/tasks?view=board", "/tasks?view=table", "/tasks/import", "/review", "/calendar", "/calendar/new",
-  "/creators", "/creators?view=table", "/creators?view=pipeline", "/creators/new", "/creators/import", "/numbers", "/reviews", "/activity", "/settings", "/clients",
+  "/creators", "/creators?view=table", "/creators?view=pipeline", "/creators/new", "/creators/import", "/leads", "/leads?view=board", "/leads/new", "/leads/import", "/numbers", "/reviews", "/activity", "/settings", "/clients",
   ...CLIENT_IDS.flatMap((id) => [`/clients/${id}`, `/clients/${id}/settings`])];
 const VIEWPORTS = [{ name: "desktop", width: 1280, height: 900 }, { name: "mobile", width: 390, height: 844 }];
 
@@ -19,10 +19,10 @@ const failures = [];
 const fail = (msg) => { failures.push(msg); console.log("  FAIL " + msg); };
 const ok = (msg) => console.log("  ok   " + msg);
 
-async function login(context) {
+async function login(context, email = EMAIL) {
   const page = await context.newPage();
   await page.goto(`${BASE}/login`);
-  await page.fill("#email", EMAIL);
+  await page.fill("#email", email);
   await page.fill("#password", PASSWORD);
   await Promise.all([page.waitForURL((u) => !u.pathname.startsWith("/login"), { timeout: 60000 }), page.click("button:has-text('Sign in')")]);
   await page.close();
@@ -72,7 +72,7 @@ async function crawl(browser) {
     const { errors } = watch(page);
     for (const path of ROUTES) await checkPage(page, path, vp.name, errors);
     // first creator / draft / task / ask / post detail pages, if any exist
-    for (const [list, sel] of [["/creators", "a[href^='/creators/']:not([href='/creators/new']):not([href^='/creators/export']):not([href^='/creators/import'])"], ["/tasks?status=all", "a[href^='/tasks/']:not([href^='/tasks/import']):not([href^='/tasks/export'])"], ["/asks", "a[href^='/asks/']:not([href='/asks/new'])"], ["/calendar", "a[href^='/calendar/']:not([href^='/calendar/new'])"]]) {
+    for (const [list, sel] of [["/creators", "a[href^='/creators/']:not([href='/creators/new']):not([href^='/creators/export']):not([href^='/creators/import'])"], ["/tasks?status=all", "a[href^='/tasks/']:not([href^='/tasks/import']):not([href^='/tasks/export'])"], ["/asks", "a[href^='/asks/']:not([href='/asks/new'])"], ["/calendar", "a[href^='/calendar/']:not([href^='/calendar/new'])"], ["/leads", "a[href^='/leads/']:not([href='/leads/new']):not([href^='/leads/import']):not([href^='/leads/export'])"]]) {
       await page.goto(BASE + list, { waitUntil: "networkidle" });
       const href = await page.locator(sel).first().getAttribute("href").catch(() => null);
       if (href) await checkPage(page, href, vp.name, errors);
@@ -117,6 +117,15 @@ async function tool(name, args) {
   try { return JSON.parse(t); } catch { return t; }
 }
 
+/** Calls a tool and returns { isError, text } without throwing on a tool-level refusal. */
+async function toolRaw(name, args) {
+  const r = await mcp("tools/call", { name, arguments: args });
+  if (r.status !== 200) throw new Error(`${name}: HTTP ${r.status}`);
+  if (r.body?.error) return { isError: true, text: JSON.stringify(r.body.error) };
+  const res = r.body?.result;
+  return { isError: !!res?.isError, text: res?.content?.[0]?.text ?? "" };
+}
+
 async function step(name, fn) {
   try { await fn(); ok(name); } catch (e) { fail(`${name}: ${e.message.split("\n")[0]}`); }
 }
@@ -146,8 +155,9 @@ async function flows(browser) {
     await page.locator("input[type='file']").first().setInputFiles(png);
     await page.waitForTimeout(500);
     await page.locator("button[type='submit']").last().click();
-    await page.waitForURL(/\/asks\?created=1/, { timeout: 60000 });
+    await page.waitForURL(/\/\?sent=auto/, { timeout: 60000 });
     await page.waitForLoadState("networkidle");
+    await page.goto(`${BASE}/asks`, { waitUntil: "networkidle" });
     const card = page.locator(`text=${askText}`).first();
     await card.waitFor();
     const imgs = await page.locator("img[src*='/uploads/']").count();
@@ -394,6 +404,128 @@ async function flows(browser) {
     });
   }
 
+  /* ── ask routing, leads, onboarding ── */
+  if (process.env.MCP_TOKEN) {
+    const camAsk = `Smoke for Cameron ${stamp}: reset the TikTok password`;
+    await step("ask with the Cameron chip → Cameron's task + For me", async () => {
+      await page.goto(`${BASE}/asks/new`, { waitUntil: "networkidle" });
+      await page.locator("#ask-body").fill(camAsk);
+      await page.locator("label", { hasText: /^Cameron$/ }).first().click();
+      await page.locator("button[type='submit']:has-text('Send')").click();
+      await page.waitForURL(/\/\?sent=cameron/, { timeout: 60000 });
+      const cam = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+      await login(cam, "cameron@local");
+      const cp = await cam.newPage();
+      await cp.goto(`${BASE}/asks?tab=me`, { waitUntil: "networkidle" });
+      if (!(await cp.locator(`text=${camAsk}`).count())) throw new Error("ask not in Cameron's For me tab");
+      await cp.goto(`${BASE}/tasks?assignee=me&view=list`, { waitUntil: "networkidle" });
+      if (!(await cp.locator(`text=Smoke for Cameron ${stamp}`).count())) throw new Error("no task for Cameron on /tasks?assignee=me");
+      await cam.close();
+    });
+
+    const autoAsk = `Smoke triage ${stamp}: please film the new dessert`;
+    await step("mcp triage_ask routes an auto ask to Nora → task created", async () => {
+      await page.goto(`${BASE}/asks/new`, { waitUntil: "networkidle" });
+      await page.locator("#ask-body").fill(autoAsk);
+      await page.locator("button[type='submit']:has-text('Send')").click();
+      await page.waitForURL(/\/\?sent=auto/, { timeout: 60000 });
+      const list = JSON.stringify(await tool("list_asks", {}));
+      const i = list.indexOf(autoAsk);
+      const id = i < 0 ? "" : ([...list.slice(0, i).matchAll(/"(ask_[^"]+)"/g)].pop() ?? [])[1];
+      if (!id) throw new Error("new ask not visible via list_asks");
+      const r = await tool("triage_ask", { ask_id: id, kind: "request", for_who: "nora" });
+      if (!r.taskCreated) throw new Error(`no taskCreated: ${JSON.stringify(r).slice(0, 300)}`);
+      const again = await tool("triage_ask", { ask_id: id, kind: "request", for_who: "nora" });
+      if (again.taskCreated) throw new Error("re-triage created a second task");
+      await page.goto(`${BASE}/tasks?assignee=me&view=list`, { waitUntil: "networkidle" });
+      if (!(await page.locator(`text=Smoke triage ${stamp}`).count())) throw new Error("routed task not on Nora's list");
+    });
+
+    await step("Find leads form creates a Claude ask", async () => {
+      await page.goto(`${BASE}/leads`, { waitUntil: "networkidle" });
+      await page.locator("button:has-text('Find leads')").first().click();
+      await page.fill("#fl-area", `Smoketown ${stamp}`);
+      await page.locator("button:has-text('Ask Claude to find them')").click();
+      await page.locator("text=Sent to Claude").waitFor({ timeout: 30000 });
+      const s = JSON.stringify(await tool("list_asks", {}));
+      if (!s.includes(`Smoketown ${stamp}`)) throw new Error("research ask not visible to Claude");
+    });
+
+    const site = `https://sample-noodle-${stamp}.example.com`;
+    let leadId = "";
+    await step("mcp add_lead twice with the same website dedupes", async () => {
+      const base = { name: `Sample Noodle House ${stamp}`, city: "Richmond, VA", website: site, instagram_handle: `samplenoodle_${stamp}`,
+        google_rating: "4.4", google_review_count: "312 reviews", reply_rate: "5%", opportunities: ["google", "social"], score: 72,
+        why: "312 Google reviews, owner replied to ~5% of recent ones." };
+      const a = await tool("add_lead", base);
+      const b = await tool("add_lead", { ...base, name: `Sample Noodle House`, website: `${site}/menu`, instagram_followers: "1.2k" });
+      leadId = a.leadId;
+      if (!a.created || b.created || b.leadId !== a.leadId) throw new Error(`not deduped: ${JSON.stringify(a)} / ${JSON.stringify(b)}`);
+      const n = (JSON.stringify(await tool("list_leads", { limit: 200 })).match(new RegExp(`sample-noodle-${stamp}`, "g")) ?? []).length;
+      if (n !== 1) throw new Error(`${n} leads with that website`);
+    });
+
+    await step("Claude (MCP) can't set lead stage to won / contacted", async () => {
+      for (const stage of ["won", "contacted"]) {
+        const r = await toolRaw("update_lead", { lead_id: leadId, stage });
+        if (!r.isError) throw new Error(`update_lead stage ${stage} was accepted`);
+      }
+      const l = await tool("get_lead", { lead_id: leadId });
+      if (JSON.stringify(l).match(/"stage":"(won|contacted)"/)) throw new Error("stage changed");
+    });
+
+    await step("mcp create_draft lead_dm → approve + mark sent → lead contacted", async () => {
+      const d = await tool("create_draft", { kind: "lead_dm", title: `Pitch ${stamp}`, meta: { leadId, channel: "instagram_dm" },
+        body: "Hi! I'm Nora, a Richmond food creator. Your noodles look amazing and I noticed lots of Google reviews without replies — I help with that. Quick chat? If it's not for you, no worries." });
+      const id = d.draftId;
+      if (!id) throw new Error(`no draftId: ${JSON.stringify(d).slice(0, 200)}`);
+      await page.goto(`${BASE}/review?draft=${id}`, { waitUntil: "networkidle" });
+      await page.locator(`#d-${id} button:has-text('Approve')`).first().click();
+      await page.waitForLoadState("networkidle"); await page.waitForTimeout(1500);
+      await page.goto(`${BASE}/review?draft=${id}`, { waitUntil: "networkidle" });
+      await page.locator(`#d-${id} button:has-text('Mark sent')`).first().click();
+      await page.waitForLoadState("networkidle"); await page.waitForTimeout(1500);
+      const l = JSON.stringify(await tool("get_lead", { lead_id: leadId }));
+      if (!l.includes('"stage":"contacted"')) throw new Error(`lead not contacted: ${l.slice(0, 300)}`);
+    });
+
+    await step("lead → talking in the UI → Start managing → Getting started", async () => {
+      await page.goto(`${BASE}/leads/${leadId}`, { waitUntil: "networkidle" });
+      await Promise.all([
+        page.waitForResponse((r) => r.request().method() === "POST", { timeout: 30000 }),
+        page.locator("select[name='stage']").first().selectOption("talking"),
+      ]);
+      await page.waitForTimeout(1000);
+      await page.goto(`${BASE}/leads/${leadId}`, { waitUntil: "networkidle" });
+      const btn = page.locator("button:has-text('Start managing')").first();
+      await btn.waitFor({ timeout: 15000 });
+      await btn.click();
+      await page.waitForURL(/\/clients\/[^/?]+/, { timeout: 60000 });
+      await page.waitForLoadState("networkidle");
+      const t = await page.locator("main").innerText();
+      if (!t.includes("Getting started")) throw new Error("no Getting started card");
+      if (!t.includes("Owner adds Nora as Manager on the Google Business Profile")) throw new Error("google step missing");
+      if (!t.includes("Get TikTok access")) throw new Error("social step missing");
+      if (t.includes("Agree collab terms")) throw new Error("collab step shown though collab wasn't picked");
+      const l = JSON.stringify(await tool("get_lead", { lead_id: leadId }));
+      if (!l.includes('"stage":"won"') || !l.includes("convertedClientId")) throw new Error("lead not won/converted");
+    });
+
+    await step("Add business form creates a business with an onboarding checklist", async () => {
+      await page.goto(`${BASE}/clients`, { waitUntil: "networkidle" });
+      await page.fill("#new-name", `Sample Taco Stand ${stamp}`);
+      await page.fill("#new-location", "Norfolk");
+      for (const [v, on] of [["social", false], ["google", false], ["collab", true]]) await page.locator(`input[name='services'][value='${v}']`).setChecked(on);
+      await page.locator("button[type='submit']:has-text('Add business')").click();
+      await page.waitForURL(/\/clients\/(?!$)[^/?]+/, { timeout: 60000 });
+      await page.waitForLoadState("networkidle");
+      const t = await page.locator("main").innerText();
+      if (!t.includes(`Sample Taco Stand ${stamp}`)) throw new Error("not on the new business page");
+      if (!t.includes("Getting started") || !t.includes("Agree collab terms")) throw new Error("collab onboarding checklist missing");
+      if (t.includes("Get TikTok access")) throw new Error("social steps shown though social wasn't picked");
+    });
+  }
+
   for (const e of errors) fail(`flows: ${e}`);
   await context.close();
 }
@@ -420,6 +552,7 @@ async function detailRoutes(browser) {
     ["/asks", "a[href^='/asks/']:not([href='/asks/new'])"],
     ["/calendar", "a[href^='/calendar/']:not([href^='/calendar/new'])"],
     ["/review", "a[href^='/review?draft=']"],
+    ["/leads", "a[href^='/leads/']:not([href='/leads/new']):not([href^='/leads/import']):not([href^='/leads/export'])"],
   ]) {
     await page.goto(BASE + list, { waitUntil: "networkidle" });
     const href = await page.locator(sel).first().getAttribute("href").catch(() => null);

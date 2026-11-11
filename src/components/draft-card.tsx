@@ -13,6 +13,7 @@ const KIND_PLATFORM: Record<string, string> = {
   tiktok_post: "tiktok",
   review_reply: "google",
   outreach_email: "email",
+  lead_email: "email",
   comment_reply: "instagram",
 };
 
@@ -96,6 +97,32 @@ function OutreachPanel({ o, draft, clientName }: { o: OutreachContext; draft: Dr
   );
 }
 
+function LeadPanel({ draft }: { draft: Draft }) {
+  const m = draft.meta;
+  const leadId = typeof m.leadId === "string" ? m.leadId : null;
+  return (
+    <div className="flex flex-col gap-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <p className="font-semibold">Pitch to a potential client</p>
+        <Badge tone="info">Lead</Badge>
+      </div>
+      <dl className="grid gap-1.5">
+        {draft.kind === "lead_email" ? (
+          <>
+            <Row label="To">{String(m.to ?? "—")}</Row>
+            <Row label="Subject">{String(m.subject ?? "—")}</Row>
+          </>
+        ) : (
+          <Row label="Send via">{m.channel === "tiktok_dm" ? "TikTok DM" : "Instagram DM"}</Row>
+        )}
+      </dl>
+      {leadId && (
+        <Link href={`/leads/${leadId}`} className="text-sm text-accent hover:underline">Open lead</Link>
+      )}
+    </div>
+  );
+}
+
 function ContextPanel({ draft, ctx, clientName }: { draft: Draft; ctx: DraftContext; clientName: (id: string | null) => string }) {
   switch (draft.kind) {
     case "review_reply": {
@@ -116,6 +143,9 @@ function ContextPanel({ draft, ctx, clientName }: { draft: Draft; ctx: DraftCont
     case "outreach_email":
     case "outreach_dm":
       return ctx.outreach ? <OutreachPanel o={ctx.outreach} draft={draft} clientName={clientName} /> : <p className="text-sm text-danger">The outreach record for this draft is missing.</p>;
+    case "lead_email":
+    case "lead_dm":
+      return <LeadPanel draft={draft} />;
     case "instagram_post":
     case "tiktok_post": {
       const p = ctx.post;
@@ -162,6 +192,17 @@ function manualLinks(draft: Draft, ctx: DraftContext, clientName: (id: string | 
       links.push({ href: `https://instagram.com/${c.instagramHandle}`, label: "Open profile" });
     } else if (typeof draft.meta.profileUrl === "string") links.push({ href: draft.meta.profileUrl, label: "Open profile" });
   }
+  if (draft.kind === "lead_dm" && typeof draft.meta.profileUrl === "string") {
+    // Only links that point at the saved handle's profile (the server builds meta.profileUrl from the lead) —
+    // anything else is ignored rather than shown as a button.
+    const url = draft.meta.profileUrl;
+    const ig = draft.meta.channel === "instagram_dm" ? /^https:\/\/www\.instagram\.com\/([A-Za-z0-9._]+)\/?$/.exec(url)?.[1] : null;
+    const tt = draft.meta.channel === "tiktok_dm" ? /^https:\/\/www\.tiktok\.com\/@([A-Za-z0-9._]+)\/?$/.exec(url)?.[1] : null;
+    if (ig) {
+      links.push({ href: `https://ig.me/m/${ig}`, label: "Open Instagram DM" });
+      links.push({ href: `https://www.instagram.com/${ig}/`, label: "Open profile" });
+    } else if (tt) links.push({ href: `https://www.tiktok.com/@${tt}`, label: "Open TikTok profile" });
+  }
   if (draft.kind === "review_reply") {
     links.push({ href: `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(clientName(draft.clientId))}`, label: "Open in Google Maps" });
   }
@@ -195,17 +236,17 @@ export function DraftCard({
   highlight?: boolean;
 }) {
   const isOutreach = draft.kind === "outreach_email" || draft.kind === "outreach_dm";
-  const platform = draft.kind === "outreach_dm" ? String(draft.meta.channel ?? "instagram_dm") : KIND_PLATFORM[draft.kind];
+  const platform = draft.kind === "outreach_dm" || draft.kind === "lead_dm" ? String(draft.meta.channel ?? "instagram_dm") : KIND_PLATFORM[draft.kind];
   const manualKind = (MANUAL_SEND_KINDS as readonly string[]).includes(draft.kind);
   const mode =
     draft.status === "needs_review" ? "review" : draft.status === "failed" ? "failed" : draft.status === "approved" && manualKind ? "approved" : "readonly";
-  const hasContext = ["review_reply", "outreach_email", "outreach_dm", "instagram_post", "tiktok_post", "comment_reply"].includes(draft.kind);
+  const hasContext = ["review_reply", "outreach_email", "outreach_dm", "lead_email", "lead_dm", "instagram_post", "tiktok_post", "comment_reply"].includes(draft.kind);
 
   return (
     <article id={`d-${draft.id}`} className={cx("scroll-mt-20 rounded-xl border bg-surface", highlight ? "border-accent ring-2 ring-accent-soft" : "border-border")}>
       <header className="flex flex-col gap-1.5 border-b border-border px-4 py-3">
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-          <span className="text-sm font-semibold">{draft.clientId ? clientName(draft.clientId) : "No business"}</span>
+          <span className="text-sm font-semibold">{draft.clientId ? clientName(draft.clientId) : draft.kind === "lead_email" || draft.kind === "lead_dm" ? "New lead" : "No business"}</span>
           <PlatformTag platform={platform} />
           <Badge tone="neutral">{kindLabel(draft.kind, draft.meta)}</Badge>
           {draft.status !== "needs_review" && <StatusBadge status={draft.status} />}
@@ -241,7 +282,7 @@ export function DraftCard({
           )}
           {mode === "approved" && (
             <p className="rounded-lg bg-warn-soft px-3 py-2 text-sm text-warn">
-              {draft.kind === "outreach_email"
+              {draft.kind === "outreach_email" || draft.kind === "lead_email"
                 ? gmailConnected
                   ? "Approved but not sent. Send it from your email, then click “Mark sent”."
                   : "Gmail isn't connected — send this from your email, then click “Mark sent”."
@@ -263,7 +304,7 @@ export function DraftCard({
             body={draft.body}
             mode={mode}
             returnTo={returnTo}
-            mailto={mode === "approved" && draft.kind === "outreach_email" && draft.meta.to ? { to: String(draft.meta.to), subject: String(draft.meta.subject ?? "") } : undefined}
+            mailto={mode === "approved" && (draft.kind === "outreach_email" || draft.kind === "lead_email") && draft.meta.to ? { to: String(draft.meta.to), subject: String(draft.meta.subject ?? "") } : undefined}
             links={mode === "approved" ? manualLinks(draft, ctx, clientName) : undefined}
             postKey={ctx.post ? postReviewKey(ctx.post) : undefined}
           />
