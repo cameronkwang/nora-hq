@@ -21,6 +21,7 @@ import {
   upsertMetric,
   upsertOutreach,
 } from "@/lib/ops";
+import { TASK_SCOPES } from "@/lib/ops-tasks";
 import { WORKING_RULES } from "./rules";
 import { checkPitch, draftLeadPitch } from "./tools-leads";
 import {
@@ -328,18 +329,20 @@ export function registerTools(server: McpServer, ctx: Ctx) {
     title: "List tasks",
     description:
       "Lists checklist tasks. Default status \"open\" = todo, in_progress, needs_review, blocked. Filter by business, month (YYYY-MM) and assignee (nora, cameron, claude, unassigned). " +
-      "Tasks with a deliverableId are the monthly plan items (e.g. \"Instagram feed posts — 3 of 8\").",
+      "Tasks with a deliverableId are the monthly plan items (e.g. \"Instagram feed posts — 3 of 8\"). " +
+      "scope: \"adhoc\" = one-off tasks outside the monthly plan (what Nora hands off), \"plan\" = monthly plan items, \"all\" (default).",
     inputSchema: {
       client_id: clientId.optional(),
       status: z.enum(["open", ...schema.TASK_STATUSES]).default("open"),
       month: monthArg.optional(),
       assignee: z.enum(schema.ASSIGNEES).optional(),
+      scope: z.enum(TASK_SCOPES).default("all"),
       limit: limit(50, 200),
     },
     annotations: READ,
-  }, async ({ client_id, status, month, assignee, limit }) => run(async () => {
+  }, async ({ client_id, status, month, assignee, scope, limit }) => run(async () => {
     const names = await clientNames();
-    return (await listTasks({ clientId: client_id, status, month, assignee, limit })).map((t) => shapeTask(t, names));
+    return (await listTasks({ clientId: client_id, status, month, assignee, scope, limit })).map((t) => shapeTask(t, names));
   }));
 
   server.registerTool("create_task", {

@@ -9,7 +9,9 @@ import { MonthPicker } from "@/components/month-picker";
 import { ActionForm, SubmitButton } from "@/components/client-form";
 import { CreatorFilterChips, CreatorList, filterOutreach, type CreatorFilter } from "@/components/client-creators";
 import { ViewsChart, type ViewsPoint } from "@/components/views-chart";
-import { TaskRow } from "@/components/task-row";
+import { TaskRow, isOverdue } from "@/components/task-row";
+import { isAdHocTask } from "@/lib/ops-tasks";
+import type { Task } from "@/lib/schema";
 import { generateChecklistAction, quickAddTaskAction, saveMetricsAction } from "../actions";
 import { monthBounds } from "@/lib/integrations/time";
 import { getOnboardingStatus } from "@/lib/ops-onboarding";
@@ -58,9 +60,15 @@ export default async function ClientPage({
   const totalTarget = plan.reduce((a, p) => a + p.target, 0);
   const totalDone = plan.reduce((a, p) => a + (p.target > 0 ? Math.min(p.done, p.target) : 0), 0);
 
-  /* outstanding */
-  const carried = openTasks.filter((t) => t.month < month);
-  const thisMonth = openTasks.filter((t) => t.month === month);
+  /* outstanding: the plan checklist vs one-off (ad hoc) work. Ad hoc goes first when any of it is overdue. */
+  const adHoc = openTasks.filter(isAdHocTask);
+  const checklist = openTasks.filter((t) => !isAdHocTask(t));
+  const adHocFirst = adHoc.some((t) => isOverdue(t));
+  const sections = [
+    { key: "checklist", title: `${month === now ? "This month's" : `${mon}'s`} checklist`, tasks: checklist },
+    { key: "adhoc", title: "Ad hoc", tasks: adHoc },
+  ];
+  if (adHocFirst) sections.reverse();
 
   /* creators */
   const counts = Object.fromEntries(FILTERS.map((f) => [f, filterOutreach(outreach, f, monthStart, nextStart).length])) as Record<CreatorFilter, number>;
@@ -210,39 +218,17 @@ export default async function ClientPage({
                   {needsChecklist && plan.length > 0 ? "Create the checklist from the plan, or add a task below." : "All caught up. Add a task below if something comes up."}
                 </EmptyState>
               ) : (
-                <div className="flex flex-col gap-4">
-                  {carried.length > 0 && (
-                    <div>
-                      <h3 className="mb-1 text-xs font-semibold uppercase tracking-wide text-warn">Carried over</h3>
-                      <ul className="divide-y divide-border">
-                        {carried.map((t) => (
-                          <li key={t.id} className="pt-3">
-                            <Badge tone="warn" className="-mb-2">From {monthLabel(t.month, "short")}</Badge>
-                            <TaskRow task={t} clientName={client.name} showClient={false} />
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
-                  )}
-                  {thisMonth.length > 0 && (
-                    <div>
-                      {carried.length > 0 && <h3 className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted">{mon}</h3>}
-                      <ul className="divide-y divide-border">
-                        {thisMonth.map((t) => (
-                          <li key={t.id}>
-                            <TaskRow task={t} clientName={client.name} showClient={false} />
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
-                  )}
+                <div className="flex flex-col gap-5">
+                  {sections.filter((sec) => sec.tasks.length > 0).map((sec) => (
+                    <OutstandingSection key={sec.key} title={sec.title} tasks={sec.tasks} month={month} clientName={client.name} />
+                  ))}
                 </div>
               )}
             </div>
 
             <div className="border-t border-border px-4 py-3">
               <ActionForm action={quickAddTaskAction.bind(null, client.id, month)} resetOnSuccess ariaLabel="Quick add task">
-                <label className="label" htmlFor="qa-title">Add a task for {mon}</label>
+                <label className="label" htmlFor="qa-title">Add an ad hoc task for {mon}</label>
                 <div className="flex gap-2">
                   <input id="qa-title" name="title" required className="input" placeholder="e.g. Film new menu reel" autoComplete="off" />
                   <SubmitButton size="sm" pendingLabel="Adding…" className="shrink-0">Add</SubmitButton>
@@ -390,6 +376,28 @@ export default async function ClientPage({
         </Card>
       </div>
     </>
+  );
+}
+
+/** One block of the Outstanding card: heading with a count, then rows. Tasks from earlier months get a "From Oct" badge. */
+function OutstandingSection({ title, tasks, month, clientName }: { title: string; tasks: Task[]; month: string; clientName: string }) {
+  const overdue = tasks.filter((t) => isOverdue(t)).length;
+  return (
+    <section>
+      <h3 className="mb-1 flex items-baseline gap-2 text-xs font-semibold uppercase tracking-wide text-muted">
+        {title}
+        <span className="font-normal normal-case tracking-normal tabular-nums">· {tasks.length}</span>
+        {overdue > 0 && <span className="font-medium normal-case tracking-normal text-danger">{overdue} overdue</span>}
+      </h3>
+      <ul className="divide-y divide-border">
+        {tasks.map((t) => (
+          <li key={t.id} className={t.month < month ? "pt-3" : undefined}>
+            {t.month < month && <Badge tone="warn" className="-mb-2">From {monthLabel(t.month, "short")}</Badge>}
+            <TaskRow task={t} clientName={clientName} showClient={false} />
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }
 

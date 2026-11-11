@@ -4,6 +4,7 @@ import { SERVER_INSTRUCTIONS } from "./rules";
 import { registerTools } from "./tools";
 import { registerAskTools } from "./tools-asks";
 import { registerLeadTools } from "./tools-leads";
+import { registerCreatorTools } from "./tools-creator";
 import type { Ctx } from "./queries";
 
 /** A fresh MCP server per request (stateless Streamable HTTP — works on serverless). */
@@ -15,5 +16,6 @@ export function createMcpServer(ctx: Ctx): McpServer {
   registerTools(server, ctx);
   registerAskTools(server);
   registerLeadTools(server);
+  registerCreatorTools(server);
   return server;
 }

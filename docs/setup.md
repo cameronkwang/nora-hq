@@ -146,3 +146,31 @@ Google keeps every Business Profile API at **0 requests per minute** until it ap
 | Instagram "Insufficient developer role" | The account isn't an accepted Instagram tester (5.6–5.7). |
 | Instagram "Only JPEG images" | Convert the image to .jpg and re-upload it. |
 | Everything says "can't read saved token" | `TOKEN_ENC_KEY` changed or is missing. Set it, then reconnect each account. |
+
+## Nora's own stats (@noraeatsgood)
+
+**My stats** (`/stats`) tracks Nora's own Instagram and TikTok: follower growth, views, engagement, top posts, Instagram audience and a copy-ready media-kit summary. It works with no setup at all. Use **Log today's numbers** (followers, plus views if you like) until the APIs are connected. Once connected, the hourly sync job saves a snapshot every day. Platforms only expose current totals, so the growth history starts on the day you connect (or the first day you log by hand).
+
+### Connect Nora's Instagram
+
+This uses the same Meta app as the businesses (step 5). It only asks for read access: `instagram_business_basic` and `instagram_business_manage_insights`.
+
+1. @noraeatsgood must be a **Creator** or **Business** account (Instagram app → **Settings → Account type and tools**).
+2. In the Meta app, go to **App roles → Roles → Instagram testers** and add `noraeatsgood`. Then accept the invite: log in as @noraeatsgood on instagram.com, go to **Settings → Apps and websites → Tester invites**, and accept. The app can stay in Development mode, so you don't need App Review.
+3. In a private window (or after logging out of instagram.com), open **My stats → Connect Instagram** and log in as @noraeatsgood. The redirect URI is the same `…/api/oauth/instagram/callback` you added in step 5.
+4. Instagram only reports audience (cities, ages) and daily new follows for accounts with 100+ followers. Audience is refreshed weekly. The token renews automatically with the businesses' tokens.
+
+### Connect Nora's TikTok
+
+1. Go to <https://developers.tiktok.com>, log in, and choose **Manage apps → Connect an app**.
+2. Add the **Login Kit** product. Then add the **Display API** scopes: `user.info.basic`, `user.info.profile`, `user.info.stats` and `video.list`.
+3. Under **Login Kit → Redirect URI**, add `https://ops.cameronwang.com/api/oauth/tiktok/callback` (that is, `${APP_URL}/api/oauth/tiktok/callback`).
+4. Copy the **Client key** and **Client secret** into `TIKTOK_CLIENT_KEY` and `TIKTOK_CLIENT_SECRET` in Vercel, then redeploy.
+5. While the app isn't reviewed, use **Sandbox**. Under **Sandbox → Target users**, add Nora's TikTok account (up to 10 accounts are allowed). Then, signed in as Nora, open **My stats → Connect TikTok** and allow every permission.
+   - If she turns any permission off, My stats lists what's missing. Use **Reconnect** to allow it.
+   - TikTok hasn't said whether sandbox apps return real follower and view counts. If a sync shows an error or zeros, submit the app for review (Production) with the same scopes.
+6. Access tokens last about 24 hours and are renewed automatically before each sync. The refresh token lasts about a year, and after that you'll need to reconnect.
+
+Notes:
+- TikTok's API has no audience, reach or daily views. "Views, 28 days" for TikTok is the growth in total views across Nora's latest ~60 videos, measured from the daily snapshots. It becomes accurate after about four weeks of syncing.
+- On each post in **Top posts**, pick a business to tag it as a collab. Claude can read all of these numbers through the connector (`get_creator_stats`) when drafting pitches.

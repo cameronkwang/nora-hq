@@ -20,6 +20,7 @@ const MAIN: Item[] = [
   { href: "/creators", label: "Creators", icon: "users" },
   { href: "/leads", label: "Leads", icon: "target" },
   { href: "/numbers", label: "Numbers", icon: "chart" },
+  { href: "/stats", label: "My stats", icon: "trend" },
 ];
 
 /** Less frequent places, tucked behind "More". */
@@ -379,7 +380,7 @@ function useNewAskShortcut() {
 
 type IconName =
   | "home" | "inbox" | "check" | "list" | "calendar" | "users" | "chart" | "star" | "clock" | "gear"
-  | "plus" | "menu" | "chevron" | "store" | "grid" | "logout" | "target";
+  | "plus" | "menu" | "chevron" | "store" | "grid" | "logout" | "target" | "trend";
 
 const PATHS: Record<IconName, ReactNode> = {
   home: <path d="M3 10.5 12 3l9 7.5M5 9v11h5v-6h4v6h5V9" />,
@@ -404,6 +405,7 @@ const PATHS: Record<IconName, ReactNode> = {
     </>
   ),
   chart: <path d="M4 20V10M10 20V4M16 20v-7M21 20H3" />,
+  trend: <path d="M3 17l6-6 4 4 8-8M15 7h6v6" />,
   star: <path d="m12 3.5 2.6 5.4 5.9.8-4.3 4.1 1 5.8L12 16.9l-5.2 2.7 1-5.8-4.3-4.1 5.9-.8z" />,
   clock: (
     <>

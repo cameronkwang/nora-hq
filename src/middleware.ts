@@ -2,7 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { SESSION_COOKIE, verifySession } from "@/lib/session";
 
 // Routes that authenticate themselves (bearer tokens / cron secret) or are public.
-const PUBLIC_PREFIXES = ["/login", "/api/mcp", "/api/cron", "/_next", "/favicon", "/manifest", "/icon"];
+const PUBLIC_PREFIXES = ["/login", "/api/mcp", "/api/cron", "/api/asks/capture", "/_next", "/favicon", "/manifest", "/icon"];
 
 export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;

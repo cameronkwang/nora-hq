@@ -11,7 +11,7 @@ const EMAIL = process.env.SMOKE_EMAIL ?? "nora@local";
 const PASSWORD = process.env.SMOKE_PASSWORD ?? "dev";
 const CLIENT_IDS = ["yummy-red-bowl-richmond", "yummy-red-bowl-sc", "crab-o-clock", "poke-bros", "maxs-virginia-beach", "snf-kingdom"];
 const ROUTES = ["/", "/asks", "/asks/new", "/tasks", "/tasks?view=list", "/tasks?view=board", "/tasks?view=table", "/tasks/import", "/review", "/calendar", "/calendar/new",
-  "/creators", "/creators?view=table", "/creators?view=pipeline", "/creators/new", "/creators/import", "/leads", "/leads?view=board", "/leads/new", "/leads/import", "/numbers", "/reviews", "/activity", "/settings", "/clients",
+  "/creators", "/creators?view=table", "/creators?view=pipeline", "/creators/new", "/creators/import", "/leads", "/leads?view=board", "/leads/new", "/leads/import", "/numbers", "/reviews", "/activity", "/settings", "/settings/capture", "/stats", "/tasks?scope=adhoc", "/tasks?scope=plan", "/tasks?scope=all", "/clients",
   ...CLIENT_IDS.flatMap((id) => [`/clients/${id}`, `/clients/${id}/settings`])];
 const VIEWPORTS = [{ name: "desktop", width: 1280, height: 900 }, { name: "mobile", width: 390, height: 844 }];
 
@@ -192,7 +192,7 @@ async function flows(browser) {
     if (!btn) { console.log("       (every business already has this month's checklist; skipping)"); return; }
     await btn.first().click();
     await page.waitForFunction(() => !document.body.innerText.includes("Create this month's checklist"), null, { timeout: 30000 });
-    await page.goto(`${BASE}/tasks?client=${cid}`, { waitUntil: "networkidle" });
+    await page.goto(`${BASE}/tasks?client=${cid}&scope=plan`, { waitUntil: "networkidle" });
     const n = await page.locator("text=Instagram stories").count();
     if (!n) throw new Error("checklist tasks not found on /tasks");
   });
@@ -526,6 +526,128 @@ async function flows(browser) {
     });
   }
 
+  /* ── hand-off: Home composer, quick-capture keys, ad hoc split, Nora's stats ── */
+  if (process.env.MCP_TOKEN) {
+    const composer = async (text, chip) => {
+      await page.goto(`${BASE}/`, { waitUntil: "networkidle" });
+      await page.locator("#quick-ask").fill(text);
+      await page.locator("[role='radiogroup'][aria-label=\"Who's it for?\"] [role='radio']", { hasText: chip }).first().click();
+      await page.locator("form:has(#quick-ask) button[type='submit']").click();
+      await page.locator("form:has(#quick-ask) [role='status']").waitFor({ timeout: 30000 });
+      const msg = await page.locator("form:has(#quick-ask) [role='status']").innerText();
+      if (new URL(page.url()).pathname !== "/") throw new Error(`left Home: ${page.url()}`);
+      if (await page.locator("#quick-ask").inputValue()) throw new Error("composer not cleared");
+      return msg;
+    };
+    const qClaude = `Smoke composer ${stamp}: caption ideas for the crab boil`;
+    await step("Home composer: Claude chip sends an ask without leaving Home", async () => {
+      const msg = await composer(qClaude, /^Claude$/);
+      if (!/Claude/.test(msg)) throw new Error(`unexpected confirmation: ${msg}`);
+      const s = JSON.stringify(await tool("list_asks", {}));
+      if (!s.includes(qClaude)) throw new Error("ask not visible via list_asks");
+    });
+    const qAdhoc = `Smoke adhoc ${stamp}: pick up the gift cards`;
+    await step("Home composer: Ad hoc task chip puts a task on Cameron's list", async () => {
+      const msg = await composer(qAdhoc, /^Ad hoc task$/);
+      if (!/Cameron/.test(msg)) throw new Error(`unexpected confirmation: ${msg}`);
+      const s = JSON.stringify(await tool("list_tasks", { assignee: "cameron", scope: "adhoc" }));
+      if (!s.includes("Smoke adhoc " + stamp)) throw new Error("no ad hoc task for Cameron via list_tasks scope=adhoc");
+      const plan = JSON.stringify(await tool("list_tasks", { assignee: "cameron", scope: "plan" }));
+      if (plan.includes("Smoke adhoc " + stamp)) throw new Error("ad hoc task leaked into scope=plan");
+    });
+
+    let key = null;
+    const capture = (body, headers = {}, token = key) =>
+      fetch(`${BASE}/api/asks/capture`, { method: "POST", headers: { ...(token ? { authorization: `Bearer ${token}` } : {}), ...headers }, body })
+        .then(async (r) => ({ status: r.status, json: await r.json().catch(() => null) }));
+    await step("settings/capture: make a key in the UI", async () => {
+      await page.goto(`${BASE}/settings/capture`, { waitUntil: "networkidle" });
+      await page.fill("#cap-label", `Smoke phone ${stamp}`);
+      await page.locator("button[type='submit']:has-text('Make a key')").click();
+      await page.locator("#cap-new-token").waitFor({ timeout: 30000 });
+      key = await page.locator("#cap-new-token").inputValue();
+      if (!/^nhq_/.test(key)) throw new Error(`bad key: ${key}`);
+    });
+    const cText = `Smoke capture ${stamp}: post the new hours`;
+    await step("capture API: JSON route=cameron → task for Cameron", async () => {
+      const r = await capture(JSON.stringify({ text: cText, route: "cameron" }), { "content-type": "application/json" });
+      if (r.status !== 200 || !r.json?.ok) throw new Error(`HTTP ${r.status} ${JSON.stringify(r.json)}`);
+      const s = JSON.stringify(await tool("list_tasks", { assignee: "cameron" }));
+      if (!s.includes(`Smoke capture ${stamp}`)) throw new Error("no Cameron task for the captured ask");
+    });
+    await step("capture API: multipart with a JPEG → ask with attachment", async () => {
+      const jp = await context.newPage();
+      await jp.setContent("<body style='margin:0;background:#c33'></body>");
+      const jpeg = await jp.screenshot({ type: "jpeg", clip: { x: 0, y: 0, width: 8, height: 8 } });
+      await jp.close();
+      const fd = new FormData();
+      const t = `Smoke photo ${stamp}: new bowl`;
+      fd.set("text", t);
+      fd.set("route", "claude");
+      fd.append("file", new Blob([jpeg], { type: "image/jpeg" }), "bowl.jpg");
+      const r = await capture(fd);
+      if (r.status !== 200 || !r.json?.ok) throw new Error(`HTTP ${r.status} ${JSON.stringify(r.json)}`);
+      const asks = await tool("list_asks", {});
+      const list = Array.isArray(asks) ? asks : asks.asks ?? asks.items ?? [];
+      const a = list.find((x) => x.body?.includes(t)) ?? null;
+      if (!a) throw new Error("captured ask not in list_asks");
+      if (!a.attachments?.length || !/image\/jpeg/.test(a.attachments[0].contentType)) throw new Error(`no jpeg attachment: ${JSON.stringify(a.attachments)}`);
+    });
+    await step("capture API: bad key → 401", async () => {
+      const r = await capture(JSON.stringify({ text: "nope" }), { "content-type": "application/json" }, "nhq_notarealkey0000000000000000000000000000000");
+      if (r.status !== 401) throw new Error(`HTTP ${r.status}`);
+      const r2 = await capture(JSON.stringify({ text: "nope" }), { "content-type": "application/json" }, null);
+      if (r2.status !== 401) throw new Error(`no auth: HTTP ${r2.status}`);
+    });
+    await step("capture API: turned-off key → 401", async () => {
+      await page.goto(`${BASE}/settings/capture`, { waitUntil: "networkidle" });
+      page.once("dialog", (d) => d.accept());
+      const row = page.locator("li, tr, div", { hasText: `Smoke phone ${stamp}` }).filter({ has: page.locator("button:has-text('Turn off')") }).last();
+      await row.locator("button:has-text('Turn off')").click();
+      await page.locator(`text=Smoke phone ${stamp}`).waitFor({ state: "detached", timeout: 15000 });
+      const r = await capture(JSON.stringify({ text: "after revoke" }), { "content-type": "application/json" });
+      if (r.status !== 401) throw new Error(`HTTP ${r.status}`);
+    });
+
+    const adhocTitle = `Smoke one-off ${stamp}`;
+    await step("business page: Ad hoc vs monthly checklist split", async () => {
+      await tool("create_task", { client_id: "crab-o-clock", title: adhocTitle, assignee: "nora" });
+      await page.goto(`${BASE}/clients/crab-o-clock`, { waitUntil: "networkidle" });
+      const btn = page.locator("button:has-text(\"Create this month's checklist\")");
+      if (await btn.count()) {
+        await btn.first().click();
+        await page.waitForFunction(() => !document.body.innerText.includes("Create this month's checklist"), null, { timeout: 30000 });
+        await page.reload({ waitUntil: "networkidle" });
+      }
+      const t = await page.locator("main").innerText();
+      if (!/checklist/i.test(t) || !/Ad hoc/i.test(t)) throw new Error("no 'checklist' + 'Ad hoc' sections");
+      const iAd = t.search(/\nAd hoc/i); const iTitle = t.indexOf(adhocTitle);
+      if (iAd < 0 || iTitle < iAd) throw new Error("ad hoc task not under the Ad hoc heading");
+      await page.goto(`${BASE}/tasks?scope=plan&client=crab-o-clock&view=list`, { waitUntil: "networkidle" });
+      if (await page.locator(`text=${adhocTitle}`).count()) throw new Error("ad hoc task shows in Monthly plan scope");
+      await page.goto(`${BASE}/tasks?scope=adhoc&client=crab-o-clock&view=list`, { waitUntil: "networkidle" });
+      if (!(await page.locator(`text=${adhocTitle}`).count())) throw new Error("ad hoc task missing from Ad hoc scope");
+    });
+
+    await step("/stats: log today's numbers for Instagram + TikTok", async () => {
+      await page.goto(`${BASE}/stats`, { waitUntil: "networkidle" });
+      const ig = page.locator("#instagram_followers");
+      if (!(await ig.isVisible())) await page.locator("summary", { hasText: /Log/i }).first().click();
+      await ig.fill("23,456");
+      await page.fill("#instagram_views", "345k");
+      await page.fill("#tiktok_followers", "8,765");
+      await page.locator("button[type='submit']:has-text(\"Save today's numbers\")").click();
+      await page.locator("text=Saved Instagram and TikTok").waitFor({ timeout: 30000 });
+      await page.reload({ waitUntil: "networkidle" });
+      const t = await page.locator("main").innerText();
+      for (const n of ["23,456", "8,765"]) if (!t.includes(n)) throw new Error(`${n} not shown on /stats`);
+    });
+    await step("mcp get_creator_stats returns the logged numbers", async () => {
+      const s = JSON.stringify(await tool("get_creator_stats", {}));
+      if (!s.includes("23456") || !s.includes("8765")) throw new Error(`numbers missing: ${s.slice(0, 300)}`);
+    });
+  }
+
   for (const e of errors) fail(`flows: ${e}`);
   await context.close();
 }
@@ -633,6 +755,14 @@ function auditPage(touch) {
   return res;
 }
 
+const DEV_BLIP = /ERR_CONNECTION_REFUSED|ERR_CONNECTION_RESET|ERR_INCOMPLETE_CHUNKED_ENCODING|ERR_EMPTY_RESPONSE|webpack-hmr|Failed to fetch RSC payload|interrupted by another navigation|chrome-error:/;
+async function waitForServer() {
+  for (let i = 0; i < 90; i++) {
+    try { if ((await fetch(`${BASE}/login`)).ok) return; } catch {}
+    await new Promise((r) => setTimeout(r, 2000));
+  }
+}
+
 async function responsive(browser) {
   console.log("\n== responsive");
   const routes = [...ROUTES, ...(await detailRoutes(browser))];
@@ -652,13 +782,23 @@ async function responsive(browser) {
     page.on("pageerror", (e) => errs.push(e.message.slice(0, 200)));
     for (const path of routes) {
       const where = `${vp.name}${scheme === "dark" ? "d" : ""}`;
-      errs.length = 0;
-      let res;
-      try { res = await page.goto(BASE + path, { waitUntil: "networkidle", timeout: 90000 }); } catch (e) { note(`${path}: navigation ${e.message.split("\n")[0]}`, where); continue; }
+      let res, a, navErr = null;
+      // `next dev` restarts itself when it nears its memory limit; that drops connections mid-run.
+      // Wait for it to come back and retry the page instead of reporting a dev-server blip as an app bug.
+      for (let attempt = 0; attempt < 3; attempt++) {
+        errs.length = 0; navErr = null;
+        try {
+          res = await page.goto(BASE + path, { waitUntil: "networkidle", timeout: 90000 });
+          await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+          await page.waitForTimeout(120);
+          a = await page.evaluate(auditPage, !!vp.touch);
+        } catch (e) { navErr = e.message.split("\n")[0]; }
+        const blip = (navErr && DEV_BLIP.test(navErr)) || errs.some((e) => DEV_BLIP.test(e));
+        if (!blip) break;
+        await waitForServer();
+      }
+      if (navErr) { note(`${path}: navigation ${navErr}`, where); continue; }
       if (res?.status() !== 200) note(`${path}: HTTP ${res?.status()}`, where);
-      await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
-      await page.waitForTimeout(120);
-      const a = await page.evaluate(auditPage, !!vp.touch);
       pages++;
       if (a.overflow) note(`${path}: horizontal overflow ${a.overflow.replace(/\d+ > \d+: /, "")}`, where);
       for (const f of a.smallFonts) note(`${path}: input font < 16px: ${f}`, where);

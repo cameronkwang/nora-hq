@@ -5,6 +5,7 @@ import { getClientMonth } from "@/lib/reports";
 import { addMonths, currentMonth, today } from "@/lib/dates";
 import { monthBounds } from "@/lib/integrations/time"; // app-timezone month edges
 import { listAskMessagesFor } from "@/lib/ops";
+import { taskScopeWhere, type TaskScope } from "@/lib/ops-tasks";
 
 /**
  * Read-side queries for the Claude connector. Everything here returns plain, compact objects
@@ -197,10 +198,13 @@ export async function listTasks(opts: {
   status?: schema.TaskStatus | "open";
   month?: string;
   assignee?: schema.Assignee;
+  scope?: TaskScope;
   limit: number;
 }) {
   const db = await getDb();
   const where: SQL[] = [];
+  const scopeWhere = taskScopeWhere(opts.scope ?? "all");
+  if (scopeWhere) where.push(scopeWhere);
   const status = opts.status ?? "open";
   if (status === "open") where.push(inArray(schema.tasks.status, OPEN_TASK));
   else where.push(eq(schema.tasks.status, status));

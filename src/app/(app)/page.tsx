@@ -8,6 +8,8 @@ import { APP_TZ, currentMonth, monthLabel, relativeTime, today } from "@/lib/dat
 import { askThreadState, listAskMessagesFor } from "@/lib/ops";
 import { isAskRoute, personKey, type AskRoute } from "@/components/ask-route";
 import { TaskList, TaskRow, isOverdue } from "@/components/task-row";
+import { blobEnabled } from "@/lib/uploads";
+import { QuickAsk } from "@/components/quick-ask";
 import { Badge, Card, EmptyState, PageHeader, ProgressBar, clientLabel, cx, formatNumber, humanize } from "@/components/ui";
 
 export const dynamic = "force-dynamic";
@@ -111,6 +113,9 @@ export default async function Home({ searchParams }: { searchParams: Promise<Rec
 
   return (
     <div className="flex flex-col gap-6">
+      {/* Drop anything in — first thing on screen. */}
+      <QuickAsk me={me} directUpload={blobEnabled()} />
+
       <PageHeader title={`${greeting()}, ${first}`} subtitle={todayLabel()} />
 
       {sent && (
@@ -132,7 +137,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<Rec
         />
         <Tile href="/asks" value={asksWaiting.n} label="Asks waiting" />
         <Tile
-          href="/tasks"
+          href="/tasks?scope=all"
           value={dueCount.n}
           label="Tasks due"
           hint={overdueCount.n > 0 ? <span className="font-semibold text-danger">{overdueCount.n} overdue</span> : null}
@@ -203,7 +208,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<Rec
             )}
             {tasks.length > 0 && (
               <section>
-                <SectionHead title="Due today or overdue" href="/tasks" total={dueCount.n} shown={tasks.length} />
+                <SectionHead title="Due today or overdue" href="/tasks?scope=all" total={dueCount.n} shown={tasks.length} />
                 <TaskList>
                   {tasks.map((t) => (
                     <TaskRow key={t.id} task={t} clientName={t.clientId ? names.get(t.clientId) : null} />
@@ -313,7 +318,7 @@ function BusinessCard({ cm, now }: { cm: ClientMonth; now: string }) {
   const chips = [
     { n: cm.pendingDrafts, label: cm.pendingDrafts === 1 ? "draft" : "drafts", href: `/review?client=${id}`, cls: "text-accent" },
     { n: cm.unrepliedReviews, label: cm.unrepliedReviews === 1 ? "review" : "reviews", href: `/reviews?client=${id}`, cls: "text-google" },
-    { n: overdue, label: "overdue", href: `/tasks?client=${id}`, cls: "text-danger" },
+    { n: overdue, label: "overdue", href: `/tasks?client=${id}&scope=all`, cls: "text-danger" },
   ].filter((c) => c.n > 0);
 
   return (

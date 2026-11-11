@@ -7,6 +7,7 @@ import { addMonths, currentMonth, lastMonths, monthLabel, today } from "@/lib/da
 import type { Task } from "@/lib/schema";
 import { TaskList, TaskRow } from "@/components/task-row";
 import { TaskQuickAdd } from "@/components/task-quick-add";
+import { TaskScopeSwitch } from "@/components/task-scope";
 import { TaskFilters } from "@/components/task-filters";
 import { TaskMenu } from "@/components/task-menu";
 import { TaskSelection, TaskSelectAll, TaskSelectToggle } from "@/components/task-selection";
@@ -30,6 +31,8 @@ function addDays(date: string, n: number) {
 }
 
 const VIEW_LABEL = { list: "List", board: "Board", table: "Table" } as const;
+const SCOPE_LABEL = { adhoc: "Ad hoc", plan: "Monthly plan", all: "All" } as const;
+const SCOPE_NOUN = { adhoc: "ad hoc task", plan: "plan task", all: "task" } as const;
 
 export default async function TasksPage({ searchParams }: { searchParams: Promise<SP> }) {
   const user = await requireUser();
@@ -70,13 +73,18 @@ export default async function TasksPage({ searchParams }: { searchParams: Promis
   const exportHref = tasksHref({ ...f, view: "list", group: "due" }, {}, "/tasks/export");
   const shown = tasks.length;
   const clearHref = tasksHref({ ...f, client: "", assignee: "", status: "open", month: "" });
+  const noun = SCOPE_NOUN[f.scope];
 
   let body: React.ReactNode;
   if (shown === 0 && f.view !== "board") {
     body = (
-      <EmptyState title={filtered ? "No tasks match these filters." : "Nothing on the list."}>
+      <EmptyState title={filtered ? `No ${noun}s match these filters.` : f.scope === "adhoc" ? "No ad hoc tasks. All clear." : f.scope === "plan" ? "No monthly-plan tasks." : "Nothing on the list."}>
         {filtered ? (
           <Link href={clearHref} className="text-accent hover:underline">Clear filters</Link>
+        ) : f.scope === "adhoc" ? (
+          "One-off jobs land here: add one above, or send an ask to Cameron or Nora."
+        ) : f.scope === "plan" ? (
+          "Open a business and create this month’s checklist from its plan."
         ) : (
           "Add one above, or open a business and create this month’s checklist from its plan."
         )}
@@ -111,7 +119,7 @@ export default async function TasksPage({ searchParams }: { searchParams: Promis
         title="Tasks"
         subtitle={
           <>
-            {shown} {f.view === "board" ? "on the board" : `task${shown === 1 ? "" : "s"}`}
+            {shown} {f.view === "board" ? `${noun}${shown === 1 ? "" : "s"} on the board` : `${noun}${shown === 1 ? "" : "s"}`}
             {shown === 500 && " (showing first 500)"}
           </>
         }
@@ -132,24 +140,34 @@ export default async function TasksPage({ searchParams }: { searchParams: Promis
         }
       />
 
+      <TaskScopeSwitch
+        current={f.scope}
+        options={(["adhoc", "plan", "all"] as const).map((s) => ({ value: s, label: SCOPE_LABEL[s], href: tasksHref(f, { scope: s === "adhoc" ? "" : s }) }))}
+      />
+
       {flash && (
         <p role={flash.tone === "danger" ? "alert" : "status"} className={cx("mb-4 rounded-lg px-3 py-2 text-sm", flash.tone === "danger" ? "bg-danger-soft text-danger" : "bg-ok-soft text-ok")}>
           {flash.text}
         </p>
       )}
 
-      <Card className="mb-4">
-        <PhoneDisclosure summary="New task">
-        <TaskQuickAdd
-          clients={clientOpts}
-          defaultClientId={f.client && f.client !== "none" ? f.client : undefined}
-          defaultAssignee={assigneeFor(user)}
-          returnTo={returnTo}
-        />
-        </PhoneDisclosure>
-      </Card>
+      {/* Quick add makes ad hoc tasks (no plan item), so it's hidden on the Monthly plan scope where the new task wouldn't show. */}
+      {f.scope !== "plan" && (
+        <Card className="mb-4">
+          <PhoneDisclosure summary="Ad hoc task">
+            <TaskQuickAdd
+              clients={clientOpts}
+              defaultClientId={f.client && f.client !== "none" ? f.client : undefined}
+              defaultAssignee={assigneeFor(user)}
+              returnTo={returnTo}
+              label="New ad hoc task"
+            />
+          </PhoneDisclosure>
+        </Card>
+      )}
 
       <TaskFilters
+        scope={f.scope}
         view={f.view}
         client={f.client}
         assignee={f.assignee}
@@ -192,7 +210,7 @@ function ListBody({
     const order = [...clients.map((c) => c.id), ...[...byClient.keys()].filter((k) => k && !names.has(k)), ""];
     groups = order
       .filter((k) => byClient.has(k))
-      .map((k) => ({ key: k || "none", label: k ? (names.get(k) ?? "Archived business") : "No business", tasks: byClient.get(k)! }));
+      .map((k) => ({ key: k || "none", label: k ? (names.get(k) ?? "Archived business") : "No business / general", tasks: byClient.get(k)! }));
   } else {
     const buckets: Group[] = [
       { key: "overdue", label: "Overdue", tone: "danger", tasks: [] },
