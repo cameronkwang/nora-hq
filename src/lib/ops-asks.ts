@@ -106,6 +106,7 @@ export async function createRoutedAsk(
   input: z.input<typeof AskInput>,
   route: { kind: schema.AskKind; forWho: schema.AskFor },
   actor: string,
+  opts: { skipTask?: boolean } = {},
 ) {
   const v = AskInput.parse(input);
   const r = TriageInput.pick({ kind: true, forWho: true }).parse(route);
@@ -117,6 +118,7 @@ export async function createRoutedAsk(
   }).returning();
   const routed = r.kind === "auto" && r.forWho === "auto" ? "" : ` (${KIND_LABEL[r.kind]} for ${FOR_LABEL[r.forWho]})`;
   await logActivity({ actor, action: "ask.created", entityType: "ask", entityId: id, clientId: row.clientId, summary: `New ask${routed}: ${v.body.slice(0, 80)}` });
-  const taskId = r.kind === "request" && isPerson(r.forWho) ? await ensurePersonTask(row, r.forWho, actor) : null;
+  // skipTask: callers that track the work elsewhere (e.g. the collab inbox) avoid a duplicate to-do.
+  const taskId = !opts.skipTask && r.kind === "request" && isPerson(r.forWho) ? await ensurePersonTask(row, r.forWho, actor) : null;
   return { id, taskId };
 }

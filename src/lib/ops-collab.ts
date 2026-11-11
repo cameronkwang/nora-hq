@@ -272,7 +272,8 @@ export async function submitCollabRequest(input: CollabInputT | Record<string, u
       "",
       `Open it: /collabs/${id}`,
     ].filter((l) => l !== null).join("\n");
-    const ask = await createRoutedAsk({ body, clientId }, { kind: "request", forWho: "nora" }, actor);
+    // No task: the request is already tracked in the Collab requests inbox; a task would duplicate it.
+    const ask = await createRoutedAsk({ body, clientId }, { kind: "request", forWho: "nora" }, actor, { skipTask: true });
     askId = ask.id;
   } catch (e) {
     console.error("[collab] ask create failed", id, e);
@@ -339,6 +340,9 @@ export async function setCollabStatus(id: string, status: schema.CollabRequestSt
     } else {
       // assignee passed explicitly: TaskInput.partial() would otherwise default it to "unassigned".
       for (const t of tasks) await updateTask(t.id, { status: "done", assignee: t.assignee }, actor);
+      // Requests created without a task: close the ask directly once Nora decides.
+      const [ask] = await db.select({ status: schema.asks.status }).from(schema.asks).where(eq(schema.asks.id, cur.askId));
+      if (ask && ask.status !== "done" && ask.status !== "archived") await updateAsk(cur.askId, { status: "done" }, actor);
     }
   }
   return row;
