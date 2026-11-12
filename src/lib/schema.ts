@@ -674,3 +674,17 @@ export type DealDeliverable = typeof dealDeliverables.$inferSelect;
 export type PushSubscription = typeof pushSubscriptions.$inferSelect;
 export type SavedReply = typeof savedReplies.$inferSelect;
 export type ClientReport = typeof clientReports.$inferSelect;
+
+/* ───────────────────────── Sign-in protection ───────────────────────── */
+
+/** Failed sign-ins, for lockout. IPs are stored only as a salted hash. Rows older than 7 days are pruned. */
+export const loginAttempts = pgTable(
+  "login_attempts",
+  {
+    id: text("id").primaryKey(),
+    ipHash: text("ip_hash").notNull(),
+    email: text("email"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("login_attempts_ip_idx").on(t.ipHash, t.createdAt), index("login_attempts_email_idx").on(t.email, t.createdAt)],
+);
