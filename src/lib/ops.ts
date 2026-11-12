@@ -9,6 +9,7 @@ import { publishInstagramPost, replyToInstagramComment } from "./integrations/in
 import { replyToGoogleReview } from "./integrations/google";
 import { sendOutreachEmail } from "./integrations/gmail";
 import { postReviewKey } from "./post-key";
+import { notifyDraftCreated } from "./notify";
 import type { IntegrationResult } from "./integrations/types";
 
 /**
@@ -427,6 +428,7 @@ export async function createDraft(input: z.input<typeof DraftInput>, actor = "cl
   await db.insert(schema.drafts).values({ id, clientId: v.clientId || null, kind: v.kind, title: v.title.trim(), body: v.body, meta: v.meta, taskId: v.taskId || null, askId: v.askId || null, createdBy: actor });
   if (v.taskId) await db.update(schema.tasks).set({ status: "needs_review" }).where(and(eq(schema.tasks.id, v.taskId), inArray(schema.tasks.status, ["todo", "in_progress", "blocked"])));
   await logActivity({ actor, action: "draft.created", entityType: "draft", entityId: id, clientId: v.clientId, summary: `Draft for review: ${v.title}` });
+  notifyDraftCreated({ id, title: v.title }, actor);
   return id;
 }
 
@@ -436,6 +438,11 @@ export async function reviseDraft(id: string, patch: { body?: string; title?: st
   const [cur] = await db.select().from(schema.drafts).where(eq(schema.drafts.id, id));
   if (!cur) throw new OpsError("draft not found");
   if (cur.status === "sent") throw new OpsError("Already sent — can't edit");
+  if (cur.kind === "report" && patch.meta) {
+    for (const key of ["reportId", "audience"]) {
+      if (key in patch.meta && String(patch.meta[key] ?? "") !== String(cur.meta[key] ?? "")) throw new OpsError(`Can't change which report a draft is for (meta.${key}).`);
+    }
+  }
   if ((cur.kind === "lead_email" || cur.kind === "lead_dm") && patch.meta) {
     if ("leadId" in patch.meta && String(patch.meta.leadId) !== String(cur.meta.leadId ?? "")) throw new OpsError("Can't change which lead a pitch is for — create a new draft instead.");
     if (actor === "claude" && cur.kind === "lead_email" && patch.meta.to !== undefined && String(patch.meta.to).trim().toLowerCase() !== String(cur.meta.to ?? "").toLowerCase())
@@ -486,6 +493,11 @@ export async function approveDraft(id: string, actor: string, opts: { body?: str
   if (!cur) throw new OpsError("draft not found");
   if (cur.kind === "outreach_email" || cur.kind === "outreach_dm") await assertContactable(cur);
   if (cur.kind === "lead_email" || cur.kind === "lead_dm") await assertLeadContactable(cur);
+  if (cur.kind === "report" && cur.meta.reportId) {
+    // meta.reportId alone isn't trusted: the report must point back at this draft (same business, external).
+    const { reportForDraft } = await import("./ops-reports");
+    await reportForDraft(cur);
+  }
   if ((cur.kind === "instagram_post" || cur.kind === "tiktok_post") && cur.meta.postId) {
     // The reviewer approved what the review page showed them. If the post's media, time or format changed since
     // (e.g. Claude edited it), refuse rather than schedule something the person never saw.
@@ -555,6 +567,11 @@ export async function approveDraft(id: string, actor: string, opts: { body?: str
     }
     case "lead_dm":
       return { status: "approved", message: "Approved. Copy it, send it from the app, then click “Mark sent”." };
+    case "report": {
+      // Marks the client report approved. Never sends: a person sends it from the business's Reports page.
+      const { onReportDraftApproved } = await import("./ops-reports");
+      return onReportDraftApproved(draft, actor);
+    }
     default:
       return { status: "approved", message: "Approved." };
   }

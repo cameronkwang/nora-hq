@@ -8,7 +8,12 @@ import { ConfirmButton, SubmitButton } from "@/components/client-form";
 import { CollabComp, CollabStatusBadge, CollabTypeChips } from "@/components/collab-bits";
 import { Card, PageHeader, StatusBadge, buttonClass, cx } from "@/components/ui";
 import { askCollabReplyAction, copyCollabContactAction, setCollabStatusAction } from "../actions";
+import { createDealFromCollabAction } from "../../deals/actions";
+import { dealForCollabRequest } from "@/lib/ops-deals";
+import { DealStatusBadge } from "@/components/deal-bits";
 import { STAGE_LABEL } from "../../leads/shared";
+import { ReplyPicker } from "@/components/reply-picker";
+import { firstName } from "@/components/reply-fill";
 
 export const dynamic = "force-dynamic";
 
@@ -16,7 +21,7 @@ type SP = Record<string, string | string[] | undefined>;
 const one = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v) ?? "";
 
 const DONE_MSG: Record<string, string> = {
-  accepted: "Accepted.",
+  accepted: "Accepted. Create the deal below when you’re ready — it’s pre-filled from the request.",
   declined: "Marked declined.",
   spam: "Marked as spam and cleared from Nora’s list.",
   reviewing: "Moved to reviewing.",
@@ -27,7 +32,10 @@ export default async function CollabRequestPage({ params, searchParams }: { para
   const [{ id }, sp] = await Promise.all([params, searchParams]);
   const req = await getCollabRequest(id);
   if (!req) notFound();
-  const [lead, drafts] = req.leadId ? await Promise.all([getLead(req.leadId), leadDrafts(req.leadId)]) : [null, []];
+  const [[lead, drafts], deal] = await Promise.all([
+    req.leadId ? Promise.all([getLead(req.leadId), leadDrafts(req.leadId)]) : Promise.resolve([null, []] as const),
+    dealForCollabRequest(req.id),
+  ]);
   const reply = drafts.find((d) => d.kind === "lead_email");
   const groups = collabAnswerGroups(req);
   const error = one(sp.error);
@@ -133,6 +141,23 @@ export default async function CollabRequestPage({ params, searchParams }: { para
             </p>
           </Card>
 
+          {(req.status === "accepted" || deal) && (
+            <Card title="Deal">
+              {deal ? (
+                <p className="flex flex-wrap items-center gap-2 text-sm">
+                  <DealStatusBadge status={deal.status} />
+                  <Link href={`/deals/${deal.id}`} className="font-medium text-accent hover:underline">Open the deal →</Link>
+                </p>
+              ) : (
+                <form action={createDealFromCollabAction} className="space-y-2">
+                  <input type="hidden" name="collabRequestId" value={req.id} />
+                  <SubmitButton pendingLabel="Creating…" className="w-full sm:w-auto">Create deal</SubmitButton>
+                  <p className="text-xs text-muted">Pre-filled from this request: contact, address, compensation, usage, menu/dietary/filming notes and deliverables. Claude is asked for a shot list.</p>
+                </form>
+              )}
+            </Card>
+          )}
+
           {req.status !== "spam" && (
             <Card title="Reply">
               {reply && (
@@ -152,7 +177,10 @@ export default async function CollabRequestPage({ params, searchParams }: { para
                   Claude’s draft goes to the lead’s saved email ({leadEmail ?? "none saved"}), not {req.email}. Copy the form’s contact onto the lead below if this person should get it.
                 </p>
               )}
-              <a href={`mailto:${req.email}`} className={cx(buttonClass("ghost", "sm"), "mt-2")}>Or email {req.email} yourself</a>
+              <div className="mt-2 flex flex-wrap items-center gap-2">
+                <a href={`mailto:${req.email}`} className={buttonClass("ghost", "sm")}>Or email {req.email} yourself</a>
+                <ReplyPicker context={{ name: firstName(req.contactName), business: req.businessName }} category="collab" label="Copy a saved reply" variant="ghost" size="sm" />
+              </div>
             </Card>
           )}
 

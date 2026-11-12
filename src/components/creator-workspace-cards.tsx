@@ -2,6 +2,9 @@ import Link from "next/link";
 import type { ReactNode } from "react";
 import type { CollabRequest, Client, Lead } from "@/lib/schema";
 import type { PlatformSummary } from "@/lib/ops-creator";
+import type { DealsCardData } from "@/lib/ops-deals";
+import { formatMoney, formatVisit } from "./deal-bits";
+import { DELIVERABLE_LABEL } from "@/lib/ops-deals";
 import { formatDate, relativeTime } from "@/lib/dates";
 import { STAGE_LABEL } from "@/app/(app)/leads/shared";
 import { NextStep } from "./lead-bits";
@@ -37,9 +40,12 @@ export function CreatorHeader({ client }: { client: Client }) {
           )}
         </div>
       </div>
-      <LinkButton href={`/clients/${client.id}/settings`} size="sm" className="self-start sm:self-auto">
-        Voice &amp; plan
-      </LinkButton>
+      <div className="flex flex-wrap gap-2 self-start sm:self-auto">
+        <LinkButton href="/kit-settings" size="sm">Media kit</LinkButton>
+        <LinkButton href={`/clients/${client.id}/settings`} size="sm">
+          Voice &amp; plan
+        </LinkButton>
+      </div>
     </div>
   );
 }
@@ -169,6 +175,62 @@ export function CollabLeadsCard({ rows, total, today }: { rows: Lead[]; total: n
             </li>
           ))}
         </ul>
+      )}
+    </Card>
+  );
+}
+
+/* ------------------------------------------------------------------- deals */
+
+/**
+ * Collab deals at a glance: the next visit, deliverables due in the next 7 days and what Nora is owed.
+ * Data: dealsCardData() from lib/ops-deals. Links to /deals (not a nav item — this card is the way in).
+ */
+export function DealsCard({ data }: { data: DealsCardData }) {
+  const { nextVisit, dueThisWeek, owed } = data;
+  return (
+    <Card
+      title="Deals"
+      actions={<Link href="/deals" className="-my-2 inline-flex min-h-11 items-center text-xs text-accent hover:underline md:min-h-0">All deals</Link>}
+      padded={false}
+    >
+      <Link href="/deals" className="flex min-h-11 flex-wrap items-baseline gap-x-2 border-b border-border px-4 py-3 hover:bg-surface-2">
+        <span className="text-sm text-muted">Owed</span>
+        <span className="text-xl font-semibold tabular-nums">{formatMoney(owed.owedCents) || "$0"}</span>
+        {owed.overdueCount > 0 ? (
+          <span className="text-sm font-semibold text-danger">({owed.overdueCount} overdue)</span>
+        ) : owed.count > 0 ? (
+          <span className="text-xs text-muted">{owed.count} deal{owed.count === 1 ? "" : "s"}</span>
+        ) : null}
+      </Link>
+      {nextVisit ? (
+        <Link href={`/deals/${nextVisit.id}/visit`} className="flex min-h-11 items-center gap-3 border-b border-border px-4 py-3 hover:bg-surface-2">
+          <span className="min-w-0 flex-1">
+            <span className="block text-xs font-medium text-muted">Next visit</span>
+            <span className="block truncate text-sm font-medium">{nextVisit.businessName}</span>
+          </span>
+          <span className="shrink-0 text-xs tabular-nums text-muted">{formatVisit(nextVisit.visitAt)}</span>
+        </Link>
+      ) : (
+        <p className="border-b border-border px-4 py-3 text-sm text-muted">No visits scheduled.</p>
+      )}
+      {dueThisWeek.length > 0 ? (
+        <ul className="divide-y divide-border">
+          {dueThisWeek.map((d, i) => (
+            <li key={`${d.dealId}-${i}`}>
+              <Link href={`/deals/${d.dealId}`} className="flex min-h-11 items-center gap-3 px-4 py-2.5 hover:bg-surface-2">
+                <span className="min-w-0 flex-1 truncate text-sm">
+                  {DELIVERABLE_LABEL[d.kind]} <span className="text-muted">· {d.businessName}</span>
+                </span>
+                <span className={cx("shrink-0 text-xs tabular-nums", d.overdue ? "font-semibold text-danger" : "text-muted")}>
+                  {d.overdue ? "late · " : "due "}{formatDate(d.dueDate)}
+                </span>
+              </Link>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="px-4 py-3 text-sm text-muted">Nothing due to post this week.</p>
       )}
     </Card>
   );

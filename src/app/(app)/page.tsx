@@ -10,6 +10,7 @@ import { isAskRoute, personKey, type AskRoute } from "@/components/ask-route";
 import { TaskList, TaskRow, isOverdue } from "@/components/task-row";
 import { blobEnabled } from "@/lib/uploads";
 import { QuickAsk } from "@/components/quick-ask";
+import { NotifyHomeCard } from "@/components/notify-home-card";
 import { NewClientLink } from "@/components/onboard-link";
 import { Badge, Card, EmptyState, PageHeader, ProgressBar, clientLabel, cx, formatNumber, humanize } from "@/components/ui";
 
@@ -118,6 +119,9 @@ export default async function Home({ searchParams }: { searchParams: Promise<Rec
     <div className="flex flex-col gap-6">
       {/* Drop anything in — first thing on screen. */}
       <QuickAsk me={me} directUpload={blobEnabled()} />
+
+      {/* One-time "turn on phone alerts" prompt; hides itself once handled. */}
+      <NotifyHomeCard />
 
       <PageHeader title={`${greeting()}, ${first}`} subtitle={todayLabel()} />
 

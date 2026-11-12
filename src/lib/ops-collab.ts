@@ -7,6 +7,7 @@ import { newId } from "./ids";
 import { logActivity } from "./activity";
 import { OpsError, deleteTask, updateAsk, updateTask } from "./ops";
 import { createRoutedAsk } from "./ops-asks";
+import { notifyCollabRequest } from "./notify";
 import { updateLead, upsertLead } from "./ops-leads";
 import { formatDate } from "./dates";
 import {
@@ -286,6 +287,7 @@ export async function submitCollabRequest(input: CollabInputT | Record<string, u
     actor, action: "collab.received", entityType: "collab_request", entityId: id, clientId,
     summary: `Collab request from ${v.businessName} (${v.city})${compensation ? ` — ${compensation}` : ""}`,
   });
+  notifyCollabRequest({ id, businessName: v.businessName, city: v.city, compensation });
   return { id, leadId, askId };
 }
 

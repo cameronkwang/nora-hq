@@ -25,7 +25,9 @@ export const COLLAB_COPY = {
     disclosure: "Sponsored and gifted content is always clearly disclosed (#ad / Paid partnership / “gifted”) per FTC guidelines.",
     honest: "Reviews are honest — a collab doesn’t guarantee positive coverage.",
   },
-  budgetHint: "Helps me suggest the right package. Paid usage (ads/whitelisting) is priced separately.",
+  budgetHint: "Paid collabs start at $600 — pick the closest range, or “Custom package” and we’ll shape one together. Paid usage (ads/whitelisting) is priced separately.",
+  /** Shown under the intro when the media kit's "Show rate" is on (the line itself is set in the media kit settings). */
+  mediaKitLink: "See my media kit",
   paidUsageNote: "Paid usage is priced separately.",
   submit: "Send request",
   sending: "Sending…",
@@ -87,14 +89,28 @@ export const COMPENSATION: Option[] = [
 /** Compensation values that show the budget question. */
 export const PAID_COMPENSATION = ["paid", "paid_hosted"] as const;
 
+/** Nora's public rate line — the default for the media kit (Settings live in app_settings "media_kit"). */
+export const DEFAULT_RATE_LINE = "Collabs start at $600 — custom packages available; reach out to Nora directly.";
+
+/**
+ * Budget ranges offered on the form (paid collabs start at $600). "1000_2500" and "2500_plus" keep the values
+ * the earlier list used, so old answers read the same. Retired values still display via LEGACY_LABELS.
+ */
 export const BUDGETS: Option[] = [
-  { value: "under_250", label: "Under $250" },
-  { value: "250_500", label: "$250–500" },
-  { value: "500_1000", label: "$500–1,000" },
-  { value: "1000_2500", label: "$1,000–2,500" },
+  { value: "600_1000", label: "$600–$1,000" },
+  { value: "1000_2500", label: "$1,000–$2,500" },
   { value: "2500_plus", label: "$2,500+" },
-  { value: "discuss", label: "Prefer to discuss" },
+  { value: "custom", label: "Custom package — let’s talk" },
+  { value: "gifted_only", label: "Gifted / hosted only" },
 ];
+
+/** Labels for option values no longer offered, so requests stored before a list changed still read nicely. */
+const LEGACY_LABELS: Record<string, string> = {
+  under_250: "Under $250",
+  "250_500": "$250–500",
+  "500_1000": "$500–1,000",
+  discuss: "Prefer to discuss",
+};
 
 export const USAGE: Option[] = [
   { value: "organic", label: "Organic — shared on Nora’s page only" },
@@ -153,7 +169,7 @@ export const FIELD_STEP: Record<CollabField, 0 | 1 | 2> = {
 
 export function optionLabel(list: Option[], value: string | null | undefined): string {
   if (!value) return "";
-  return list.find((o) => o.value === value)?.label ?? value;
+  return list.find((o) => o.value === value)?.label ?? LEGACY_LABELS[value] ?? value;
 }
 
 export function optionLabels(list: Option[], values: unknown): string[] {

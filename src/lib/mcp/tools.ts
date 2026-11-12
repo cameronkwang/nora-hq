@@ -481,6 +481,8 @@ export function registerTools(server: McpServer, ctx: Ctx) {
     const db = await getDb();
     const meta: Record<string, unknown> = { ...a.meta };
     const warnings: string[] = [];
+    if (a.kind === "report" && ("reportId" in meta || "audience" in meta))
+      throw new ToolError("Monthly owner reports come from create_report, not create_draft — don't pass meta.reportId/audience here.");
 
     if (a.task_id) {
       const [t] = await db.select().from(schema.tasks).where(eq(schema.tasks.id, a.task_id));
@@ -585,7 +587,7 @@ export function registerTools(server: McpServer, ctx: Ctx) {
     const warnings: string[] = [];
     const meta = a.meta ? { ...a.meta } : undefined;
     if (meta) {
-      for (const key of ["reviewId", "outreachId", "postId", "leadId"]) {
+      for (const key of ["reviewId", "outreachId", "postId", "leadId", "reportId", "audience"]) {
         if (key in meta && String(meta[key]) !== String(cur.meta[key] ?? "")) throw new ToolError(`Can't change meta.${key} — create a new draft instead.`);
       }
       if (cur.kind === "outreach_email" && meta.to !== undefined && String(meta.to).trim().toLowerCase() !== String(cur.meta.to ?? "").toLowerCase())

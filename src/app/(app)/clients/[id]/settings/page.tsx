@@ -6,6 +6,7 @@ import { Badge, Card, EmptyState, PageHeader, humanize } from "@/components/ui";
 import { ActionForm, ConfirmButton, SubmitButton } from "@/components/client-form";
 import { deleteDeliverableAction, saveDeliverableAction, setArchivedAction, updateClientAction } from "../../actions";
 import { listDeliverables } from "../../queries";
+import { setOwnerEmailAction } from "../../../reports/actions";
 
 export const dynamic = "force-dynamic";
 
@@ -107,6 +108,26 @@ export default async function ClientSettingsPage({ params }: { params: Promise<{
         </Card>
 
         <div className="flex flex-col gap-6">
+          {/* Owner email — where an approved external monthly report is sent (only when a person presses Send). */}
+          {!isCreatorClient(client) && (
+            <section id="owner" className="scroll-mt-4">
+              <Card title="Owner email">
+                <ActionForm action={setOwnerEmailAction.bind(null, client.id)} className="flex flex-col gap-3" ariaLabel="Owner email">
+                  <div>
+                    <label className="label" htmlFor="s-owner">Owner&apos;s email for monthly reports</label>
+                    <input id="s-owner" name="ownerEmail" type="email" inputMode="email" autoCapitalize="none" autoComplete="off" defaultValue={client.ownerEmail ?? ""} className="input" placeholder="owner@business.com" />
+                    <p className="mt-1 text-xs text-muted">
+                      Owners only get the external report you approve and send from <Link href={`/reports?client=${client.id}`} className="text-accent hover:underline">Reports</Link>. Nothing is sent automatically.
+                    </p>
+                  </div>
+                  <div>
+                    <SubmitButton size="sm">Save owner email</SubmitButton>
+                  </div>
+                </ActionForm>
+              </Card>
+            </section>
+          )}
+
           {/* Monthly plan */}
           <section id="plan" className="scroll-mt-4">
             <Card title="Monthly plan">

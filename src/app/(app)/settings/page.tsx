@@ -12,6 +12,7 @@ import { listLocations, type GoogleLocation } from "@/lib/integrations/google";
 import { Badge, Card, EmptyState, PageHeader, buttonClass, clientLabel, cx } from "@/components/ui";
 import { ConfirmButton, SubmitButton } from "@/components/client-form";
 import { CopyButton } from "@/components/copy-button";
+import { SavedRepliesRow } from "@/components/reply-links";
 import {
   checkRepliesAction, disconnectAction, refreshInstagramTokensAction, saveLocationsAction, syncInstagramViewsAction, syncReviewsAction,
 } from "./actions";
@@ -121,6 +122,20 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
           </span>
           <span aria-hidden className="text-muted">→</span>
         </Link>
+
+        {/* Phone notifications + private calendar link */}
+        <Link href="/settings/notifications" className="flex min-h-11 items-center justify-between gap-3 rounded-xl border border-border bg-surface px-4 py-3 hover:bg-surface-2">
+          <span className="min-w-0">
+            <span className="block font-medium">Notifications &amp; calendar</span>
+            <span className="block text-sm text-muted">Phone alerts and your calendar link</span>
+          </span>
+          <span aria-hidden className="text-muted">→</span>
+        </Link>
+
+        {/* Saved replies */}
+        <div className="rounded-xl border border-border bg-surface px-3 py-1">
+          <SavedRepliesRow />
+        </div>
 
         {/* Instagram */}
         <Card
