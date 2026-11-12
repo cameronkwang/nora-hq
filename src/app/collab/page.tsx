@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { CollabForm } from "@/components/collab-form";
 import { COLLAB_COPY as C } from "@/lib/collab-copy";
 import { collabFormToken } from "@/lib/ops-collab";
+import { getPublicRateInfo } from "@/lib/ops-kit";
 
 /**
  * PUBLIC — no sign-in, no app chrome (lives outside the (app) group; middleware lets "/collab" through).
@@ -26,7 +27,9 @@ const NO_JS_CSS = `
 .collab-step + .collab-step { margin-top: 2.5rem; padding-top: 2rem; border-top: 1px solid var(--border); }
 `;
 
-export default function CollabPage() {
+export default async function CollabPage() {
+  // The rate line and media-kit link come from Nora's media kit settings; never block the form on them.
+  const rate = await getPublicRateInfo().catch(() => ({ rateLine: null, kitLive: false }));
   return (
     <main
       className="min-h-dvh px-[max(1rem,env(safe-area-inset-left))] pb-[max(2rem,env(safe-area-inset-bottom))] pt-[max(2rem,env(safe-area-inset-top))] sm:pt-14"
@@ -47,6 +50,16 @@ export default function CollabPage() {
           <h1 className="text-3xl font-semibold tracking-tight sm:text-4xl">{C.title}</h1>
           <p className="mt-1.5 text-[15px] font-medium text-accent">{C.handle}</p>
           <p className="mx-auto mt-4 max-w-md text-[16px] leading-relaxed text-muted">{C.intro}</p>
+          {(rate.rateLine || rate.kitLive) && (
+            <div className="mx-auto mt-4 max-w-md rounded-2xl bg-accent-soft px-4 py-2.5 text-[15px] leading-relaxed">
+              {rate.rateLine && <p className="py-1 font-medium">{rate.rateLine}</p>}
+              {rate.kitLive && (
+                <a href="/kit" className="flex min-h-11 items-center justify-center font-semibold text-accent underline-offset-2 hover:underline">
+                  {C.mediaKitLink} →
+                </a>
+              )}
+            </div>
+          )}
           <p className="mt-3 text-sm text-muted">{C.timeNote}</p>
         </header>
 

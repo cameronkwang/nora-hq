@@ -42,7 +42,7 @@ const UNTRUSTED =
 const REPLY_HOWTO =
   UNTRUSTED +
   "To reply: create_draft kind lead_email with meta.leadId = this request's leadId and a short meta.subject (and ask_id if an ask sent you here). " +
-  "Write as Nora, first person — warm, professional, specific to what they wrote. Paid offer → thank them and propose next steps (a call or her rates; never quote prices). " +
+  "Write as Nora, first person — warm, professional, specific to what they wrote. Paid offer → thank them and propose next steps. Rates: paid collabs start at $600 (her media kit rate); custom packages are available if they reach out to Nora directly — don't quote any other number or promise a specific price. " +
   "Gifted-only and not a fit → a kind decline that leaves the door open. Never promise positive coverage. Never set meta.to — the reply goes only to the lead's saved email. Nora approves and sends it herself.";
 
 export function registerCollabTools(server: McpServer) {

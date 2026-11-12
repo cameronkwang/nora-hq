@@ -18,7 +18,9 @@ import { getOnboardingStatus } from "@/lib/ops-onboarding";
 import { getCreatorStats } from "@/lib/ops-creator";
 import { activeCollabLeads, noraUnfiledTasks, openCollabRequests } from "@/lib/data";
 import { OnboardWelcome } from "@/components/onboard-welcome";
-import { CollabLeadsCard, CollabRequestsCard, CreatorHeader, CreatorRow, CreatorStatsCard } from "@/components/creator-workspace-cards";
+import { CollabLeadsCard, CollabRequestsCard, CreatorHeader, CreatorRow, CreatorStatsCard, DealsCard } from "@/components/creator-workspace-cards";
+import { SavedRepliesCard } from "@/components/reply-links";
+import { dealsCardData } from "@/lib/ops-deals";
 
 export const dynamic = "force-dynamic";
 
@@ -114,9 +116,12 @@ export default async function ClientPage({
               )}
             </div>
           </div>
-          <LinkButton href={`/clients/${client.id}/settings`} size="sm" className="self-start">
-            Settings &amp; plan
-          </LinkButton>
+          <div className="flex flex-wrap gap-2 self-start">
+            <LinkButton href={`/reports?client=${client.id}`} size="sm">Reports</LinkButton>
+            <LinkButton href={`/clients/${client.id}/settings`} size="sm">
+              Settings &amp; plan
+            </LinkButton>
+          </div>
         </div>
         <MonthPicker month={month} current={now} />
       </div>
@@ -401,12 +406,12 @@ function OutstandingCard({
       {(pendingDrafts > 0 || unrepliedReviews > 0) && (
         <div className="flex flex-wrap gap-2 border-b border-border px-4 py-3">
           {pendingDrafts > 0 && (
-            <Link href={`/review?client=${clientId}`} className="rounded-full bg-warn-soft px-3 py-1 text-xs font-medium text-warn hover:opacity-90">
+            <Link href={`/review?client=${clientId}`} className="inline-flex items-center rounded-full bg-warn-soft px-3 py-1 text-xs font-medium text-warn hover:opacity-90 pointer-coarse:min-h-11">
               {pendingDrafts} draft{pendingDrafts === 1 ? "" : "s"} waiting for review →
             </Link>
           )}
           {unrepliedReviews > 0 && (
-            <Link href={`/reviews?client=${clientId}`} className="rounded-full bg-info-soft px-3 py-1 text-xs font-medium text-info hover:opacity-90">
+            <Link href={`/reviews?client=${clientId}`} className="inline-flex items-center rounded-full bg-info-soft px-3 py-1 text-xs font-medium text-info hover:opacity-90 pointer-coarse:min-h-11">
               {unrepliedReviews} Google review{unrepliedReviews === 1 ? "" : "s"} without a reply →
             </Link>
           )}
@@ -499,11 +504,12 @@ function ContentCard({ clientId, posts, month }: { clientId: string; posts: Clie
  */
 async function CreatorWorkspace({ data, month, now }: { data: ClientMonth; month: string; now: string }) {
   const { client, plan, posts } = data;
-  const [collabs, stats, leads, unfiled] = await Promise.all([
+  const [collabs, stats, leads, unfiled, deals] = await Promise.all([
     openCollabRequests(5),
     getCreatorStats({ days: 31 }),
     activeCollabLeads(5),
     noraUnfiledTasks(month),
+    dealsCardData(),
   ]);
   // Her tasks: everything filed under her workspace, plus anything assigned to her with no business attached.
   const seen = new Set(data.openTasks.map((t) => t.id));
@@ -514,7 +520,10 @@ async function CreatorWorkspace({ data, month, now }: { data: ClientMonth; month
     <>
       <CreatorHeader client={client} />
       <div className="grid gap-6">
-        <CollabRequestsCard newCount={collabs.newCount} reviewingCount={collabs.reviewingCount} latest={collabs.latest} />
+        <CreatorRow>
+          <CollabRequestsCard newCount={collabs.newCount} reviewingCount={collabs.reviewingCount} latest={collabs.latest} />
+          <DealsCard data={deals} />
+        </CreatorRow>
 
         <CreatorRow>
           <PlanCard clientId={client.id} plan={plan} month={month} now={now} />
@@ -538,6 +547,8 @@ async function CreatorWorkspace({ data, month, now }: { data: ClientMonth; month
         </CreatorRow>
 
         <ContentCard clientId={client.id} posts={posts} month={month} />
+
+        <SavedRepliesCard />
       </div>
     </>
   );

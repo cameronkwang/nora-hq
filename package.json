@@ -8,7 +8,8 @@
     "start": "next start",
     "typecheck": "tsc --noEmit",
     "db:generate": "drizzle-kit generate",
-    "db:migrate": "tsx scripts/migrate.ts"
+    "db:migrate": "tsx scripts/migrate.ts",
+    "dev:sample-data": "tsx scripts/sample-seed.mts"
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.5.16",

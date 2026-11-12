@@ -4,9 +4,10 @@ import { listClients } from "@/lib/data";
 import { DRAFT_KINDS } from "@/lib/schema";
 import { DraftCard } from "@/components/draft-card";
 import { DraftFilters } from "@/components/draft-filters";
+import { DraftQueue } from "@/components/draft-queue";
 import { KIND_LABELS, MANUAL_SEND_KINDS } from "@/components/draft-checks";
 import { EmptyState, PageHeader, clientLabel, cx } from "@/components/ui";
-import { REVIEW_TABS, getDraft, gmailConnected, listDrafts, loadContexts, tabCounts, type ReviewTab } from "./queries";
+import { REVIEW_TABS, getDraft, gmailConnected, googleConnected, listDrafts, loadContexts, tabCounts, type ReviewTab } from "./queries";
 
 export const dynamic = "force-dynamic";
 
@@ -39,11 +40,12 @@ export default async function ReviewPage({ searchParams }: { searchParams: Promi
   const nextId = one(sp.next);
 
   const filters = { client: client || undefined, kind: kind || undefined };
-  const [clients, counts, focused, gmail] = await Promise.all([
+  const [clients, counts, focused, gmail, google] = await Promise.all([
     listClients({ includeArchived: true }),
     tabCounts(filters),
     focusId ? getDraft(focusId) : Promise.resolve(null),
     gmailConnected(),
+    googleConnected(),
   ]);
   const drafts = focused ? [focused] : await listDrafts(tab, filters);
   const contexts = await loadContexts(drafts);
@@ -143,8 +145,8 @@ export default async function ReviewPage({ searchParams }: { searchParams: Promi
         </EmptyState>
       )}
 
-      <div className="flex flex-col gap-4">
-        {drafts.map((d) => (
+      {(() => {
+        const card = (d: (typeof drafts)[number]) => (
           <DraftCard
             key={d.id}
             draft={d}
@@ -155,8 +157,12 @@ export default async function ReviewPage({ searchParams }: { searchParams: Promi
             gmailConnected={gmail}
             highlight={!!focused}
           />
-        ))}
-      </div>
+        );
+        // Needs review: focus mode on phones, keyboard shortcuts + bulk replies on desktop.
+        if (!focused && tab === "needs_review" && drafts.length > 0)
+          return <DraftQueue googleConnected={google} items={drafts.map((d) => ({ id: d.id, kind: d.kind, title: d.title, node: card(d) }))} />;
+        return <div className="flex flex-col gap-4">{drafts.map(card)}</div>;
+      })()}
       {!focused && drafts.length >= 100 && <p className="mt-4 text-center text-xs text-muted">Showing the first 100. Filter by business or type to see more.</p>}
     </div>
   );
