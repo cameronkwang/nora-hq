@@ -29,6 +29,27 @@
       "when": 1794353061054,
       "tag": "0003_leads_and_ask_routing",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1794372532938,
+      "tag": "0004_capture_and_creator_stats",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1794429340841,
+      "tag": "0005_nora_workspace_and_collab_intake",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1794453979968,
+      "tag": "0006_deals_notify_replies_reports",
+      "breakpoints": true
     }
   ]
 }

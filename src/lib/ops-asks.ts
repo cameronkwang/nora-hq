@@ -5,6 +5,7 @@ import { getDb, schema } from "./db";
 import { newId } from "./ids";
 import { logActivity } from "./activity";
 import { AskInput, OpsError, createTask } from "./ops";
+import { notifyAsk } from "./notify";
 
 /**
  * Ask routing ("triage"). Same conventions as lib/ops: zod-validated input, `actor` is a user email
@@ -98,6 +99,7 @@ export async function triageAsk(askId: string, input: z.input<typeof TriageInput
       summary: `Ask sorted: ${KIND_LABEL[row.kind]} for ${FOR_LABEL[row.forWho]}${taskId && isPerson(v.forWho) ? ` — added a task for ${name(v.forWho)}` : ""}${droppedFor.length ? ` — removed it from ${droppedFor.join(" and ")}'s tasks` : ""}`,
     });
   }
+  notifyAsk(row, actor, cur);
   return { ask: row, taskId };
 }
 
@@ -106,6 +108,7 @@ export async function createRoutedAsk(
   input: z.input<typeof AskInput>,
   route: { kind: schema.AskKind; forWho: schema.AskFor },
   actor: string,
+  opts: { skipTask?: boolean } = {},
 ) {
   const v = AskInput.parse(input);
   const r = TriageInput.pick({ kind: true, forWho: true }).parse(route);
@@ -117,6 +120,8 @@ export async function createRoutedAsk(
   }).returning();
   const routed = r.kind === "auto" && r.forWho === "auto" ? "" : ` (${KIND_LABEL[r.kind]} for ${FOR_LABEL[r.forWho]})`;
   await logActivity({ actor, action: "ask.created", entityType: "ask", entityId: id, clientId: row.clientId, summary: `New ask${routed}: ${v.body.slice(0, 80)}` });
-  const taskId = r.kind === "request" && isPerson(r.forWho) ? await ensurePersonTask(row, r.forWho, actor) : null;
+  // skipTask: callers that track the work elsewhere (e.g. the collab inbox) avoid a duplicate to-do.
+  const taskId = !opts.skipTask && r.kind === "request" && isPerson(r.forWho) ? await ensurePersonTask(row, r.forWho, actor) : null;
+  notifyAsk(row, actor);
   return { id, taskId };
 }

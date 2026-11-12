@@ -15,6 +15,7 @@ import {
   upsertMetric,
 } from "@/lib/ops";
 import { onboardClient, SERVICES, type Service } from "@/lib/ops-onboarding";
+import { parseBusinessInput } from "@/lib/onboard-parse";
 
 /** Result shape for forms wired through <ActionForm> (useActionState). */
 export type FormState = { ok?: boolean; error?: string; message?: string; at?: number };
@@ -42,22 +43,32 @@ function refresh(clientId?: string) {
 
 /* ───────── Businesses ───────── */
 
-/** "Add business": creates it with a plan matching the services and a Getting started checklist. */
-export async function createClientAction(_prev: FormState, fd: FormData): Promise<FormState> {
+/**
+ * New client (/clients/new): one field takes the name or a pasted Instagram/TikTok/Maps/website link
+ * (parsed again here so it works without JS). Creates the business with its plan, Getting started checklist
+ * and Claude's research ask; from a lead it also marks the lead Won. Lands on the business page.
+ */
+export async function onboardAction(_prev: FormState, fd: FormData): Promise<FormState> {
   const user = await requireUser();
-  if (!str(fd, "name").trim()) return { error: "Give the business a name." };
+  const parsed = parseBusinessInput(str(fd, "q"));
+  const name = (parsed.kind === "name" ? parsed.name : str(fd, "name")).trim();
+  if (!name) return { error: parsed.kind === "name" ? "Give the business a name." : "Add the business name too." };
   const services = fd.getAll("services").filter((v): v is Service => typeof v === "string" && (SERVICES as readonly string[]).includes(v));
   if (services.length === 0) return { error: "Pick at least one service." };
+  const leadId = opt(fd, "leadId");
   let id: string;
   try {
     id = await onboardClient(
       {
-        name: str(fd, "name"),
+        name,
         location: opt(fd, "location"),
-        instagramHandle: opt(fd, "instagramHandle"),
-        tiktokHandle: opt(fd, "tiktokHandle"),
-        website: opt(fd, "website"),
+        instagramHandle: parsed.kind === "instagram" ? parsed.handle : opt(fd, "instagramHandle"),
+        tiktokHandle: parsed.kind === "tiktok" ? parsed.handle : opt(fd, "tiktokHandle"),
+        website: parsed.kind === "website" ? parsed.url : opt(fd, "website"),
+        googleMapsUrl: parsed.kind === "maps" ? parsed.url : opt(fd, "googleMapsUrl"),
+        copyPlanFrom: opt(fd, "copyPlanFrom"),
         services,
+        leadId,
       },
       user.email,
     );
@@ -66,7 +77,17 @@ export async function createClientAction(_prev: FormState, fd: FormData): Promis
   }
   refresh(id);
   revalidatePath("/tasks");
-  redirect(`/clients/${id}`);
+  revalidatePath("/asks");
+  if (leadId) {
+    revalidatePath("/leads");
+    revalidatePath(`/leads/${leadId}`);
+  }
+  redirect(`/clients/${id}?welcome=1${leadId ? "&lead=1" : ""}`);
+}
+
+/** Older "Add business" form signature — same flow as New client. */
+export async function createClientAction(prev: FormState, fd: FormData): Promise<FormState> {
+  return onboardAction(prev, fd);
 }
 
 export async function updateClientAction(clientId: string, _prev: FormState, fd: FormData): Promise<FormState> {

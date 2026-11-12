@@ -12,11 +12,15 @@ import { actorName } from "../activity/actor";
 
 export const dynamic = "force-dynamic";
 
-type TabKey = "inbox" | "me" | "ideas" | "done" | "archived";
+type TabKey = "inbox" | "nora" | "cameron" | "ideas" | "done" | "archived";
+
+/** One tab per person so either of you can see the other's queue. */
+const PEOPLE = ["nora", "cameron"] as const;
 
 const TABS: Array<{ key: TabKey; label: string; empty: string }> = [
   { key: "inbox", label: "Inbox", empty: "Inbox zero. Drop an ask whenever something comes up." },
-  { key: "me", label: "For me", empty: "Nothing routed to you right now." },
+  { key: "nora", label: "For Nora", empty: "Nothing waiting on Nora right now." },
+  { key: "cameron", label: "For Cameron", empty: "Nothing waiting on Cameron right now." },
   { key: "ideas", label: "Ideas", empty: "No ideas saved yet. Pick “Just an idea” on a new ask to park one here." },
   { key: "done", label: "Done", empty: "No finished asks yet." },
 ];
@@ -28,40 +32,42 @@ const LEGACY: Record<string, TabKey> = { new: "inbox", in_progress: "inbox", don
 export default async function AsksPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const user = await requireUser();
   const sp = await searchParams;
-  const asked = typeof sp.tab === "string" ? sp.tab : typeof sp.status === "string" ? LEGACY[sp.status] : undefined;
-  const tab = [...TABS, ARCHIVED].find((t) => t.key === asked) ?? TABS[0];
   const me = personKey(assigneeFor(user));
+  const rawTab = typeof sp.tab === "string" ? sp.tab : typeof sp.status === "string" ? LEGACY[sp.status] : undefined;
+  const asked = rawTab === "me" ? me ?? undefined : rawTab; // old "For me" links → your own tab
+  const tab = [...TABS, ARCHIVED].find((t) => t.key === asked) ?? TABS[0];
   const db = await getDb();
 
   const open = inArray(schema.asks.status, ["new", "in_progress"]);
-  // "For me": routed to me, or an open task from the ask is on my list.
-  const mine: SQL = me
-    ? and(open, or(eq(schema.asks.forWho, me), inArray(schema.asks.id,
-        db.select({ id: sql<string>`${schema.tasks.askId}` }).from(schema.tasks)
-          .where(and(eq(schema.tasks.assignee, me), ne(schema.tasks.status, "done"), sql`${schema.tasks.askId} is not null`)))))!
-    : sql`false`;
+  // "For <person>": routed to them, or an open task from the ask is on their list.
+  const forPerson = (who: (typeof PEOPLE)[number]): SQL =>
+    and(open, or(eq(schema.asks.forWho, who), inArray(schema.asks.id,
+      db.select({ id: sql<string>`${schema.tasks.askId}` }).from(schema.tasks)
+        .where(and(eq(schema.tasks.assignee, who), ne(schema.tasks.status, "done"), sql`${schema.tasks.askId} is not null`)))))!;
   const where: Record<TabKey, SQL> = {
     inbox: and(open, ne(schema.asks.kind, "idea"))!,
-    me: mine,
+    nora: forPerson("nora"),
+    cameron: forPerson("cameron"),
     ideas: and(eq(schema.asks.kind, "idea"), ne(schema.asks.status, "archived"))!,
     done: eq(schema.asks.status, "done"),
     archived: eq(schema.asks.status, "archived"),
   };
   const count = (w: SQL) => db.select({ n: sql<number>`count(*)::int` }).from(schema.asks).where(w).then((r) => r[0]?.n ?? 0);
 
-  const [rows, nInbox, nMe, nIdeas] = await Promise.all([
+  const [rows, nInbox, nNora, nCameron, nIdeas] = await Promise.all([
     db
       .select({ ask: schema.asks, client: schema.clients })
       .from(schema.asks)
       .leftJoin(schema.clients, eq(schema.asks.clientId, schema.clients.id))
       .where(where[tab.key])
-      .orderBy(tab.key === "inbox" || tab.key === "me" ? desc(schema.asks.createdAt) : desc(schema.asks.updatedAt))
+      .orderBy(tab.key === "inbox" || tab.key === "nora" || tab.key === "cameron" ? desc(schema.asks.createdAt) : desc(schema.asks.updatedAt))
       .limit(200),
     count(where.inbox),
-    count(where.me),
+    count(where.nora),
+    count(where.cameron),
     count(where.ideas),
   ]);
-  const counts: Partial<Record<TabKey, number>> = { inbox: nInbox, me: nMe, ideas: nIdeas };
+  const counts: Partial<Record<TabKey, number>> = { inbox: nInbox, nora: nNora, cameron: nCameron, ideas: nIdeas };
   const sent = typeof sp.created === "string";
 
   const ids = rows.map((r) => r.ask.id);

@@ -11,12 +11,15 @@ export function TaskQuickAdd({
   defaultAssignee,
   returnTo,
   askId,
+  label = "New task",
 }: {
   clients: Opt[];
   defaultClientId?: string;
   defaultAssignee?: string;
   returnTo: string;
   askId?: string;
+  /** Label over the title field. */
+  label?: string;
 }) {
   const assignee = defaultAssignee && (ASSIGNEES as readonly string[]).includes(defaultAssignee) ? defaultAssignee : "unassigned";
   return (
@@ -24,7 +27,7 @@ export function TaskQuickAdd({
       <input type="hidden" name="returnTo" value={returnTo} />
       {askId && <input type="hidden" name="askId" value={askId} />}
       <div className="col-span-2 xl:col-span-1">
-        <label htmlFor="qa-title" className="label">New task</label>
+        <label htmlFor="qa-title" className="label">{label}</label>
         <input id="qa-title" name="title" required placeholder="What needs doing?" className="input" autoComplete="off" />
       </div>
       <div className="col-span-2 xl:col-span-1">

@@ -16,8 +16,11 @@ export const KIND_LABELS: Record<string, string> = {
   other: "Other",
 };
 
-/** Kinds that end up "approved" and wait for a person to send them by hand. */
-export const MANUAL_SEND_KINDS = ["review_reply", "outreach_email", "outreach_dm", "lead_email", "lead_dm", "comment_reply"] as const;
+/** Kinds that end up "approved" and wait for a person to send them (by hand, or "Send to owner" for reports). */
+export const MANUAL_SEND_KINDS = ["review_reply", "outreach_email", "outreach_dm", "lead_email", "lead_dm", "comment_reply", "report"] as const;
+
+/** The only kind that may be approved in bulk. Outreach, pitches, posts and reports always get one-by-one review. */
+export const BULK_APPROVE_KINDS = ["review_reply"] as const;
 
 export function kindLabel(kind: string, meta?: Record<string, unknown>) {
   if (kind === "outreach_dm" || kind === "lead_dm") {

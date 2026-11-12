@@ -6,10 +6,12 @@ import { newId } from "./ids";
 import { currentMonth } from "./dates";
 import { logActivity } from "./activity";
 import { createClient, OpsError } from "./ops";
+import { createRoutedAsk } from "./ops-asks";
 
 /**
- * Adding a business we manage: creates the client, sets a monthly plan that matches the services we sell them,
- * and drops a short "Getting started" checklist (tasks tagged "onboarding") on its page.
+ * Adding a business we manage ("land a client → set up in seconds"): creates the client, sets a monthly plan that
+ * matches the services we sell them (or copies another business's), drops a short "Getting started" checklist
+ * (tasks tagged "onboarding") on its page, and hands the research to Claude as one routed ask.
  * Same conventions as lib/ops: zod-validated input, `actor` is a user email. People only — Claude never
  * decides who becomes a client.
  */
@@ -34,6 +36,8 @@ export const OnboardInput = z.object({
   services: z.array(z.enum(SERVICES)).min(1, "Pick at least one service."),
   notes: z.string().max(5000).nullish(),
   leadId: z.string().nullish(),
+  googleMapsUrl: z.string().max(1000).nullish(),
+  copyPlanFrom: z.string().max(200).nullish(),
 });
 
 type PlanItem = Pick<schema.Deliverable, "title" | "platform" | "targetPerMonth">;
@@ -51,34 +55,27 @@ const PLAN: Record<Service, PlanItem[]> = {
 
 type Step = { title: string; assignee: schema.Assignee; platform?: schema.Platform; details?: string };
 
-const STEPS: { always: Step[] } & Record<Service, Step[]> = {
-  always: [
+/**
+ * Getting started, trimmed to what actually blocks the work (6 steps for social + Google reviews).
+ * Research and the brand-voice draft are Claude's job — handed off as an ask, not a checklist item.
+ * Order: first → service steps → last.
+ */
+const STEPS: { first: Step[]; last: Step[] } & Record<Service, Step[]> = {
+  first: [
     {
       title: "Kickoff call: goals, offers, signature dishes, what to avoid",
       assignee: "nora",
-      details: "Jot notes as you go — they feed the brand voice step.",
-    },
-    {
-      title: "Write brand voice (Claude drafts from kickoff notes — paste notes into an ask)",
-      assignee: "claude",
-      details: "Paste the kickoff notes into a new ask for this business. Claude drafts the brand voice; check it on the business's Settings page.",
-    },
-    {
-      title: "Set this business's monthly plan",
-      assignee: "nora",
-      details: "A starting plan is already filled in from the services you picked. Adjust the numbers on Settings & plan if needed.",
+      details: "Jot notes as you go and drop them in Claude's onboarding ask — they sharpen the brand voice.",
     },
   ],
   social: [
     {
-      title: "Get Instagram access (owner adds you in Meta Business Suite, or store login in password manager — not in Nora HQ)",
+      title: "Get Instagram & TikTok access",
       assignee: "cameron",
       platform: "instagram",
-      details: "Never paste passwords into Nora HQ.",
+      details: "Owner adds us in Meta Business Suite (and TikTok), or logins go in the password manager. Never paste passwords into Nora HQ. Make sure Instagram is a Business/Creator account.",
     },
-    { title: "Confirm Instagram is a Business/Creator account", assignee: "cameron", platform: "instagram" },
-    { title: "Get TikTok access", assignee: "cameron", platform: "tiktok" },
-    { title: "Collect brand photos/videos & logo", assignee: "nora" },
+    { title: "Collect logo, brand photos & videos", assignee: "nora" },
   ],
   google: [
     { title: "Owner adds Nora as Manager on the Google Business Profile", assignee: "nora", platform: "google" },
@@ -87,6 +84,13 @@ const STEPS: { always: Step[] } & Record<Service, Step[]> = {
   collab: [
     { title: "Agree collab terms (gifted/paid, deliverables, dates) & FTC disclosure", assignee: "nora" },
     { title: "Schedule visit / shoot", assignee: "nora" },
+  ],
+  last: [
+    {
+      title: "Approve brand voice & first-month plan",
+      assignee: "nora",
+      details: "Claude is researching them and drafting both in Asks. Tweak, then save the voice on Settings & plan.",
+    },
   ],
 };
 
@@ -102,8 +106,12 @@ function normalize(services: readonly Service[]): Service[] {
 }
 
 /**
- * People only: add a business we now manage. Creates it (createClient), replaces the default monthly plan with
- * one matching `services`, and adds the Getting started checklist. Returns the new business id.
+ * People only: add a business we now manage. In one call:
+ *  - creates it (createClient) with the monthly plan for `services` — or a copy of another business's plan (`copyPlanFrom`);
+ *  - adds the short Getting started checklist;
+ *  - hands research to Claude: one ask routed to Claude (brand voice, first-month plan, what we need from the owner);
+ *  - with `leadId`: marks the lead Won and links it. If that lead was already turned into a business, returns that one.
+ * Returns the business id. Backward compatible with the original (name, services, …, leadId) input.
  */
 export async function onboardClient(
   input: {
@@ -115,19 +123,51 @@ export async function onboardClient(
     services: Array<"google" | "social" | "collab">;
     notes?: string | null;
     leadId?: string | null;
+    googleMapsUrl?: string | null;
+    copyPlanFrom?: string | null;
   },
   actor: string,
 ): Promise<string> {
   if (!isPerson(actor)) throw new OpsError("Only a person can add a business we manage");
   const v = OnboardInput.parse(input);
   const services = normalize(v.services);
+  const db = await getDb();
+
+  let lead: schema.Lead | null = null;
+  if (v.leadId) {
+    [lead] = await db.select().from(schema.leads).where(eq(schema.leads.id, v.leadId));
+    if (!lead) throw new OpsError("lead not found");
+    if (lead.convertedClientId) {
+      const [c] = await db.select({ id: schema.clients.id }).from(schema.clients).where(eq(schema.clients.id, lead.convertedClientId));
+      if (c) return c.id; // already set up (double tap, or converted elsewhere)
+    }
+  }
+
+  let copied: PlanItem[] | null = null;
+  let copiedFrom: string | null = null;
+  if (v.copyPlanFrom) {
+    const [src] = await db.select({ id: schema.clients.id, name: schema.clients.name }).from(schema.clients).where(eq(schema.clients.id, v.copyPlanFrom));
+    if (!src) throw new OpsError("The business to copy the plan from wasn't found");
+    const items = await db.select().from(schema.deliverables)
+      .where(and(eq(schema.deliverables.clientId, src.id), eq(schema.deliverables.active, true)))
+      .orderBy(asc(schema.deliverables.sortOrder));
+    if (items.length) {
+      copied = items.map(({ title, platform, targetPerMonth }) => ({ title, platform, targetPerMonth }));
+      copiedFrom = src.name;
+    }
+  }
+
+  const mapsUrl = blank(v.googleMapsUrl);
+  // From a lead with no notes of its own: carry over the pitch angle and the lead's notes (convertLead passes these itself).
+  const leadNotes = lead && !blank(v.notes) ? [lead.why ? `Why we pitched them: ${lead.why}` : null, blank(lead.notes)] : [];
+  const notes = [blank(v.notes), ...leadNotes, mapsUrl ? `Google Maps: ${mapsUrl}` : null].filter(Boolean).join("\n\n") || null;
 
   const clientId = await createClient(
-    { name: v.name, location: v.location, instagramHandle: v.instagramHandle, tiktokHandle: v.tiktokHandle, website: v.website, notes: v.notes },
+    { name: v.name, location: v.location, instagramHandle: v.instagramHandle, tiktokHandle: v.tiktokHandle, website: v.website, notes },
     actor,
   );
 
-  await replacePlan(clientId, services);
+  await setPlan(clientId, copied ?? services.flatMap((s) => PLAN[s]));
   const added = await addOnboardingTasks(clientId, services, actor);
 
   const what = services.map((s) => SERVICE_LABELS[s].toLowerCase()).join(", ");
@@ -137,15 +177,60 @@ export async function onboardClient(
     entityType: "client",
     entityId: clientId,
     clientId,
-    summary: `Started managing ${v.name.trim()} (${what})${v.leadId ? " from a lead" : ""} · ${added} getting-started step${added === 1 ? "" : "s"}`,
+    summary: `Started managing ${v.name.trim()} (${what})${lead ? " from a lead" : ""}${copiedFrom ? ` · plan copied from ${copiedFrom}` : ""} · ${added} getting-started step${added === 1 ? "" : "s"}`,
   });
+
+  if (lead) {
+    await db.update(schema.leads).set({ stage: "won", convertedClientId: clientId, updatedAt: new Date() }).where(eq(schema.leads.id, lead.id));
+    await logActivity({ actor, action: "lead.converted", entityType: "lead", entityId: lead.id, clientId, summary: `Won: ${lead.name} is now a business we manage` });
+  }
+
+  await handOffToClaude(clientId, { name: v.name.trim(), location: v.location, instagramHandle: v.instagramHandle, tiktokHandle: v.tiktokHandle, website: v.website, mapsUrl, services, lead }, actor);
   return clientId;
 }
 
-/** Swaps createClient's default plan for the one matching the services. Only used right after creation. */
-async function replacePlan(clientId: string, services: Service[]) {
+/** The research brief Claude gets for every new client — so Nora doesn't have to do it. */
+export function onboardingBrief(c: {
+  name: string;
+  location?: string | null;
+  instagramHandle?: string | null;
+  tiktokHandle?: string | null;
+  website?: string | null;
+  mapsUrl?: string | null;
+  services: readonly Service[];
+  lead?: Pick<schema.Lead, "why"> | null;
+}): string {
+  const at = (h: string | null | undefined) => (h ? `@${h.replace(/^@/, "")}` : null);
+  const known = [
+    c.location ? `- City: ${c.location}` : null,
+    c.website ? `- Website: ${c.website}` : null,
+    at(c.instagramHandle) ? `- Instagram: ${at(c.instagramHandle)}` : null,
+    at(c.tiktokHandle) ? `- TikTok: ${at(c.tiktokHandle)}` : null,
+    c.mapsUrl ? `- Google Maps: ${c.mapsUrl}` : null,
+    c.lead?.why ? `- Why we pitched them: ${c.lead.why}` : null,
+  ].filter(Boolean);
+  return [
+    `New client ${c.name}: research their public presence (website, Google rating/reviews, Instagram/TikTok), draft a brand voice for their settings, suggest a first-month content plan, and list anything we need from the owner.`,
+    "",
+    `We're doing: ${c.services.map((s) => SERVICE_LABELS[s]).join(", ")}.`,
+    ...(known.length ? ["", "What we know so far:", ...known] : ["", "We only have the name — find their website and socials first."]),
+    "",
+    "Reply on this ask with:",
+    "1. Snapshot — Google rating & review count (and how many recent reviews have owner replies), follower counts, last post date. Leave anything you can't verify blank; never guess numbers.",
+    "2. Brand voice — a short draft for their Settings page (tone, words to use/avoid, signature dishes).",
+    "3. First-month plan — content ideas that fit the monthly plan on their page.",
+    "4. What we need from the owner — logins/access, photos, offers, anything missing.",
+    "If you find handles or a website we don't have, list them in your reply. Research public info only — don't contact the business.",
+  ].join("\n");
+}
+
+async function handOffToClaude(clientId: string, c: Parameters<typeof onboardingBrief>[0], actor: string) {
+  await createRoutedAsk({ clientId, body: onboardingBrief(c) }, { kind: "request", forWho: "claude" }, actor);
+}
+
+/** Swaps createClient's default plan for the given items. Only used right after creation. */
+async function setPlan(clientId: string, items: PlanItem[]) {
   const db = await getDb();
-  const items = services.flatMap((s) => PLAN[s]);
   await db.delete(schema.deliverables).where(eq(schema.deliverables.clientId, clientId));
   if (items.length) {
     await db.insert(schema.deliverables).values(items.map((x, i) => ({ id: newId("dlv_"), clientId, sortOrder: i, ...x })));
@@ -158,7 +243,7 @@ async function replacePlan(clientId: string, services: Service[]) {
  */
 async function addOnboardingTasks(clientId: string, services: Service[], actor: string) {
   const db = await getDb();
-  const steps = [...STEPS.always, ...services.flatMap((s) => STEPS[s])];
+  const steps = [...STEPS.first, ...services.flatMap((s) => STEPS[s]), ...STEPS.last];
   const existing = await db.select({ title: schema.tasks.title }).from(schema.tasks)
     .where(and(eq(schema.tasks.clientId, clientId), eq(schema.tasks.tag, ONBOARDING_TAG)));
   const have = new Set(existing.map((t) => t.title));

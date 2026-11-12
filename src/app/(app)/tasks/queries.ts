@@ -1,5 +1,6 @@
 import "server-only";
 import { and, asc, desc, eq, gte, isNull, ne, sql, type SQL } from "drizzle-orm";
+import { TASK_SCOPES, taskScopeWhere, type TaskScope } from "@/lib/ops-tasks";
 import { getDb, schema } from "@/lib/db";
 import { assigneeFor } from "@/lib/auth";
 import { isMonth } from "@/lib/dates";
@@ -12,8 +13,13 @@ export const VIEWS = ["list", "board", "table"] as const;
 export type View = (typeof VIEWS)[number];
 export const SORT_KEYS = ["title", "business", "status", "assignee", "due", "platform", "month"] as const;
 export type SortKey = (typeof SORT_KEYS)[number];
+/**
+ * Which tasks: "adhoc" = one-offs outside the monthly plans (no deliverable, not the onboarding checklist) —
+ * where requests from asks land, so it's the default; "plan" = monthly-plan checklist items; "all" = everything.
+ */
 
 export type TaskFilters = {
+  scope: TaskScope;
   client: string; // "" | client id | "none"
   assignee: string; // "" | "me" | an ASSIGNEES value
   status: string; // "open" (default, not done) | "all" | a TASK_STATUSES value
@@ -35,7 +41,9 @@ export function parseTaskFilters(sp: SP | URLSearchParams, cookieView?: string):
   const assignee = get("assignee");
   const status = get("status");
   const sort = get("sort");
+  const scope = get("scope");
   return {
+    scope: (TASK_SCOPES as readonly string[]).includes(scope) ? (scope as TaskScope) : "adhoc",
     client: get("client"),
     assignee: assignee === "me" || (ASSIGNEES as readonly string[]).includes(assignee) ? assignee : "",
     status: status === "all" || (TASK_STATUSES as readonly string[]).includes(status) ? status : "open",
@@ -52,6 +60,7 @@ export function tasksHref(f: TaskFilters, patch: Partial<Record<keyof TaskFilter
   const cur: Record<string, string> = {
     // Always explicit: the remembered view (cookie) must not override a link's view.
     view: base === "/tasks" ? f.view : "",
+    scope: f.scope === "adhoc" ? "" : f.scope,
     client: f.client,
     assignee: f.assignee,
     status: f.status === "open" ? "" : f.status,
@@ -72,6 +81,8 @@ export function isFiltered(f: TaskFilters) {
 
 function baseWhere(f: TaskFilters, user: SessionUser, withStatus: boolean): SQL[] {
   const where: SQL[] = [];
+  const scope = taskScopeWhere(f.scope);
+  if (scope) where.push(scope);
   if (f.client === "none") where.push(isNull(schema.tasks.clientId));
   else if (f.client) where.push(eq(schema.tasks.clientId, f.client));
   const who = f.assignee === "me" ? assigneeFor(user) : f.assignee;
