@@ -22,7 +22,22 @@ export const DEFAULT_DELIVERABLES: Array<Pick<schema.Deliverable, "title" | "pla
   { title: "Creator outreach", platform: "other", targetPerMonth: 5 },
 ];
 
+/** Nora's own creator workspace — pinned above the businesses. */
+export const CREATOR_CLIENT = { id: "noraeatsgood", name: "Nora", location: "@noraeatsgood", brand: null, kind: "creator" as const, instagramHandle: "noraeatsgood", tiktokHandle: "noraeatsgood" };
+/** Placeholder plan for Nora's own content — edit on her settings tab. */
+export const CREATOR_DELIVERABLES: Array<Pick<schema.Deliverable, "title" | "platform" | "targetPerMonth">> = [
+  { title: "Instagram reels / posts", platform: "instagram", targetPerMonth: 8 },
+  { title: "TikTok videos", platform: "tiktok", targetPerMonth: 8 },
+  { title: "Collab content", platform: "instagram", targetPerMonth: 0 },
+];
+
 export async function seed(db: DB) {
+  await db.insert(schema.clients).values({ ...CREATOR_CLIENT, sortOrder: -1 }).onConflictDoNothing({ target: schema.clients.id });
+  const [{ n: creatorDels }] = await db.select({ n: sql<number>`count(*)::int` }).from(schema.deliverables).where(eq(schema.deliverables.clientId, CREATOR_CLIENT.id));
+  if (creatorDels === 0) {
+    await db.insert(schema.deliverables).values(CREATOR_DELIVERABLES.map((d, j) => ({ id: newId("dlv_"), clientId: CREATOR_CLIENT.id, sortOrder: j, ...d })));
+  }
+
   for (const [i, c] of SEED_CLIENTS.entries()) {
     await db
       .insert(schema.clients)

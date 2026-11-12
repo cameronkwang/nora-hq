@@ -1,9 +1,8 @@
 import Link from "next/link";
-import { listClients } from "@/lib/data";
+import { isCreatorClient, listClients } from "@/lib/data";
 import { currentMonth, monthLabel } from "@/lib/dates";
-import { Badge, Card, EmptyState, PageHeader, ProgressBar, cx } from "@/components/ui";
-import { ActionForm, SubmitButton } from "@/components/client-form";
-import { createClientAction } from "./actions";
+import { Badge, EmptyState, PageHeader, ProgressBar, cx } from "@/components/ui";
+import { NewClientLink } from "@/components/onboard-link";
 import { clientSummaries } from "./queries";
 
 export const dynamic = "force-dynamic";
@@ -12,7 +11,10 @@ export default async function ClientsPage({ searchParams }: { searchParams: Prom
   const sp = await searchParams;
   const showArchived = sp.archived === "1";
   const month = currentMonth();
-  const all = await listClients({ includeArchived: true });
+  const everyone = await listClients({ includeArchived: true });
+  // Nora's own workspace isn't a business: it gets a pinned link above the grid instead of a card.
+  const creator = everyone.find((c) => isCreatorClient(c)) ?? null; // pinned even if archived
+  const all = everyone.filter((c) => !isCreatorClient(c));
   const archivedCount = all.filter((c) => c.archived).length;
   const clients = showArchived ? all : all.filter((c) => !c.archived);
   const summaries = await clientSummaries(clients.map((c) => c.id), month);
@@ -23,20 +25,37 @@ export default async function ClientsPage({ searchParams }: { searchParams: Prom
         title="Businesses"
         subtitle={`${clients.filter((c) => !c.archived).length} active · progress for ${monthLabel(month)}`}
         actions={
-          archivedCount > 0 ? (
-            <Link href={showArchived ? "/clients" : "/clients?archived=1"} className="text-sm text-muted underline-offset-2 hover:text-text hover:underline">
-              {showArchived ? "Hide archived" : `Show archived (${archivedCount})`}
-            </Link>
-          ) : null
+          <div className="flex items-center gap-3">
+            {archivedCount > 0 && (
+              <Link href={showArchived ? "/clients" : "/clients?archived=1"} className="text-sm text-muted underline-offset-2 hover:text-text hover:underline">
+                {showArchived ? "Hide archived" : `Show archived (${archivedCount})`}
+              </Link>
+            )}
+            <NewClientLink />
+          </div>
         }
       />
 
-      <div className="grid gap-6 lg:grid-cols-[1fr_20rem]">
-        <div>
+      <div>
+        <div className="flex flex-col gap-3">
+          {creator && (
+            <Link
+              href={`/clients/${creator.id}`}
+              className="flex min-h-11 items-center justify-between gap-3 rounded-xl border border-accent/40 bg-accent-soft px-4 py-3 text-sm transition hover:border-accent"
+            >
+              <span className="min-w-0">
+                <span className="font-semibold text-accent">{creator.name}</span>{" "}
+                <span className="text-muted">· {creator.location ?? "own content"}</span>
+              </span>
+              <span className="shrink-0 text-xs font-medium text-accent">Own content &amp; collabs →</span>
+            </Link>
+          )}
           {clients.length === 0 ? (
-            <EmptyState title="No businesses yet">Add your first one with the form on this page.</EmptyState>
+            <EmptyState title="No businesses yet">
+              <Link href="/clients/new" className="text-accent hover:underline">Add your first client</Link> — a name is enough. It sets up a plan and a short checklist, and Claude does the research.
+            </EmptyState>
           ) : (
-            <ul className="grid gap-3 sm:grid-cols-2">
+            <ul className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
               {clients.map((c) => {
                 const s = summaries.get(c.id)!;
                 const pct = s.target > 0 ? Math.round((s.done / s.target) * 100) : 0;
@@ -78,35 +97,6 @@ export default async function ClientsPage({ searchParams }: { searchParams: Prom
             </ul>
           )}
         </div>
-
-        <Card title="Add business">
-          <ActionForm action={createClientAction} className="flex flex-col gap-3" ariaLabel="Add business">
-            <div>
-              <label className="label" htmlFor="new-name">Name</label>
-              <input id="new-name" name="name" required className="input" placeholder="e.g. Poke Bros" autoComplete="off" />
-            </div>
-            <div>
-              <label className="label" htmlFor="new-location">Location</label>
-              <input id="new-location" name="location" className="input" placeholder="e.g. Richmond" autoComplete="off" />
-            </div>
-            <div>
-              <label className="label" htmlFor="new-brand">Brand group <span className="font-normal">(optional)</span></label>
-              <input id="new-brand" name="brand" className="input" placeholder="Same name for every location" autoComplete="off" />
-            </div>
-            <div className="grid grid-cols-2 gap-2">
-              <div>
-                <label className="label" htmlFor="new-ig">Instagram</label>
-                <input id="new-ig" name="instagramHandle" className="input" placeholder="@handle" autoComplete="off" autoCapitalize="none" />
-              </div>
-              <div>
-                <label className="label" htmlFor="new-tt">TikTok</label>
-                <input id="new-tt" name="tiktokHandle" className="input" placeholder="@handle" autoComplete="off" autoCapitalize="none" />
-              </div>
-            </div>
-            <p className="text-xs text-muted">Starts with a default monthly plan you can edit on its settings page.</p>
-            <SubmitButton pendingLabel="Adding…">Add business</SubmitButton>
-          </ActionForm>
-        </Card>
       </div>
     </>
   );

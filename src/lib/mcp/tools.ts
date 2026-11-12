@@ -21,7 +21,9 @@ import {
   upsertMetric,
   upsertOutreach,
 } from "@/lib/ops";
+import { TASK_SCOPES } from "@/lib/ops-tasks";
 import { WORKING_RULES } from "./rules";
+import { checkPitch, draftLeadPitch } from "./tools-leads";
 import {
   businessName,
   clientNames,
@@ -197,6 +199,7 @@ export function registerTools(server: McpServer, ctx: Ctx) {
       "Each ask has `thread` (messages between you and Nora/Cameron, oldest first) and `needsYourReply` — true when a person answered after you; " +
       "an ask you asked a question on comes back as NEW once Nora answers, so read its thread before working it. " +
       "(plan progress, open/overdue tasks, drafts awaiting review, unreplied Google reviews, whether this month's tasks and metrics exist). " +
+      "Each business has a kind (business or creator); kind \"creator\" (id \"noraeatsgood\") is Nora's own content-creator workspace (her @noraeatsgood content, stats and collab inbox), not a managed business: file her own content work under it, and don't treat it like a client (no Google mapping, business brand voice or client pitches). " +
       "Suggested order: sent-back drafts → asks with needsYourReply → other new asks → due tasks → follow-ups → unreplied reviews. Finish by calling update_ask on every ask you touched.",
     inputSchema: {},
     annotations: READ,
@@ -206,7 +209,8 @@ export function registerTools(server: McpServer, ctx: Ctx) {
     title: "List businesses",
     description:
       "Lists the businesses we manage with their ids, location, Instagram/TikTok handles, website, brand voice, notes and monthly plan (deliverables with target per month; 0 = as needed). " +
-      "Use the id as client_id in other tools. Always read brandVoice before drafting anything for a business.",
+      "Use the id as client_id in other tools. Always read brandVoice before drafting anything for a business. " +
+      "kind \"creator\" (id \"noraeatsgood\") is Nora's own content-creator workspace (her @noraeatsgood content, stats and collab inbox), not a managed business: file her own content work under it, and don't treat it like a client (no Google mapping, business brand voice or client pitches). ",
     inputSchema: { include_archived: z.boolean().default(false).describe("Include archived businesses.") },
     annotations: READ,
   }, async ({ include_archived }) => run(async () => {
@@ -217,6 +221,7 @@ export function registerTools(server: McpServer, ctx: Ctx) {
     ]);
     return clients.map((c) => ({
       id: c.id,
+      kind: c.kind,
       name: businessName(c),
       brand: c.brand,
       instagramHandle: c.instagramHandle,
@@ -235,7 +240,8 @@ export function registerTools(server: McpServer, ctx: Ctx) {
     description:
       "Everything about one business for one month: brand voice and notes, monthly plan progress (done vs target per deliverable), this month's checklist tasks, " +
       "outstanding tasks (not done, this month or earlier), creator outreach with each creator, 12-month metrics (views = impressions, reach, followers, engagements per platform), " +
-      "calendar posts scheduled in the month, and counts of unreplied reviews and drafts awaiting review. Read this before drafting for a business.",
+      "calendar posts scheduled in the month, and counts of unreplied reviews and drafts awaiting review. Read this before drafting for a business. " +
+      "business.kind \"creator\" (id \"noraeatsgood\") is Nora's own content-creator workspace (her @noraeatsgood content, stats and collab inbox), not a managed business: file her own content work under it, and don't treat it like a client (no Google mapping, business brand voice or client pitches). ",
     inputSchema: { client_id: clientId, month: monthArg.optional().describe("YYYY-MM; defaults to the current month.") },
     annotations: READ,
   }, async ({ client_id, month }) => run(async () => {
@@ -244,7 +250,7 @@ export function registerTools(server: McpServer, ctx: Ctx) {
     if (!cm) throw new ToolError(`No business with id "${client_id}". Call list_clients for valid ids.`);
     const names = await clientNames();
     return {
-      business: { id: cm.client.id, name: businessName(cm.client), instagramHandle: cm.client.instagramHandle, tiktokHandle: cm.client.tiktokHandle, website: cm.client.website, googleConnected: !!cm.client.googleLocation, brandVoice: cm.client.brandVoice, notes: cm.client.notes },
+      business: { id: cm.client.id, kind: cm.client.kind, name: businessName(cm.client), instagramHandle: cm.client.instagramHandle, tiktokHandle: cm.client.tiktokHandle, website: cm.client.website, googleConnected: !!cm.client.googleLocation, brandVoice: cm.client.brandVoice, notes: cm.client.notes },
       month: cm.month,
       plan: cm.plan.map((p) => ({ deliverableId: p.deliverable.id, title: p.deliverable.title, platform: p.deliverable.platform, target: p.target || "as needed", done: p.done, tasksPlanned: p.planned })),
       monthTasks: cm.monthTasks.map((t) => shapeTask(t, names)),
@@ -327,18 +333,20 @@ export function registerTools(server: McpServer, ctx: Ctx) {
     title: "List tasks",
     description:
       "Lists checklist tasks. Default status \"open\" = todo, in_progress, needs_review, blocked. Filter by business, month (YYYY-MM) and assignee (nora, cameron, claude, unassigned). " +
-      "Tasks with a deliverableId are the monthly plan items (e.g. \"Instagram feed posts — 3 of 8\").",
+      "Tasks with a deliverableId are the monthly plan items (e.g. \"Instagram feed posts — 3 of 8\"). " +
+      "scope: \"adhoc\" = one-off tasks outside the monthly plan (what Nora hands off), \"plan\" = monthly plan items, \"all\" (default).",
     inputSchema: {
       client_id: clientId.optional(),
       status: z.enum(["open", ...schema.TASK_STATUSES]).default("open"),
       month: monthArg.optional(),
       assignee: z.enum(schema.ASSIGNEES).optional(),
+      scope: z.enum(TASK_SCOPES).default("all"),
       limit: limit(50, 200),
     },
     annotations: READ,
-  }, async ({ client_id, status, month, assignee, limit }) => run(async () => {
+  }, async ({ client_id, status, month, assignee, scope, limit }) => run(async () => {
     const names = await clientNames();
-    return (await listTasks({ clientId: client_id, status, month, assignee, limit })).map((t) => shapeTask(t, names));
+    return (await listTasks({ clientId: client_id, status, month, assignee, scope, limit })).map((t) => shapeTask(t, names));
   }));
 
   server.registerTool("create_task", {
@@ -442,12 +450,14 @@ export function registerTools(server: McpServer, ctx: Ctx) {
       "• outreach_email: meta.outreachId (from upsert_outreach) + meta.subject; meta.to optional (defaults to the creator's saved public email; if given it must match it). " +
       "body = the email. Personalised, says who we are + which business, clear offer, FTC line \"If you post, please tag it as gifted/#ad\", never ask for Google/Yelp reviews.\n" +
       "• outreach_dm: meta.outreachId + meta.channel (instagram_dm|tiktok_dm); meta.profileUrl optional (filled from the creator's handle). A person copies and sends it from the app.\n" +
+      "• lead_email / lead_dm (a pitch to a potential new client from list_leads — client_id not needed): meta.leadId required. lead_email needs meta.subject and goes to the lead's saved public email; " +
+      "lead_dm needs meta.channel (instagram_dm|tiktok_dm) and a saved handle. Same rules as draft_lead_pitch (short, written as Nora, no guarantees, easy opt-out). Leads marked lost/not_a_fit or with a pending pitch are refused.\n" +
       "• report: a client recap (use get_monthly_report). • other: anything else that needs a human look.\n" +
       "Always pass task_id when the draft fulfils a checklist task (it moves to needs_review and completes on send/publish) and ask_id when it answers an ask. " +
       "Refuses duplicates when a review/outreach/post already has a pending draft — revise that one instead. Do-not-contact creators are refused.",
     inputSchema: {
-      kind: z.enum(["instagram_post", "tiktok_post", "review_reply", "outreach_email", "outreach_dm", "report", "other"]),
-      client_id: clientId,
+      kind: z.enum(["instagram_post", "tiktok_post", "review_reply", "outreach_email", "outreach_dm", "lead_email", "lead_dm", "report", "other"]),
+      client_id: clientId.optional().describe("Business id from list_clients, e.g. \"poke-bros\". Required for every kind except lead_email / lead_dm."),
       title: z.string().min(1).max(200).describe("Short label shown in the review queue, e.g. \"IG reel: spicy crab boil\"."),
       body: z.string().min(1).max(20000).describe("The exact text to be posted/sent."),
       meta: z.record(z.string(), z.unknown()).default({}).describe("Kind-specific fields; see description."),
@@ -456,10 +466,23 @@ export function registerTools(server: McpServer, ctx: Ctx) {
     },
     annotations: WRITE,
   }, async (a) => run(async () => {
+    if (a.kind === "lead_email" || a.kind === "lead_dm") {
+      const leadId = String(a.meta.leadId ?? "");
+      if (!leadId) throw new ToolError(`${a.kind} needs meta.leadId (from list_leads).`);
+      const channel = a.kind === "lead_email" ? "email" : String(a.meta.channel ?? "");
+      if (channel !== "email" && channel !== "instagram_dm" && channel !== "tiktok_dm") throw new ToolError("lead_dm needs meta.channel: instagram_dm or tiktok_dm.");
+      return draftLeadPitch({
+        lead_id: leadId, channel, title: a.title, body: a.body, ask_id: a.ask_id,
+        subject: a.meta.subject === undefined ? undefined : String(a.meta.subject),
+      });
+    }
+    if (!a.client_id) throw new ToolError(`${a.kind} needs client_id.`);
     const client = await requireClient(a.client_id);
     const db = await getDb();
     const meta: Record<string, unknown> = { ...a.meta };
     const warnings: string[] = [];
+    if (a.kind === "report" && ("reportId" in meta || "audience" in meta))
+      throw new ToolError("Monthly owner reports come from create_report, not create_draft — don't pass meta.reportId/audience here.");
 
     if (a.task_id) {
       const [t] = await db.select().from(schema.tasks).where(eq(schema.tasks.id, a.task_id));
@@ -564,7 +587,7 @@ export function registerTools(server: McpServer, ctx: Ctx) {
     const warnings: string[] = [];
     const meta = a.meta ? { ...a.meta } : undefined;
     if (meta) {
-      for (const key of ["reviewId", "outreachId", "postId"]) {
+      for (const key of ["reviewId", "outreachId", "postId", "leadId", "reportId", "audience"]) {
         if (key in meta && String(meta[key]) !== String(cur.meta[key] ?? "")) throw new ToolError(`Can't change meta.${key} — create a new draft instead.`);
       }
       if (cur.kind === "outreach_email" && meta.to !== undefined && String(meta.to).trim().toLowerCase() !== String(cur.meta.to ?? "").toLowerCase())
@@ -596,6 +619,7 @@ export function registerTools(server: McpServer, ctx: Ctx) {
     }
     if (cur.kind === "review_reply") checkReviewReply(body, warnings);
     if (cur.kind === "outreach_email" || cur.kind === "outreach_dm") checkOutreach(body, warnings);
+    if (cur.kind === "lead_email" || cur.kind === "lead_dm") checkPitch(cur.kind, body, warnings);
 
     await reviseDraft(a.draft_id, { body: a.body, title: a.title, meta }, ACTOR);
     return { ok: true, draftId: a.draft_id, status: "needs_review", resubmitted: cur.status === "rejected", warnings: warnings.length ? warnings : undefined };

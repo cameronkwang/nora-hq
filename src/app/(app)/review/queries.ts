@@ -1,7 +1,7 @@
 import "server-only";
 import { and, asc, desc, eq, inArray, ne, sql, type SQL } from "drizzle-orm";
 import { getDb, schema } from "@/lib/db";
-import type { ContentPost, Creator, Draft, DraftKind, DraftStatus, Outreach, Review } from "@/lib/schema";
+import type { ClientReport, ContentPost, Creator, Draft, DraftKind, DraftStatus, Lead, Outreach, Review } from "@/lib/schema";
 import { MANUAL_SEND_KINDS } from "@/components/draft-checks";
 
 export const REVIEW_TABS = [
@@ -19,10 +19,15 @@ export type OutreachContext = Outreach & {
   otherClients: Array<{ clientId: string; stage: string }>;
 };
 
+export type ReportContext = Pick<ClientReport, "id" | "month" | "audience" | "status" | "sentAt" | "sentTo"> & { ownerEmail: string | null };
+
 export type DraftContext = {
   review?: Review | null;
   outreach?: OutreachContext | null;
   post?: ContentPost | null;
+  lead?: Pick<Lead, "id" | "name" | "contactName" | "city"> | null;
+  /** kind "report": the client_reports row (meta.reportId) and the business owner's email, if saved. */
+  report?: ReportContext | null;
 };
 
 function baseFilters(f: { client?: string; kind?: string }) {
@@ -79,8 +84,10 @@ export async function loadContexts(drafts: Draft[]): Promise<Map<string, DraftCo
   const reviewIds = metaIds("reviewId", ["review_reply"]);
   const outreachIds = metaIds("outreachId", ["outreach_email", "outreach_dm"]);
   const postIds = metaIds("postId", ["instagram_post", "tiktok_post"]);
+  const leadIds = metaIds("leadId", ["lead_email", "lead_dm"]);
+  const reportIds = metaIds("reportId", ["report"]);
 
-  const [reviews, outreachRows, posts, history] = await Promise.all([
+  const [reviews, outreachRows, posts, history, leadRows, reportRows] = await Promise.all([
     reviewIds.length ? db.select().from(schema.reviews).where(inArray(schema.reviews.id, reviewIds)) : Promise.resolve([] as Review[]),
     outreachIds.length
       ? db.select({ o: schema.outreach, c: schema.creators }).from(schema.outreach)
@@ -94,6 +101,19 @@ export async function loadContexts(drafts: Draft[]): Promise<Map<string, DraftCo
           .where(and(eq(schema.drafts.status, "sent"), inArray(sql`${schema.drafts.meta}->>'outreachId'`, outreachIds)))
           .orderBy(desc(schema.drafts.sentAt))
       : Promise.resolve([] as Array<{ id: string; title: string; kind: DraftKind; sentAt: Date | null; outreachId: string }>),
+    leadIds.length
+      ? db.select({ id: schema.leads.id, name: schema.leads.name, contactName: schema.leads.contactName, city: schema.leads.city })
+          .from(schema.leads).where(inArray(schema.leads.id, leadIds))
+      : Promise.resolve([] as Array<Pick<Lead, "id" | "name" | "contactName" | "city">>),
+    reportIds.length
+      ? db.select({
+          id: schema.clientReports.id, month: schema.clientReports.month, audience: schema.clientReports.audience, status: schema.clientReports.status,
+          sentAt: schema.clientReports.sentAt, sentTo: schema.clientReports.sentTo, ownerEmail: schema.clients.ownerEmail,
+        })
+          .from(schema.clientReports)
+          .innerJoin(schema.clients, eq(schema.clients.id, schema.clientReports.clientId))
+          .where(inArray(schema.clientReports.id, reportIds))
+      : Promise.resolve([] as ReportContext[]),
   ]);
 
   const creatorIds = [...new Set(outreachRows.map((r) => r.c.id))];
@@ -124,16 +144,27 @@ export async function loadContexts(drafts: Draft[]): Promise<Map<string, DraftCo
       ctx.outreach = o ? { ...o, history: o.history.filter((h) => h.id !== d.id) } : null;
     }
     if (d.kind === "instagram_post" || d.kind === "tiktok_post") ctx.post = posts.find((p) => p.id === String(d.meta.postId)) ?? null;
+    if (d.kind === "lead_email" || d.kind === "lead_dm") ctx.lead = leadRows.find((l) => l.id === String(d.meta.leadId)) ?? null;
+    if (d.kind === "report") ctx.report = reportRows.find((r) => r.id === String(d.meta.reportId)) ?? null;
     out.set(d.id, ctx);
   }
   return out;
 }
 
-/** Whether a Gmail connection is live (decides whether we show a mailto: fallback). */
-export async function gmailConnected() {
+async function providerConnected(provider: "gmail" | "google") {
   const db = await getDb();
   const [row] = await db.select({ id: schema.connections.id }).from(schema.connections)
-    .where(and(eq(schema.connections.provider, "gmail"), ne(schema.connections.status, "error"), ne(schema.connections.status, "expired")))
+    .where(and(eq(schema.connections.provider, provider), ne(schema.connections.status, "error"), ne(schema.connections.status, "expired")))
     .limit(1);
   return !!row;
+}
+
+/** Whether a Gmail connection is live (decides whether we show a mailto: fallback). */
+export async function gmailConnected() {
+  return providerConnected("gmail");
+}
+
+/** Whether Google Business Profile is connected (approving a review reply then posts it publicly). */
+export async function googleConnected() {
+  return providerConnected("google");
 }

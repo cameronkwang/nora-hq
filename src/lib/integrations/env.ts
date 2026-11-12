@@ -20,6 +20,8 @@ export const ENV_VARS: EnvVar[] = [
   { name: "GOOGLE_CLIENT_SECRET", group: "Google", required: false, purpose: "Google OAuth client secret", doc: "6. Google" },
   { name: "OUTREACH_FROM_NAME", group: "Google", required: false, purpose: "Sender name on outreach emails", doc: "7. Gmail outreach" },
   { name: "OUTREACH_FOOTER", group: "Google", required: false, purpose: "Custom outreach email footer (opt-out + address)", doc: "7. Gmail outreach" },
+  { name: "TIKTOK_CLIENT_KEY", group: "TikTok", required: false, purpose: "TikTok app client key (Nora's own stats)", doc: "Nora's own stats (@noraeatsgood)" },
+  { name: "TIKTOK_CLIENT_SECRET", group: "TikTok", required: false, purpose: "TikTok app client secret", doc: "Nora's own stats (@noraeatsgood)" },
 ];
 
 export function envStatus(): Array<EnvVar & { set: boolean }> {

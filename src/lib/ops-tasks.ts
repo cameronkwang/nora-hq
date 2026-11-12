@@ -1,11 +1,32 @@
 import "server-only";
-import { eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, isNull, ne, or, type SQL } from "drizzle-orm";
 import { z } from "zod";
 import { getDb, schema } from "./db";
 import { newId } from "./ids";
 import { addMonths } from "./dates";
 import { logActivity } from "./activity";
 import { OpsError } from "./ops";
+import { ONBOARDING_TAG } from "./ops-onboarding";
+
+/**
+ * Task scopes. "adhoc" = one-off work outside the monthly plans: no deliverable and not the onboarding
+ * checklist, for any business or none (requests routed from asks land here). "plan" = monthly-plan
+ * checklist items (have a deliverable). "all" = everything.
+ */
+export const TASK_SCOPES = ["adhoc", "plan", "all"] as const;
+export type TaskScope = (typeof TASK_SCOPES)[number];
+
+/** The scope as a WHERE clause on tasks (undefined for "all"). */
+export function taskScopeWhere(scope: TaskScope): SQL | undefined {
+  if (scope === "plan") return isNotNull(schema.tasks.deliverableId);
+  if (scope === "adhoc") return and(isNull(schema.tasks.deliverableId), or(isNull(schema.tasks.tag), ne(schema.tasks.tag, ONBOARDING_TAG)));
+  return undefined;
+}
+
+/** In-memory twin of taskScopeWhere("adhoc"). */
+export function isAdHocTask(t: { deliverableId: string | null; tag: string | null }) {
+  return !t.deliverableId && t.tag !== ONBOARDING_TAG;
+}
 
 /**
  * Bulk task mutations (the /tasks bulk action bar). Same conventions as lib/ops:

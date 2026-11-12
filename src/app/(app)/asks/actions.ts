@@ -3,7 +3,9 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { requireUser } from "@/lib/auth";
-import { OpsError, addAskMessage, createAsk, updateAsk } from "@/lib/ops";
+import { OpsError, addAskMessage, updateAsk } from "@/lib/ops";
+import { createRoutedAsk, triageAsk } from "@/lib/ops-asks";
+import { ROUTE_FIELDS, isAskRoute } from "@/components/ask-route";
 import { ASK_STATUSES, type AskStatus, type Attachment } from "@/lib/schema";
 import { UploadError, attachmentsFromJson, filesFrom, saveUpload } from "@/lib/uploads";
 
@@ -30,9 +32,27 @@ export async function createAskAction(_prev: AskFormState, formData: FormData): 
     throw e;
   }
 
-  await createAsk({ body, clientId, attachments }, user.email);
+  const routeIn = str(formData.get("route"));
+  const route = isAskRoute(routeIn) ? routeIn : "auto";
+  try {
+    await createRoutedAsk({ body, clientId, attachments }, ROUTE_FIELDS[route], user.email);
+  } catch (e) {
+    if (e instanceof OpsError) return { error: e.message };
+    throw e;
+  }
   revalidatePath("/", "layout");
-  redirect("/asks?created=1");
+  // Back to Home with a short confirmation (and an "Add another" link).
+  redirect(`/?sent=${route}`);
+}
+
+/** Re-route an ask from its page (the "Who's it for?" chips). Same function Claude's triage_ask uses. */
+export async function routeAskAction(formData: FormData) {
+  const user = await requireUser();
+  const id = str(formData.get("id"));
+  const route = str(formData.get("route"));
+  if (!id || !isAskRoute(route)) return;
+  await triageAsk(id, ROUTE_FIELDS[route], user.email);
+  revalidatePath("/", "layout");
 }
 
 export async function setAskStatus(formData: FormData) {

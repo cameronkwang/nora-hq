@@ -14,7 +14,7 @@ export function OutreachStageSelect({ current, label, stages }: { current: strin
         name="stage"
         aria-label={label}
         defaultValue={current}
-        className="input py-1! text-xs!"
+        className="input py-1! text-xs! pointer-coarse:text-base!"
         onChange={(e) => {
           if (e.currentTarget.value !== current) e.currentTarget.form?.requestSubmit();
         }}

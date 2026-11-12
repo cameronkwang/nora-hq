@@ -12,9 +12,11 @@ type Opt = { id: string; label: string };
  * A plain GET form; selects apply as soon as they change (the Apply button is there for no-JS).
  */
 export function TaskFilters({
-  view, client, assignee, status, month, group, sort, dir,
+  scope = "adhoc", view, client, assignee, status, month, group, sort, dir,
   clients, months, mineHref, clearHref, filtered,
 }: {
+  /** "adhoc" (default) | "plan" | "all" — carried through the GET form. */
+  scope?: string;
   view: string;
   client: string;
   assignee: string;
@@ -37,6 +39,7 @@ export function TaskFilters({
 
   return (
     <form ref={form} method="get" action="/tasks" className="mb-4">
+      {scope !== "adhoc" && <input type="hidden" name="scope" value={scope} />}
       {view !== "list" && <input type="hidden" name="view" value={view} />}
       {view === "list" && <input type="hidden" name="view" value="list" />}
       {view === "table" && sort !== "due" && <input type="hidden" name="sort" value={sort} />}
@@ -67,7 +70,7 @@ export function TaskFilters({
             {clients.map((c) => (
               <option key={c.id} value={c.id}>{c.label}</option>
             ))}
-            <option value="none">No business</option>
+            <option value="none">No business / general</option>
           </select>
         </div>
 

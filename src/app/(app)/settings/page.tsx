@@ -1,7 +1,7 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
 import { requireUser } from "@/lib/auth";
-import { listClients } from "@/lib/data";
+import { isCreatorClient, listClients } from "@/lib/data";
 import { relativeTime } from "@/lib/dates";
 import { listConnectionSummaries, type ConnectionSummary } from "@/lib/integrations/connections";
 import { envStatus } from "@/lib/integrations/env";
@@ -12,6 +12,7 @@ import { listLocations, type GoogleLocation } from "@/lib/integrations/google";
 import { Badge, Card, EmptyState, PageHeader, buttonClass, clientLabel, cx } from "@/components/ui";
 import { ConfirmButton, SubmitButton } from "@/components/client-form";
 import { CopyButton } from "@/components/copy-button";
+import { SavedRepliesRow } from "@/components/reply-links";
 import {
   checkRepliesAction, disconnectAction, refreshInstagramTokensAction, saveLocationsAction, syncInstagramViewsAction, syncReviewsAction,
 } from "./actions";
@@ -113,6 +114,29 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
       )}
 
       <div className="flex flex-col gap-6">
+        {/* Quick capture (iPhone Shortcut keys) */}
+        <Link href="/settings/capture" className="flex min-h-11 items-center justify-between gap-3 rounded-xl border border-border bg-surface px-4 py-3 hover:bg-surface-2">
+          <span className="min-w-0">
+            <span className="block font-medium">Quick capture</span>
+            <span className="block text-sm text-muted">Send asks from your iPhone’s Share button or Siri.</span>
+          </span>
+          <span aria-hidden className="text-muted">→</span>
+        </Link>
+
+        {/* Phone notifications + private calendar link */}
+        <Link href="/settings/notifications" className="flex min-h-11 items-center justify-between gap-3 rounded-xl border border-border bg-surface px-4 py-3 hover:bg-surface-2">
+          <span className="min-w-0">
+            <span className="block font-medium">Notifications &amp; calendar</span>
+            <span className="block text-sm text-muted">Phone alerts and your calendar link</span>
+          </span>
+          <span aria-hidden className="text-muted">→</span>
+        </Link>
+
+        {/* Saved replies */}
+        <div className="rounded-xl border border-border bg-surface px-3 py-1">
+          <SavedRepliesRow />
+        </div>
+
         {/* Instagram */}
         <Card
           title="Instagram"
@@ -162,6 +186,18 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
           <p className="mt-3 text-xs text-muted">
             Tip: log out of Instagram in this browser (or use a private window) before connecting the next account, otherwise Instagram reuses the last login.
           </p>
+        </Card>
+
+        {/* Nora's own accounts — stats live on /stats */}
+        <Card title="Nora's accounts (@noraeatsgood)">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <p className="text-sm text-muted">Nora&apos;s own Instagram and TikTok, for follower growth, top posts and the media kit on My stats. Read-only.</p>
+            <div className="flex shrink-0 flex-wrap gap-2">
+              <a href="/api/oauth/instagram/start?purpose=creator" className={buttonClass("secondary", "sm")}>Connect Instagram</a>
+              <a href="/api/oauth/tiktok/start" className={buttonClass("secondary", "sm")}>Connect TikTok</a>
+              <Link href="/stats" className={buttonClass("ghost", "sm")}>My stats →</Link>
+            </div>
+          </div>
         </Card>
 
         <div className="grid gap-6 lg:grid-cols-2">
@@ -229,7 +265,7 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
                 <p className="text-sm text-muted">This Google account doesn&apos;t manage any Business Profiles yet. Ask each restaurant to add it as a manager, then reload.</p>
               )}
               <div className="grid gap-4 sm:grid-cols-2">
-                {clients.map((c) => {
+                {clients.filter((c) => !isCreatorClient(c)).map((c) => {
                   const id = `loc-${c.id}`;
                   const current = c.googleLocation ?? "";
                   const known = locations?.some((l) => l.name === current);

@@ -7,6 +7,8 @@ import { listClients } from "@/lib/data";
 import { formatDate, relativeTime } from "@/lib/dates";
 import { AskAttachments } from "@/components/ask-attachments";
 import { AskReply } from "@/components/ask-reply";
+import { personKey, routesFor } from "@/components/ask-route";
+import { AskRoutePicker } from "@/components/ask-route-picker";
 import { AskStatusButtons } from "@/components/ask-status-buttons";
 import { AskThread, type ThreadItem } from "@/components/ask-thread";
 import { askThreadState, listAskMessages } from "@/lib/ops";
@@ -52,7 +54,7 @@ export default async function AskPage({ params }: { params: Promise<{ id: string
 
   return (
     <div className="mx-auto max-w-3xl lg:max-w-6xl">
-      <Link href={ask.status === "new" ? "/asks" : `/asks?status=${ask.status}`} className="mb-3 inline-block text-sm text-muted hover:text-text">
+      <Link href={ask.status === "done" || ask.status === "archived" ? `/asks?tab=${ask.status}` : ask.kind === "idea" ? "/asks?tab=ideas" : "/asks"} className="mb-3 inline-block text-sm text-muted hover:text-text">
         ← Asks
       </Link>
       <PageHeader
@@ -78,6 +80,10 @@ export default async function AskPage({ params }: { params: Promise<{ id: string
                 <AskAttachments items={ask.attachments} size="lg" />
               </div>
             )}
+            <div className="mt-4 flex flex-col gap-2 border-t border-border pt-3 sm:flex-row sm:items-center sm:gap-3">
+              <span className="shrink-0 text-xs font-semibold text-muted">Who&rsquo;s it for?</span>
+              <AskRoutePicker ask={ask} routes={routesFor(personKey(assigneeFor(user)))} />
+            </div>
           </Card>
 
           {state && (
