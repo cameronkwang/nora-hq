@@ -35,6 +35,8 @@ export const clients = pgTable("clients", {
   archived: boolean("archived").notNull().default(false),
   /** "business" = a managed client; "creator" = Nora's own @noraeatsgood workspace (exactly one, pinned). */
   kind: text("kind").$type<"business" | "creator">().notNull().default("business"),
+  /** Where approved external monthly reports are emailed. Owners only ever receive what we send. */
+  ownerEmail: text("owner_email"),
   sortOrder: integer("sort_order").notNull().default(0),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
@@ -524,3 +526,151 @@ export const collabRequests = pgTable(
 );
 
 export type CollabRequest = typeof collabRequests.$inferSelect;
+
+/* ───────────────────────── Collab deals (Nora's creator business) ───────────────────────── */
+
+export const DEAL_STATUSES = ["planning", "scheduled", "shot", "posted", "complete", "cancelled"] as const;
+export type DealStatus = (typeof DEAL_STATUSES)[number];
+export const DEAL_COMP = ["paid", "paid_hosted", "gifted", "affiliate"] as const;
+export type DealComp = (typeof DEAL_COMP)[number];
+export const PAYMENT_STATUSES = ["not_requested", "requested", "paid", "not_applicable"] as const;
+export type PaymentStatus = (typeof PAYMENT_STATUSES)[number];
+
+export type ShotItem = { id: string; text: string; done: boolean };
+
+/** An agreed collab: terms, the visit/shoot, deliverables and whether Nora has been paid. */
+export const deals = pgTable(
+  "deals",
+  {
+    id: text("id").primaryKey(),
+    businessName: text("business_name").notNull(),
+    collabRequestId: text("collab_request_id").references(() => collabRequests.id, { onDelete: "set null" }),
+    leadId: text("lead_id").references(() => leads.id, { onDelete: "set null" }),
+    clientId: text("client_id").references(() => clients.id, { onDelete: "set null" }), // when the business is also a managed client
+    contactName: text("contact_name"),
+    contactEmail: text("contact_email"),
+    contactPhone: text("contact_phone"),
+    address: text("address"),
+    compType: text("comp_type").$type<DealComp>().notNull().default("paid"),
+    amountCents: integer("amount_cents"), // agreed fee
+    usageRights: text("usage_rights"), // organic only / repost / paid ads (priced separately)
+    terms: text("terms"),
+    visitAt: timestamp("visit_at", { withTimezone: true }), // visit or shoot time
+    status: text("status").$type<DealStatus>().notNull().default("planning"),
+    paymentStatus: text("payment_status").$type<PaymentStatus>().notNull().default("not_requested"),
+    paymentDueDate: text("payment_due_date"), // "YYYY-MM-DD"
+    paidAt: timestamp("paid_at", { withTimezone: true }),
+    menuNotes: text("menu_notes"), // signature dishes, what to order
+    dietaryNotes: text("dietary_notes"),
+    filmingNotes: text("filming_notes"), // restrictions, best times
+    shotList: jsonb("shot_list").$type<ShotItem[]>().notNull().default([]),
+    notes: text("notes"),
+    createdBy: text("created_by").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("deals_status_idx").on(t.status), index("deals_visit_idx").on(t.visitAt)],
+);
+
+export const DELIVERABLE_KINDS = ["ig_reel", "ig_post", "ig_story", "tiktok", "photos", "other"] as const;
+
+export const dealDeliverables = pgTable(
+  "deal_deliverables",
+  {
+    id: text("id").primaryKey(),
+    dealId: text("deal_id").notNull().references(() => deals.id, { onDelete: "cascade" }),
+    kind: text("kind").$type<(typeof DELIVERABLE_KINDS)[number]>().notNull(),
+    dueDate: text("due_date"), // "YYYY-MM-DD"
+    postUrl: text("post_url"),
+    postedAt: timestamp("posted_at", { withTimezone: true }),
+    disclosureOk: boolean("disclosure_ok"),
+    sortOrder: integer("sort_order").notNull().default(0),
+  },
+  (t) => [index("deal_deliverables_deal_idx").on(t.dealId)],
+);
+
+/* ───────────────────────── Phone notifications & calendar feeds ───────────────────────── */
+
+export const NOTIFY_TOPICS = ["collab_request", "ask_for_me", "drafts_waiting", "payment_overdue", "visit_reminder"] as const;
+export type NotifyTopic = (typeof NOTIFY_TOPICS)[number];
+
+/** Web Push subscriptions (one per device). iOS only allows these from a Home Screen web app. */
+export const pushSubscriptions = pgTable("push_subscriptions", {
+  id: text("id").primaryKey(),
+  userEmail: text("user_email").notNull(),
+  endpoint: text("endpoint").notNull().unique(),
+  p256dh: text("p256dh").notNull(),
+  auth: text("auth").notNull(),
+  topics: jsonb("topics").$type<NotifyTopic[]>().notNull().default(["collab_request", "ask_for_me", "drafts_waiting", "payment_overdue", "visit_reminder"]),
+  userAgent: text("user_agent"),
+  lastSentAt: timestamp("last_sent_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+/** Private iCal subscription links (token stored hashed). */
+export const calendarFeeds = pgTable("calendar_feeds", {
+  id: text("id").primaryKey(),
+  userEmail: text("user_email").notNull(),
+  tokenHash: text("token_hash").notNull().unique(),
+  revokedAt: timestamp("revoked_at", { withTimezone: true }),
+  lastFetchedAt: timestamp("last_fetched_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+/* ───────────────────────── Saved replies ───────────────────────── */
+
+/** One-tap message templates. {name}, {business}, {date} placeholders. Claude may only add "suggested" ones. */
+export const savedReplies = pgTable("saved_replies", {
+  id: text("id").primaryKey(),
+  title: text("title").notNull(),
+  body: text("body").notNull(),
+  category: text("category"), // collab, client, outreach, general
+  status: text("status").$type<"active" | "suggested">().notNull().default("active"),
+  useCount: integer("use_count").notNull().default(0),
+  createdBy: text("created_by").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+/* ───────────────────────── Monthly client reports ───────────────────────── */
+
+/**
+ * Two reports per business per month: "internal" (for Cameron & Nora — everything, incl. effort, issues,
+ * pending work) and "external" (polished, owner-facing). Owners only ever receive an approved external report
+ * that a person sends. External reports go through the drafts approval flow (drafts.kind "report", meta.reportId).
+ */
+export const clientReports = pgTable(
+  "client_reports",
+  {
+    id: text("id").primaryKey(),
+    clientId: text("client_id").notNull().references(() => clients.id, { onDelete: "cascade" }),
+    month: text("month").notNull(),
+    audience: text("audience").$type<"internal" | "external">().notNull(),
+    body: text("body").notNull(), // markdown
+    metrics: jsonb("metrics").$type<Record<string, unknown>>().notNull().default({}), // snapshot the numbers were based on
+    status: text("status").$type<"draft" | "approved" | "sent">().notNull().default("draft"),
+    draftId: text("draft_id").references(() => drafts.id, { onDelete: "set null" }),
+    sentAt: timestamp("sent_at", { withTimezone: true }),
+    sentTo: text("sent_to"),
+    createdBy: text("created_by").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("client_reports_client_month_audience_uq").on(t.clientId, t.month, t.audience)],
+);
+
+/* ───────────────────────── App settings (key/value) ───────────────────────── */
+
+/** Small settings blobs, e.g. "media_kit" → { enabled, rateLine, showRates, showPastCollabs, pastCollabs, bio }. */
+export const appSettings = pgTable("app_settings", {
+  key: text("key").primaryKey(),
+  value: jsonb("value").$type<Record<string, unknown>>().notNull(),
+  updatedBy: text("updated_by"),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export type Deal = typeof deals.$inferSelect;
+export type DealDeliverable = typeof dealDeliverables.$inferSelect;
+export type PushSubscription = typeof pushSubscriptions.$inferSelect;
+export type SavedReply = typeof savedReplies.$inferSelect;
+export type ClientReport = typeof clientReports.$inferSelect;
