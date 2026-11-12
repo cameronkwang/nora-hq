@@ -9,6 +9,7 @@ import { publishInstagramPost, replyToInstagramComment } from "./integrations/in
 import { replyToGoogleReview } from "./integrations/google";
 import { sendOutreachEmail } from "./integrations/gmail";
 import { postReviewKey } from "./post-key";
+import { notifyDraftCreated } from "./notify";
 import type { IntegrationResult } from "./integrations/types";
 
 /**
@@ -68,7 +69,13 @@ export async function updateClient(id: string, patch: Partial<z.input<typeof Cli
   for (const k of ["location", "brand", "website", "googleLocation", "brandVoice", "notes"] as const) if (v[k] !== undefined) set[k] = d(v[k]);
   if (v.instagramHandle !== undefined) set.instagramHandle = handle(v.instagramHandle);
   if (v.tiktokHandle !== undefined) set.tiktokHandle = handle(v.tiktokHandle);
-  if (patch.archived !== undefined) set.archived = patch.archived;
+  if (patch.archived !== undefined) {
+    if (patch.archived) {
+      const [cur] = await db.select({ kind: schema.clients.kind }).from(schema.clients).where(eq(schema.clients.id, id));
+      if (cur?.kind === "creator") throw new OpsError("Nora's own workspace can't be archived.");
+    }
+    set.archived = patch.archived;
+  }
   if (Object.keys(set).length === 0) return;
   await db.update(schema.clients).set(set).where(eq(schema.clients.id, id));
   await logActivity({ actor, action: "client.updated", entityType: "client", entityId: id, clientId: id, summary: `Updated business details (${Object.keys(set).join(", ")})` });
@@ -174,7 +181,8 @@ export async function updateTask(id: string, patch: Partial<z.input<typeof TaskI
   if (v.title !== undefined) set.title = v.title.trim();
   if (v.details !== undefined) set.details = d(v.details);
   if (v.platform !== undefined) set.platform = v.platform ?? null;
-  if (v.assignee !== undefined) set.assignee = v.assignee;
+  // zod defaults still apply under .partial(), so only take assignee when the caller actually sent one.
+  if (patch.assignee !== undefined && v.assignee !== undefined) set.assignee = v.assignee;
   if (v.clientId !== undefined) set.clientId = v.clientId || null;
   if (v.deliverableId !== undefined) set.deliverableId = v.deliverableId || null;
   if (v.dueDate !== undefined) set.dueDate = v.dueDate ?? null;
@@ -420,6 +428,7 @@ export async function createDraft(input: z.input<typeof DraftInput>, actor = "cl
   await db.insert(schema.drafts).values({ id, clientId: v.clientId || null, kind: v.kind, title: v.title.trim(), body: v.body, meta: v.meta, taskId: v.taskId || null, askId: v.askId || null, createdBy: actor });
   if (v.taskId) await db.update(schema.tasks).set({ status: "needs_review" }).where(and(eq(schema.tasks.id, v.taskId), inArray(schema.tasks.status, ["todo", "in_progress", "blocked"])));
   await logActivity({ actor, action: "draft.created", entityType: "draft", entityId: id, clientId: v.clientId, summary: `Draft for review: ${v.title}` });
+  notifyDraftCreated({ id, title: v.title }, actor);
   return id;
 }
 
@@ -429,6 +438,11 @@ export async function reviseDraft(id: string, patch: { body?: string; title?: st
   const [cur] = await db.select().from(schema.drafts).where(eq(schema.drafts.id, id));
   if (!cur) throw new OpsError("draft not found");
   if (cur.status === "sent") throw new OpsError("Already sent — can't edit");
+  if (cur.kind === "report" && patch.meta) {
+    for (const key of ["reportId", "audience"]) {
+      if (key in patch.meta && String(patch.meta[key] ?? "") !== String(cur.meta[key] ?? "")) throw new OpsError(`Can't change which report a draft is for (meta.${key}).`);
+    }
+  }
   if ((cur.kind === "lead_email" || cur.kind === "lead_dm") && patch.meta) {
     if ("leadId" in patch.meta && String(patch.meta.leadId) !== String(cur.meta.leadId ?? "")) throw new OpsError("Can't change which lead a pitch is for — create a new draft instead.");
     if (actor === "claude" && cur.kind === "lead_email" && patch.meta.to !== undefined && String(patch.meta.to).trim().toLowerCase() !== String(cur.meta.to ?? "").toLowerCase())
@@ -479,6 +493,11 @@ export async function approveDraft(id: string, actor: string, opts: { body?: str
   if (!cur) throw new OpsError("draft not found");
   if (cur.kind === "outreach_email" || cur.kind === "outreach_dm") await assertContactable(cur);
   if (cur.kind === "lead_email" || cur.kind === "lead_dm") await assertLeadContactable(cur);
+  if (cur.kind === "report" && cur.meta.reportId) {
+    // meta.reportId alone isn't trusted: the report must point back at this draft (same business, external).
+    const { reportForDraft } = await import("./ops-reports");
+    await reportForDraft(cur);
+  }
   if ((cur.kind === "instagram_post" || cur.kind === "tiktok_post") && cur.meta.postId) {
     // The reviewer approved what the review page showed them. If the post's media, time or format changed since
     // (e.g. Claude edited it), refuse rather than schedule something the person never saw.
@@ -548,6 +567,11 @@ export async function approveDraft(id: string, actor: string, opts: { body?: str
     }
     case "lead_dm":
       return { status: "approved", message: "Approved. Copy it, send it from the app, then click “Mark sent”." };
+    case "report": {
+      // Marks the client report approved. Never sends: a person sends it from the business's Reports page.
+      const { onReportDraftApproved } = await import("./ops-reports");
+      return onReportDraftApproved(draft, actor);
+    }
     default:
       return { status: "approved", message: "Approved." };
   }

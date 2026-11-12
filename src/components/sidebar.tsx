@@ -4,8 +4,18 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { cx } from "./ui";
+import { NewClientLink } from "./onboard-link";
 
-type NavClient = { id: string; name: string; location: string | null };
+type NavClient = { id: string; name: string; location: string | null; kind?: string | null };
+
+/** Nora's own workspace (clients.kind "creator", seeded as "noraeatsgood"). Pinned above the businesses. */
+const CREATOR_ID = "noraeatsgood";
+const isCreator = (c: NavClient) => c.kind === "creator" || c.id === CREATOR_ID;
+
+/** Splits the nav list into Nora's pinned entry and the businesses. */
+function splitClients(clients: NavClient[]) {
+  return { creator: clients.find(isCreator) ?? null, businesses: clients.filter((c) => !isCreator(c)) };
+}
 type Counts = { newAsks: number; needsReview: number };
 type CountKey = keyof Counts;
 type Item = { href: string; label: string; icon: IconName; count?: CountKey };
@@ -20,7 +30,6 @@ const MAIN: Item[] = [
   { href: "/creators", label: "Creators", icon: "users" },
   { href: "/leads", label: "Leads", icon: "target" },
   { href: "/numbers", label: "Numbers", icon: "chart" },
-  { href: "/stats", label: "My stats", icon: "trend" },
 ];
 
 /** Less frequent places, tucked behind "More". */
@@ -40,6 +49,12 @@ function useIsActive() {
   return (href: string) => (href === "/" ? path === "/" : path === href || path.startsWith(`${href}/`));
 }
 
+/** Nora's section covers her workspace page plus My stats and collab requests. */
+function useCreatorActive(id: string | undefined) {
+  const active = useIsActive();
+  return !!id && (active(`/clients/${id}`) || active("/stats") || active("/collabs"));
+}
+
 export function Sidebar({ user, clients, counts }: { user: { name: string; email: string }; clients: NavClient[]; counts: Counts }) {
   useNewAskShortcut();
   return (
@@ -55,6 +70,8 @@ export function Sidebar({ user, clients, counts }: { user: { name: string; email
 function DesktopSidebar({ user, clients, counts }: { user: { name: string; email: string }; clients: NavClient[]; counts: Counts }) {
   const active = useIsActive();
   const path = usePathname();
+  const { creator, businesses } = splitClients(clients);
+  const creatorActive = useCreatorActive(creator?.id);
   const inMore = MORE.some((m) => active(m.href));
   const [moreOpen, setMoreOpen] = useState(inMore);
   useEffect(() => {
@@ -83,10 +100,30 @@ function DesktopSidebar({ user, clients, counts }: { user: { name: string; email
           ))}
         </div>
 
+        {creator && (
+          <Link
+            href={`/clients/${creator.id}`}
+            aria-current={creatorActive ? "page" : undefined}
+            className={cx(
+              "flex items-center gap-2.5 rounded-lg border px-3 py-2",
+              creatorActive ? "border-accent bg-accent-soft text-accent" : "border-border hover:bg-surface-2",
+            )}
+          >
+            <Icon name="spark" className={cx("size-4 shrink-0", !creatorActive && "text-accent")} />
+            <span className="min-w-0 flex-1">
+              <span className="block truncate font-semibold">{creator.name}</span>
+              <span className="block truncate text-xs font-normal text-muted">@{CREATOR_ID}</span>
+            </span>
+          </Link>
+        )}
+
         <div>
-          <p className="px-3 pb-1 text-xs font-semibold uppercase tracking-wide text-muted">Businesses</p>
+          <div className="flex items-center justify-between pr-2">
+            <p className="px-3 pb-1 text-xs font-semibold uppercase tracking-wide text-muted">Businesses</p>
+            <NewClientLink variant="plus" />
+          </div>
           <div className="flex flex-col gap-0.5">
-            {clients.map((c) => (
+            {businesses.map((c) => (
               <Link
                 key={c.id}
                 href={`/clients/${c.id}`}
@@ -180,7 +217,9 @@ function MobileNav({ user, clients, counts }: { user: { name: string; email: str
     };
   }, [open]);
 
-  const sheetActive = [...SHEET_MAIN, ...MORE].some((i) => active(i.href)) || path.startsWith("/clients");
+  const { creator, businesses } = splitClients(clients);
+  const creatorActive = useCreatorActive(creator?.id);
+  const sheetActive = [...SHEET_MAIN, ...MORE].some((i) => active(i.href)) || path.startsWith("/clients") || creatorActive;
 
   return (
     <>
@@ -265,7 +304,13 @@ function MobileNav({ user, clients, counts }: { user: { name: string; email: str
             </SheetGroup>
 
             <SheetGroup title="Businesses">
-              {clients.map((c) => (
+              {creator && (
+                <SheetLink href={`/clients/${creator.id}`} icon="spark" active={creatorActive} onClick={close}>
+                  <span className="block truncate">{creator.name}</span>
+                  <span className="block truncate text-xs font-normal text-muted">@{CREATOR_ID}</span>
+                </SheetLink>
+              )}
+              {businesses.map((c) => (
                 <SheetLink key={c.id} href={`/clients/${c.id}`} icon="store" active={active(`/clients/${c.id}`)} onClick={close}>
                   <span className="block truncate">{c.name}</span>
                   {c.location && <span className="block truncate text-xs font-normal text-muted">{c.location}</span>}
@@ -274,6 +319,7 @@ function MobileNav({ user, clients, counts }: { user: { name: string; email: str
               <SheetLink href="/clients" icon="grid" active={path === "/clients"} onClick={close}>
                 All businesses
               </SheetLink>
+              <NewClientLink variant="row" onClick={close} />
             </SheetGroup>
 
             <SheetGroup>
@@ -380,7 +426,7 @@ function useNewAskShortcut() {
 
 type IconName =
   | "home" | "inbox" | "check" | "list" | "calendar" | "users" | "chart" | "star" | "clock" | "gear"
-  | "plus" | "menu" | "chevron" | "store" | "grid" | "logout" | "target" | "trend";
+  | "plus" | "menu" | "chevron" | "store" | "grid" | "logout" | "target" | "trend" | "spark";
 
 const PATHS: Record<IconName, ReactNode> = {
   home: <path d="M3 10.5 12 3l9 7.5M5 9v11h5v-6h4v6h5V9" />,
@@ -406,6 +452,7 @@ const PATHS: Record<IconName, ReactNode> = {
   ),
   chart: <path d="M4 20V10M10 20V4M16 20v-7M21 20H3" />,
   trend: <path d="M3 17l6-6 4 4 8-8M15 7h6v6" />,
+  spark: <path d="M12 3.5c.6 3.9 2.6 5.9 6.5 6.5-3.9.6-5.9 2.6-6.5 6.5-.6-3.9-2.6-5.9-6.5-6.5 3.9-.6 5.9-2.6 6.5-6.5zM18.5 15.5c.3 1.6 1 2.3 2.5 2.5-1.5.2-2.2.9-2.5 2.5-.3-1.6-1-2.3-2.5-2.5 1.5-.2 2.2-.9 2.5-2.5z" />,
   star: <path d="m12 3.5 2.6 5.4 5.9.8-4.3 4.1 1 5.8L12 16.9l-5.2 2.7 1-5.8-4.3-4.1 5.9-.8z" />,
   clock: (
     <>

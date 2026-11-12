@@ -2,7 +2,7 @@ import Link from "next/link";
 import { and, asc, desc, eq, inArray, isNotNull, lt, lte, ne, notInArray, or, sql } from "drizzle-orm";
 import { assigneeFor, requireUser } from "@/lib/auth";
 import { getDb, schema } from "@/lib/db";
-import { listClients } from "@/lib/data";
+import { countNewCollabRequests, isCreatorClient, listClients } from "@/lib/data";
 import { getClientMonth, type ClientMonth } from "@/lib/reports";
 import { APP_TZ, currentMonth, monthLabel, relativeTime, today } from "@/lib/dates";
 import { askThreadState, listAskMessagesFor } from "@/lib/ops";
@@ -10,6 +10,8 @@ import { isAskRoute, personKey, type AskRoute } from "@/components/ask-route";
 import { TaskList, TaskRow, isOverdue } from "@/components/task-row";
 import { blobEnabled } from "@/lib/uploads";
 import { QuickAsk } from "@/components/quick-ask";
+import { NotifyHomeCard } from "@/components/notify-home-card";
+import { NewClientLink } from "@/components/onboard-link";
 import { Badge, Card, EmptyState, PageHeader, ProgressBar, clientLabel, cx, formatNumber, humanize } from "@/components/ui";
 
 export const dynamic = "force-dynamic";
@@ -86,7 +88,8 @@ export default async function Home({ searchParams }: { searchParams: Promise<Rec
 
   const openDue = and(ne(schema.tasks.status, "done"), isNotNull(schema.tasks.dueDate), lte(schema.tasks.dueDate, now));
   const clients = await listClients();
-  const [cms, [asksWaiting], [draftCount], [dueCount], [overdueCount], pendingDrafts, dueTasks] = await Promise.all([
+  const [newCollabs, cms, [asksWaiting], [draftCount], [dueCount], [overdueCount], pendingDrafts, dueTasks] = await Promise.all([
+    countNewCollabRequests(),
     Promise.all(clients.map((c) => getClientMonth(c.id, month))),
     db.select({ n: sql<number>`count(*)::int` }).from(schema.asks).where(and(eq(schema.asks.status, "new"), ne(schema.asks.kind, "idea"))),
     db.select({ n: sql<number>`count(*)::int` }).from(schema.drafts).where(eq(schema.drafts.status, "needs_review")),
@@ -100,7 +103,8 @@ export default async function Home({ searchParams }: { searchParams: Promise<Rec
   const forYou = await getForYou(user.email, me, now);
   const forYouTaskIds = new Set(forYou.tasks.map((t) => t.id));
 
-  const months = cms.filter((x): x is ClientMonth => !!x);
+  // Nora's own workspace always leads the grid.
+  const months = cms.filter((x): x is ClientMonth => !!x).sort((a, b) => Number(isCreatorClient(b.client)) - Number(isCreatorClient(a.client)));
   const names = new Map(clients.map((c) => [c.id, clientLabel(c)]));
   const first = user.name.split(" ")[0];
   // Tasks already shown under "For you" aren't repeated below.
@@ -115,6 +119,9 @@ export default async function Home({ searchParams }: { searchParams: Promise<Rec
     <div className="flex flex-col gap-6">
       {/* Drop anything in — first thing on screen. */}
       <QuickAsk me={me} directUpload={blobEnabled()} />
+
+      {/* One-time "turn on phone alerts" prompt; hides itself once handled. */}
+      <NotifyHomeCard />
 
       <PageHeader title={`${greeting()}, ${first}`} subtitle={todayLabel()} />
 
@@ -223,16 +230,19 @@ export default async function Home({ searchParams }: { searchParams: Promise<Rec
       <section>
         <div className="mb-3 flex items-end justify-between gap-2">
           <h2 className="text-lg font-semibold">Businesses</h2>
-          <span className="text-sm text-muted">{monthLabel(month)}</span>
+          <div className="flex items-center gap-3">
+            <span className="text-sm text-muted">{monthLabel(month)}</span>
+            <NewClientLink />
+          </div>
         </div>
         {months.length === 0 ? (
           <EmptyState title="No businesses yet.">
-            <Link href="/clients" className="text-accent hover:underline">Add your first business</Link> to start tracking its monthly plan.
+            <Link href="/clients/new" className="text-accent hover:underline">Add your first business</Link> to start tracking its monthly plan.
           </EmptyState>
         ) : (
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
             {months.map((cm) => (
-              <BusinessCard key={cm.client.id} cm={cm} now={now} />
+              <BusinessCard key={cm.client.id} cm={cm} now={now} newCollabs={isCreatorClient(cm.client) ? newCollabs : 0} />
             ))}
           </div>
         )}
@@ -309,26 +319,34 @@ function SectionHead({ title, href, total, shown }: { title: string; href: strin
   );
 }
 
-function BusinessCard({ cm, now }: { cm: ClientMonth; now: string }) {
+function BusinessCard({ cm, now, newCollabs = 0 }: { cm: ClientMonth; now: string; newCollabs?: number }) {
+  const creator = isCreatorClient(cm.client);
   const { done, target } = planProgress(cm);
   const views = latestViews(cm);
   const id = cm.client.id;
   const overdue = cm.openTasks.filter((t) => isOverdue(t, now)).length;
   const open = cm.openTasks.length;
   const chips = [
+    { n: newCollabs, label: newCollabs === 1 ? "new collab request" : "new collab requests", href: "/collabs", cls: "text-accent" },
     { n: cm.pendingDrafts, label: cm.pendingDrafts === 1 ? "draft" : "drafts", href: `/review?client=${id}`, cls: "text-accent" },
     { n: cm.unrepliedReviews, label: cm.unrepliedReviews === 1 ? "review" : "reviews", href: `/reviews?client=${id}`, cls: "text-google" },
     { n: overdue, label: "overdue", href: `/tasks?client=${id}&scope=all`, cls: "text-danger" },
   ].filter((c) => c.n > 0);
 
   return (
-    <article className="relative flex flex-col rounded-xl border border-border bg-surface p-4 transition hover:border-muted/50">
+    <article
+      className={cx(
+        "relative flex flex-col rounded-xl border p-4 transition",
+        creator ? "border-accent/40 bg-accent-soft hover:border-accent" : "border-border bg-surface hover:border-muted/50",
+      )}
+    >
       <div className="flex items-baseline justify-between gap-3">
-        <h3 className="min-w-0 truncate font-semibold">
+        <h3 className="flex min-w-0 items-baseline gap-2 font-semibold">
           {/* The whole card opens the business; the chips below stay their own links. */}
-          <Link href={`/clients/${id}`} className="after:absolute after:inset-0 after:rounded-xl">
+          <Link href={`/clients/${id}`} className="truncate after:absolute after:inset-0 after:rounded-xl">
             {cm.client.name}
           </Link>
+          {creator && <span className="shrink-0 rounded-full bg-surface px-2 py-0.5 text-xs font-medium text-accent">Creator</span>}
         </h3>
         {cm.client.location && <span className="shrink-0 truncate text-xs text-muted">{cm.client.location}</span>}
       </div>

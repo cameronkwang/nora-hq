@@ -5,11 +5,12 @@ import { getLead, leadDrafts } from "@/lib/ops-leads";
 import { LEAD_STAGES } from "@/lib/schema";
 import { formatDate, relativeTime, today as todayStr } from "@/lib/dates";
 import { ActionForm, ConfirmButton, SubmitButton } from "@/components/client-form";
-import { LeadFields, OpportunityPicker } from "@/components/lead-fields";
+import { LeadFields } from "@/components/lead-fields";
+import { NewClientLink } from "@/components/onboard-link";
 import { NextStep, OppChips, ScoreBar } from "@/components/lead-bits";
 import { OutreachStageSelect } from "@/components/outreach-stage-select";
 import { Badge, Card, LinkButton, PageHeader, StatusBadge, cx } from "@/components/ui";
-import { askPitchAction, convertLeadAction, deleteLeadAction, moveLeadStageAction, saveFollowUpAction, updateLeadAction } from "../actions";
+import { askPitchAction, deleteLeadAction, moveLeadStageAction, saveFollowUpAction, updateLeadAction } from "../actions";
 import { CONVERT_STAGES, NO_CONTACT_STAGES, STAGE_LABEL, googleMapsHref, igHref, leadSignals, ttHref, websiteUrl } from "../shared";
 
 export const dynamic = "force-dynamic";
@@ -92,11 +93,8 @@ export default async function LeadPage({ params, searchParams }: { params: Promi
             </Card>
           ) : canConvert ? (
             <Card title="Start managing this business">
-              <ActionForm action={convertLeadAction.bind(null, lead.id)} className="space-y-3" ariaLabel="Start managing this business">
-                <p className="text-sm text-muted">Creates the business page with an onboarding checklist and marks this lead Won.</p>
-                <OpportunityPicker selected={lead.opportunities} legend="What we’ll do for them" />
-                <SubmitButton pendingLabel="Setting up…">Start managing {lead.name}</SubmitButton>
-              </ActionForm>
+              <p className="mb-3 text-sm text-muted">One screen, prefilled from this lead: sets up the plan and checklist, hands research to Claude, and marks the lead Won.</p>
+              <NewClientLink leadId={lead.id} size="md">Start managing {lead.name}</NewClientLink>
             </Card>
           ) : null}
 

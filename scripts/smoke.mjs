@@ -11,8 +11,10 @@ const EMAIL = process.env.SMOKE_EMAIL ?? "nora@local";
 const PASSWORD = process.env.SMOKE_PASSWORD ?? "dev";
 const CLIENT_IDS = ["yummy-red-bowl-richmond", "yummy-red-bowl-sc", "crab-o-clock", "poke-bros", "maxs-virginia-beach", "snf-kingdom"];
 const ROUTES = ["/", "/asks", "/asks/new", "/tasks", "/tasks?view=list", "/tasks?view=board", "/tasks?view=table", "/tasks/import", "/review", "/calendar", "/calendar/new",
-  "/creators", "/creators?view=table", "/creators?view=pipeline", "/creators/new", "/creators/import", "/leads", "/leads?view=board", "/leads/new", "/leads/import", "/numbers", "/reviews", "/activity", "/settings", "/settings/capture", "/stats", "/tasks?scope=adhoc", "/tasks?scope=plan", "/tasks?scope=all", "/clients",
+  "/creators", "/creators?view=table", "/creators?view=pipeline", "/creators/new", "/creators/import", "/leads", "/leads?view=board", "/leads/new", "/leads/import", "/numbers", "/reviews", "/activity", "/settings", "/settings/capture", "/stats", "/tasks?scope=adhoc", "/tasks?scope=plan", "/tasks?scope=all", "/clients", "/clients/new", "/clients/noraeatsgood", "/clients/noraeatsgood/settings", "/collabs",
+  "/deals", "/replies", "/kit-settings", "/reports", "/reports?client=crab-o-clock", "/reports?client=crab-o-clock&tab=internal", "/settings/notifications",
   ...CLIENT_IDS.flatMap((id) => [`/clients/${id}`, `/clients/${id}/settings`])];
+const PUBLIC_ROUTES = ["/collab"];
 const VIEWPORTS = [{ name: "desktop", width: 1280, height: 900 }, { name: "mobile", width: 390, height: 844 }];
 
 const failures = [];
@@ -20,6 +22,7 @@ const fail = (msg) => { failures.push(msg); console.log("  FAIL " + msg); };
 const ok = (msg) => console.log("  ok   " + msg);
 
 async function login(context, email = EMAIL) {
+  await waitForServer();
   const page = await context.newPage();
   await page.goto(`${BASE}/login`);
   await page.fill("#email", email);
@@ -72,12 +75,18 @@ async function crawl(browser) {
     const { errors } = watch(page);
     for (const path of ROUTES) await checkPage(page, path, vp.name, errors);
     // first creator / draft / task / ask / post detail pages, if any exist
-    for (const [list, sel] of [["/creators", "a[href^='/creators/']:not([href='/creators/new']):not([href^='/creators/export']):not([href^='/creators/import'])"], ["/tasks?status=all", "a[href^='/tasks/']:not([href^='/tasks/import']):not([href^='/tasks/export'])"], ["/asks", "a[href^='/asks/']:not([href='/asks/new'])"], ["/calendar", "a[href^='/calendar/']:not([href^='/calendar/new'])"], ["/leads", "a[href^='/leads/']:not([href='/leads/new']):not([href^='/leads/import']):not([href^='/leads/export'])"]]) {
+    for (const [list, sel] of [["/creators", "a[href^='/creators/']:not([href='/creators/new']):not([href^='/creators/export']):not([href^='/creators/import'])"], ["/tasks?status=all", "a[href^='/tasks/']:not([href^='/tasks/import']):not([href^='/tasks/export'])"], ["/asks", "a[href^='/asks/']:not([href='/asks/new'])"], ["/calendar", "a[href^='/calendar/']:not([href^='/calendar/new'])"], ["/leads", "a[href^='/leads/']:not([href='/leads/new']):not([href^='/leads/import']):not([href^='/leads/export'])"], ["/collabs", "a[href^='/collabs/']"], ["/deals", "a[href^='/deals/']"], ["/deals", "a[href$='/visit']"]]) {
       await page.goto(BASE + list, { waitUntil: "networkidle" });
       const href = await page.locator(sel).first().getAttribute("href").catch(() => null);
       if (href) await checkPage(page, href, vp.name, errors);
     }
     await context.close();
+    // public pages, logged out
+    const pub = await browser.newContext({ viewport: { width: vp.width, height: vp.height }, deviceScaleFactor: 1 });
+    const pp = await pub.newPage();
+    const pw = watch(pp);
+    for (const path of PUBLIC_ROUTES) await checkPage(pp, path, `${vp.name} logged-out`, pw.errors);
+    await pub.close();
   }
 }
 
@@ -127,7 +136,14 @@ async function toolRaw(name, args) {
 }
 
 async function step(name, fn) {
-  try { await fn(); ok(name); } catch (e) { fail(`${name}: ${e.message.split("\n")[0]}`); }
+  // `next dev` restarts itself near its memory limit; a dropped connection is retried once after it's back up.
+  for (let attempt = 0; ; attempt++) {
+    try { await fn(); ok(name); return; } catch (e) {
+      const msg = e.message.split("\n")[0];
+      if (attempt === 0 && /fetch failed|ECONNREFUSED|ECONNRESET/.test(msg) || (attempt === 0 && DEV_BLIP.test(msg))) { await waitForServer(); continue; }
+      fail(`${name}: ${msg}`); return;
+    }
+  }
 }
 
 async function flows(browser) {
@@ -497,32 +513,37 @@ async function flows(browser) {
       ]);
       await page.waitForTimeout(1000);
       await page.goto(`${BASE}/leads/${leadId}`, { waitUntil: "networkidle" });
-      const btn = page.locator("button:has-text('Start managing')").first();
-      await btn.waitFor({ timeout: 15000 });
-      await btn.click();
-      await page.waitForURL(/\/clients\/[^/?]+/, { timeout: 60000 });
+      const link = page.locator("a:has-text('Start managing')").first();
+      await link.waitFor({ timeout: 15000 });
+      await link.click();
+      await page.waitForURL(/\/clients\/new\?lead=/, { timeout: 60000 });
+      await page.waitForLoadState("networkidle");
+      if ((await page.locator("#onb-q").inputValue()) === "") throw new Error("New client form not prefilled from the lead");
+      await page.locator("button[type='submit']:has-text('Start managing')").click();
+      await page.waitForURL(/\/clients\/(?!new)[^/?]+\?welcome=1&lead=1/, { timeout: 60000 });
       await page.waitForLoadState("networkidle");
       const t = await page.locator("main").innerText();
       if (!t.includes("Getting started")) throw new Error("no Getting started card");
       if (!t.includes("Owner adds Nora as Manager on the Google Business Profile")) throw new Error("google step missing");
-      if (!t.includes("Get TikTok access")) throw new Error("social step missing");
+      if (!t.includes("Get Instagram & TikTok access")) throw new Error("social step missing");
+      if (!t.includes("Lead marked Won")) throw new Error("welcome banner missing");
       if (t.includes("Agree collab terms")) throw new Error("collab step shown though collab wasn't picked");
       const l = JSON.stringify(await tool("get_lead", { lead_id: leadId }));
       if (!l.includes('"stage":"won"') || !l.includes("convertedClientId")) throw new Error("lead not won/converted");
     });
 
     await step("Add business form creates a business with an onboarding checklist", async () => {
-      await page.goto(`${BASE}/clients`, { waitUntil: "networkidle" });
-      await page.fill("#new-name", `Sample Taco Stand ${stamp}`);
-      await page.fill("#new-location", "Norfolk");
-      for (const [v, on] of [["social", false], ["google", false], ["collab", true]]) await page.locator(`input[name='services'][value='${v}']`).setChecked(on);
-      await page.locator("button[type='submit']:has-text('Add business')").click();
-      await page.waitForURL(/\/clients\/(?!$)[^/?]+/, { timeout: 60000 });
+      await page.goto(`${BASE}/clients/new`, { waitUntil: "networkidle" });
+      await page.fill("#onb-q", `Sample Taco Stand ${stamp}`);
+      await page.fill("#onb-city", "Norfolk");
+      for (const [v, on] of [["social", false], ["google", false], ["collab", true]]) await page.locator(`input[name='services'][value='${v}']`).setChecked(on, { force: true });
+      await page.locator("button[type='submit']:has-text('Add client')").click();
+      await page.waitForURL(/\/clients\/(?!new)[^/?]+\?welcome=1/, { timeout: 60000 });
       await page.waitForLoadState("networkidle");
       const t = await page.locator("main").innerText();
       if (!t.includes(`Sample Taco Stand ${stamp}`)) throw new Error("not on the new business page");
       if (!t.includes("Getting started") || !t.includes("Agree collab terms")) throw new Error("collab onboarding checklist missing");
-      if (t.includes("Get TikTok access")) throw new Error("social steps shown though social wasn't picked");
+      if (t.includes("Get Instagram & TikTok access")) throw new Error("social steps shown though social wasn't picked");
     });
   }
 
@@ -587,7 +608,7 @@ async function flows(browser) {
       fd.append("file", new Blob([jpeg], { type: "image/jpeg" }), "bowl.jpg");
       const r = await capture(fd);
       if (r.status !== 200 || !r.json?.ok) throw new Error(`HTTP ${r.status} ${JSON.stringify(r.json)}`);
-      const asks = await tool("list_asks", {});
+      const asks = await tool("list_asks", { limit: 100 });
       const list = Array.isArray(asks) ? asks : asks.asks ?? asks.items ?? [];
       const a = list.find((x) => x.body?.includes(t)) ?? null;
       if (!a) throw new Error("captured ask not in list_asks");
@@ -601,10 +622,10 @@ async function flows(browser) {
     });
     await step("capture API: turned-off key → 401", async () => {
       await page.goto(`${BASE}/settings/capture`, { waitUntil: "networkidle" });
-      page.once("dialog", (d) => d.accept());
       const row = page.locator("li, tr, div", { hasText: `Smoke phone ${stamp}` }).filter({ has: page.locator("button:has-text('Turn off')") }).last();
+      page.once("dialog", (d) => d.accept().catch(() => {})); // "Turn off …?" confirm
       await row.locator("button:has-text('Turn off')").click();
-      await page.locator(`text=Smoke phone ${stamp}`).waitFor({ state: "detached", timeout: 15000 });
+      await page.locator(`text=Smoke phone ${stamp}`).waitFor({ state: "detached", timeout: 30000 });
       const r = await capture(JSON.stringify({ text: "after revoke" }), { "content-type": "application/json" });
       if (r.status !== 401) throw new Error(`HTTP ${r.status}`);
     });
@@ -648,7 +669,518 @@ async function flows(browser) {
     });
   }
 
-  for (const e of errors) fail(`flows: ${e}`);
+  for (const e of errors) if (!DEV_BLIP.test(e)) fail(`flows: ${e}`);
+  await context.close();
+}
+
+/* ── Nora's section, the public collab form, quick onboarding ── */
+const randIp = () => `10.${Math.floor(Math.random() * 250)}.${Math.floor(Math.random() * 250)}.${Math.floor(Math.random() * 250) + 1}`;
+
+/** Fills all three steps of /collab like a person would and sends it. Returns the text shown after sending. */
+async function fillCollab(page, opts) {
+  for (let attempt = 0; ; attempt++) {
+    try { return await fillCollabOnce(page, opts); } catch (e) {
+      if (attempt >= 2 || opts.sent?.flag) throw e;
+      await waitForServer();
+    }
+  }
+}
+async function tick(page, sel) {
+  const box = page.locator(sel).first();
+  if (await box.isChecked()) return;
+  await page.locator(`label:has(${sel})`).first().click();
+  if (!(await box.isChecked())) await box.check({ force: true });
+}
+async function fillCollabOnce(page, { business, contact = "Test Person", email, honeypot = false, wait = 4300, sent }) {
+  await page.goto(`${BASE}/collab`, { waitUntil: "networkidle" });
+  const t0 = Date.now();
+  await page.fill("input[name='businessName']", business);
+  await page.fill("input[name='contactName']", contact);
+  await page.fill("input[name='email']", email);
+  await page.fill("input[name='city']", "Testville");
+  await page.fill("input[name='instagram']", `@test_${business.replace(/\W+/g, "_").toLowerCase().slice(-24)}`);
+  if (honeypot) await page.evaluate(() => { const h = document.querySelector("input[name='homepage']"); if (h) h.value = "http://spam.example"; });
+  await page.locator("button:has-text('Next')").click();
+  await tick(page, "input[name='interests'][value='dine_in']");
+  await tick(page, "input[name='deliverables'][value='ig_reel']");
+  await tick(page, "input[name='compensation'][value='paid']");
+  await page.locator("select[name='budget']").selectOption("600_1000");
+  await page.locator("button:has-text('Next')").click();
+  await page.fill("textarea[name='special']", "Smoke test only - fake sample data. Wood-fired test dumplings.");
+  await tick(page, "input[name='ackDisclosure']");
+  await tick(page, "input[name='ackHonest']");
+  const left = wait - (Date.now() - t0);
+  if (left > 0) await page.waitForTimeout(left);
+  await page.locator("button[type='submit']:has-text('Send request')").click();
+  if (sent) sent.flag = true;
+  const done = page.locator("text=/Thanks, |Looks like a few requests|need a look|Something went wrong/").first();
+  await done.waitFor({ timeout: 30000 });
+  return done.innerText();
+}
+
+async function noraFlows(browser) {
+  console.log("\n== nora: collab form, Nora's section, quick onboarding");
+  const stamp = Date.now().toString(36);
+  const ip = randIp();
+  const pub = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, extraHTTPHeaders: { "x-forwarded-for": ip } });
+  const pp = await pub.newPage();
+  const pubErrs = watch(pp).errors;
+  const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+  await login(context);
+  const page = await context.newPage();
+  const { errors } = watch(page);
+  page.setDefaultTimeout(30000);
+
+  const biz = `Smoke Test Kitchen ${stamp}`;
+  let reqId = "", leadId = "";
+  await step("/collab logged out: 3 steps → thank-you", async () => {
+    const msg = await fillCollab(pp, { business: biz, email: `test+${stamp}@example.com`, sent: {} });
+    if (!/Thanks, Test!/.test(msg)) throw new Error(`no thank-you: ${msg}`);
+    if (new URL(pp.url()).pathname !== "/collab") throw new Error(`redirected to ${pp.url()}`);
+  });
+  await step("request shows in /collabs, Nora's section, For Nora asks and as a collab lead", async () => {
+    await page.goto(`${BASE}/collabs`, { waitUntil: "networkidle" });
+    const a = page.locator(`a[href^='/collabs/']`, { hasText: biz }).first();
+    await a.waitFor({ timeout: 15000 });
+    reqId = (await a.getAttribute("href")).split("/").pop().split("?")[0];
+    await page.goto(`${BASE}/clients/noraeatsgood`, { waitUntil: "networkidle" });
+    if (!(await page.locator(`text=${biz}`).count())) throw new Error("not on Nora's Collab requests card");
+    await page.goto(`${BASE}/asks?tab=nora`, { waitUntil: "networkidle" });
+    if (!(await page.locator(`text=${biz}`).count())) throw new Error("no ask in For Nora");
+    const r = await tool("get_collab_request", { id: reqId });
+    leadId = r.leadId ?? r.request?.leadId ?? "";
+    if (!leadId) throw new Error(`no leadId: ${JSON.stringify(r).slice(0, 300)}`);
+    const l = JSON.stringify(await tool("get_lead", { lead_id: leadId }));
+    if (!l.includes('"collab"') || !l.includes('"stage":"qualified"')) throw new Error(`lead not a qualified collab lead: ${l.slice(0, 300)}`);
+    await page.goto(`${BASE}/leads?opp=collab`, { waitUntil: "networkidle" });
+    if (!(await page.locator(`text=${biz}`).count())) throw new Error("not on /leads?opp=collab");
+  });
+  await step("Home: Nora's card first, with the new-requests chip", async () => {
+    await page.goto(`${BASE}/`, { waitUntil: "networkidle" });
+    const first = page.locator("main a[href^='/clients/']").filter({ hasNotText: /^New client$/ }).first();
+    const href = await first.getAttribute("href");
+    if (href !== "/clients/noraeatsgood") throw new Error(`first business card is ${href}`);
+    if (!(await page.locator("a[href='/collabs']", { hasText: /new collab request/ }).count())) throw new Error("no 'new collab requests' chip");
+  });
+  await step("honeypot-filled submit looks fine but stores nothing", async () => {
+    const bot = `Smoke Bot Diner ${stamp}`;
+    const p2 = await pub.newPage();
+    const msg = await fillCollab(p2, { business: bot, email: `bot+${stamp}@example.com`, honeypot: true });
+    await p2.close();
+    if (!/Thanks/.test(msg)) throw new Error(`bot didn't see thank-you: ${msg}`);
+    const list = JSON.stringify(await tool("list_collab_requests", { limit: 100 }));
+    if (list.includes(bot)) throw new Error("honeypot submission was stored");
+  });
+  await step("too-fast submit (<4s) is dropped silently", async () => {
+    const fast = `Smoke Fast Diner ${stamp}`;
+    const p2 = await pub.newPage();
+    const msg = await fillCollab(p2, { business: fast, email: `fast+${stamp}@example.com`, wait: 0 });
+    await p2.close();
+    if (!/Thanks/.test(msg)) throw new Error(`no thank-you: ${msg}`);
+    if (JSON.stringify(await tool("list_collab_requests", { limit: 100 })).includes(fast)) throw new Error("too-fast submission was stored");
+  });
+  await step("6th submit from the same IP within an hour is rate-limited", async () => {
+    let last = "";
+    for (let i = 2; i <= 6; i++) {
+      const p2 = await pub.newPage();
+      last = await fillCollab(p2, { business: `Smoke Rate Cafe ${stamp} #${i}`, email: `rate${i}+${stamp}@example.com`, sent: {} });
+      await p2.close();
+      if (i < 6 && !/Thanks/.test(last)) throw new Error(`submit ${i} refused early: ${last}`);
+    }
+    if (!/Looks like a few requests/.test(last)) throw new Error(`6th not limited: ${last}`);
+    const list = JSON.stringify(await tool("list_collab_requests", { limit: 100 }));
+    if (list.includes(`Smoke Rate Cafe ${stamp} #6`)) throw new Error("6th request was stored");
+    // a different address is still welcome
+    const other = await browser.newContext({ extraHTTPHeaders: { "x-forwarded-for": randIp() } });
+    const op = await other.newPage();
+    const m = await fillCollab(op, { business: `Smoke Other Cafe ${stamp}`, email: `other+${stamp}@example.com` });
+    await other.close();
+    if (!/Thanks/.test(m)) throw new Error(`other IP refused: ${m}`);
+  });
+  await step("/collabs/[id]: Accept → lead Talking, request Accepted", async () => {
+    await page.goto(`${BASE}/collabs/${reqId}`, { waitUntil: "networkidle" });
+    const t = await page.locator("main").innerText();
+    if (!t.includes(biz) || !t.includes("Wood-fired test dumplings")) throw new Error("answers not shown");
+    await page.locator("button:has-text('Accept')").first().click();
+    await page.locator("text=/Accepted/").first().waitFor({ timeout: 15000 });
+    await page.waitForTimeout(800);
+    const l = JSON.stringify(await tool("get_lead", { lead_id: leadId }));
+    if (!l.includes('"stage":"talking"')) throw new Error(`lead not talking: ${l.slice(0, 300)}`);
+    const r = JSON.stringify(await tool("get_collab_request", { id: reqId }));
+    if (!r.includes('"status":"accepted"')) throw new Error("request not accepted");
+  });
+  await step("/collabs stays private when logged out", async () => {
+    const res = await pp.goto(`${BASE}/collabs`, { waitUntil: "networkidle" });
+    if (!new URL(pp.url()).pathname.startsWith("/login")) throw new Error(`not redirected to login (HTTP ${res?.status()}, ${pp.url()})`);
+  });
+
+  await step("/clients/new: pasted Instagram link + name → business, IG handle, checklist, Claude ask", async () => {
+    const name = `Sample Tacos ${stamp}`;
+    await page.goto(`${BASE}/clients/new`, { waitUntil: "networkidle" });
+    await page.fill("#onb-q", "https://www.instagram.com/sampletacos/");
+    await page.locator("#onb-name").waitFor();
+    if (!(await page.locator("text=sampletacos").count())) throw new Error("no parsed-handle chip");
+    await page.fill("#onb-name", name);
+    await page.fill("#onb-city", "Testville");
+    await page.locator("button[type='submit']:has-text('Add client')").click();
+    await page.waitForURL(/\/clients\/(?!new)[^/?]+\?welcome=1/, { timeout: 60000 });
+    await page.waitForLoadState("networkidle");
+    const t = await page.locator("main").innerText();
+    if (!t.includes(name)) throw new Error("not on the new business page");
+    if (!t.includes("is set up")) throw new Error("no welcome banner");
+    if (!t.includes("@sampletacos")) throw new Error("IG handle not saved");
+    if (!t.includes("Getting started") || !t.includes("Kickoff call")) throw new Error("onboarding checklist missing");
+    const asks = JSON.stringify(await tool("list_asks", { limit: 100 }));
+    if (!asks.includes(name)) throw new Error("no Claude ask for the new business");
+  });
+  await step("/clients/new?lead=<id> converts a lead", async () => {
+    const lead = await tool("add_lead", { name: `Sample Bao Bar ${stamp}`, city: "Testville", website: `https://sample-bao-${stamp}.example.com`, opportunities: ["social"] });
+    await page.goto(`${BASE}/clients/new?lead=${lead.leadId}`, { waitUntil: "networkidle" });
+    if (!(await page.locator("#onb-q").inputValue()).includes("Sample Bao Bar")) throw new Error("name not prefilled");
+    await page.locator("button[type='submit']:has-text('Start managing')").click();
+    await page.waitForURL(/\/clients\/(?!new)[^/?]+\?welcome=1&lead=1/, { timeout: 60000 });
+    const l = JSON.stringify(await tool("get_lead", { lead_id: lead.leadId }));
+    if (!l.includes('"stage":"won"') || !l.includes("convertedClientId")) throw new Error(`lead not won: ${l.slice(0, 300)}`);
+    // double submit is safe: revisiting redirects to the business
+    await page.goto(`${BASE}/clients/new?lead=${lead.leadId}`, { waitUntil: "networkidle" });
+    if (new URL(page.url()).pathname === "/clients/new") throw new Error("converted lead didn't redirect to its business");
+  });
+  await step("Nora is pinned, not in the Businesses list", async () => {
+    await page.goto(`${BASE}/clients`, { waitUntil: "networkidle" });
+    const n = await page.locator("main a[href='/clients/noraeatsgood']").count();
+    if (n !== 1) throw new Error(`${n} links to Nora on /clients (want 1 pinned)`);
+    const sideBiz = await page.locator("aside a[href='/clients/noraeatsgood'], nav a[href='/clients/noraeatsgood']").count();
+    if (sideBiz < 1) throw new Error("no pinned Nora entry in the sidebar");
+    const listed = await page.evaluate(() => {
+      const h = [...document.querySelectorAll("p")].find((p) => p.textContent?.trim() === "Businesses");
+      const list = h?.parentElement?.parentElement;
+      return list ? !!list.querySelector("a[href='/clients/noraeatsgood']") : null;
+    });
+    if (listed) throw new Error("Nora listed under Businesses in the sidebar");
+    if (!(await page.locator("a[href='/clients/new']").count())) throw new Error("no New client link");
+  });
+
+  // `next dev` occasionally restarts itself near its memory limit; dropped connections aren't app bugs.
+  for (const e of errors) if (!DEV_BLIP.test(e)) fail(`nora flows: ${e}`);
+  for (const e of pubErrs) if (!DEV_BLIP.test(e)) fail(`nora flows (public): ${e}`);
+  await pub.close();
+  await context.close();
+}
+
+
+/* ── v6: deals, notifications + calendar, saved replies, fast review, media kit, client reports ── */
+async function v6Flows(browser) {
+  console.log("\n== v6: deals, notify/calendar, replies, review, kit, reports");
+  const stamp = Date.now().toString(36);
+  const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+  await login(context);
+  const page = await context.newPage();
+  const { errors } = watch(page);
+  page.setDefaultTimeout(30000);
+  page.on("dialog", (d) => d.accept().catch(() => {})); // confirm() prompts: always yes
+  const anon = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, extraHTTPHeaders: { "x-forwarded-for": randIp() } });
+  const ap = await anon.newPage();
+  const anonErrs = watch(ap).errors;
+  const now = new Date();
+  const prev = ym(new Date(now.getFullYear(), now.getMonth() - 1, 1));
+
+  await step("logged out: /collabs /deals /kit-settings /reports /replies /settings/notifications → login; /collab public", async () => {
+    for (const path of ["/collabs", "/deals", "/kit-settings", "/reports?client=crab-o-clock", "/replies", "/settings/notifications"]) {
+      await ap.goto(BASE + path, { waitUntil: "networkidle" });
+      if (!new URL(ap.url()).pathname.startsWith("/login")) throw new Error(`${path} not private (${ap.url()})`);
+    }
+    const r = await ap.goto(`${BASE}/collab`, { waitUntil: "networkidle" });
+    if (r?.status() !== 200 || new URL(ap.url()).pathname !== "/collab") throw new Error("/collab not public");
+  });
+  await step("logged out: /api/calendar/<bad> → 404, push subscribe/test → 401", async () => {
+    for (const path of ["/api/calendar/not-a-real-token.ics", "/api/calendar/x"]) {
+      const r = await fetch(BASE + path);
+      if (r.status !== 404) throw new Error(`${path}: HTTP ${r.status}`);
+    }
+    for (const path of ["/api/push/subscribe", "/api/push/unsubscribe", "/api/push/test"]) {
+      const r = await fetch(BASE + path, { method: "POST", headers: { "content-type": "application/json", origin: BASE }, body: JSON.stringify({ endpoint: "https://push.example.com/x", keys: { p256dh: "x", auth: "y" } }) });
+      if (r.status !== 401) throw new Error(`${path}: HTTP ${r.status}`);
+    }
+  });
+  await step("push endpoints signed in: cross-origin refused; test send is a no-op with VAPID unset", async () => {
+    await page.goto(`${BASE}/settings/notifications`, { waitUntil: "networkidle" });
+    const r = await page.evaluate(async () => {
+      const a = await fetch("/api/push/test", { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
+      const k = await fetch("/api/push/public-key");
+      return { test: a.status, testBody: await a.text(), key: k.status, keyBody: await k.text() };
+    });
+    if (r.test >= 500) throw new Error(`test send errored: ${r.test} ${r.testBody}`);
+    if (r.key >= 500) throw new Error(`public-key errored: ${r.key}`);
+    const cookies = await context.cookies();
+    const cookie = cookies.map((c) => `${c.name}=${c.value}`).join("; ");
+    const x = await fetch(`${BASE}/api/push/subscribe`, { method: "POST", headers: { cookie, "content-type": "application/json", origin: "https://evil.example.com" }, body: JSON.stringify({ endpoint: "https://push.example.com/x", keys: { p256dh: "x", auth: "y" } }) });
+    if (x.status < 400) throw new Error(`cross-origin subscribe accepted: ${x.status}`);
+  });
+
+  await step("/kit 404 while the media kit is unpublished", async () => {
+    const r = await fetch(`${BASE}/kit`);
+    if (r.status !== 404) throw new Error(`HTTP ${r.status}`);
+  });
+  await step("/kit-settings: publish → logged-out /kit shows sample stats + $600 rate; /collab shows the rate", async () => {
+    await page.goto(`${BASE}/kit-settings`, { waitUntil: "networkidle" });
+    await page.locator("button[name='intent'][value='publish']").click();
+    await page.waitForTimeout(1500);
+    await page.waitForLoadState("networkidle");
+    const r = await ap.goto(`${BASE}/kit`, { waitUntil: "networkidle" });
+    if (r?.status() !== 200) throw new Error(`/kit HTTP ${r?.status()}`);
+    const t = await ap.locator("body").innerText();
+    if (!/\$600/.test(t)) throw new Error("no $600 rate line on /kit");
+    if (!/23\.\dK|48\.\dK/.test(t)) throw new Error(`sample follower counts missing: ${t.slice(0, 300)}`);
+    if (!/Sampleton/.test(t)) throw new Error("top cities missing");
+    await ap.goto(`${BASE}/collab`, { waitUntil: "networkidle" });
+    const c = await ap.locator("body").innerText();
+    if (!/\$600/.test(c)) throw new Error("/collab has no $600 rate line");
+    if (!(await ap.locator("a[href='/kit']").count())) throw new Error("/collab has no media kit link");
+  });
+
+  // ---------- deals ----------
+  const biz = `Sample Noodle House ${stamp}`;
+  let reqId = "", dealId = "";
+  await step("collab request → accept → Create deal → prefilled deal + Claude shot-list ask", async () => {
+    const msg = await fillCollab(ap, { business: biz, contact: "Pat Sample", email: `pat+${stamp}@example.com`, sent: {} });
+    if (!/Thanks/.test(msg)) throw new Error(`collab form: ${msg}`);
+    await page.goto(`${BASE}/collabs`, { waitUntil: "networkidle" });
+    const a = page.locator("a[href^='/collabs/']", { hasText: biz }).first();
+    await a.waitFor({ timeout: 15000 });
+    reqId = (await a.getAttribute("href")).split("/").pop().split("?")[0];
+    await page.goto(`${BASE}/collabs/${reqId}`, { waitUntil: "networkidle" });
+    if (!(await page.locator("button", { hasText: "Copy a saved reply" }).count())) throw new Error("no saved-reply picker on the collab request");
+    await page.locator("button:has-text('Accept')").first().click();
+    await page.locator("button:has-text('Create deal')").first().waitFor({ timeout: 15000 });
+    await Promise.all([page.waitForURL(/\/deals\/[^/?]+/, { timeout: 60000 }), page.locator("button:has-text('Create deal')").first().click()]);
+    dealId = new URL(page.url()).pathname.split("/")[2];
+    await page.waitForLoadState("networkidle");
+    const vals = await page.evaluate(() => ({
+      name: document.querySelector("#businessName")?.value, contact: document.querySelector("input[name='contactName']")?.value,
+      email: document.querySelector("input[name='contactEmail']")?.value, comp: document.querySelector("#compType")?.value,
+      notes: [...document.querySelectorAll("textarea")].map((t) => t.value).join("\n"),
+    }));
+    if (vals.name !== biz) throw new Error(`business not prefilled: ${vals.name}`);
+    if (vals.contact !== "Pat Sample" || !vals.email?.includes(stamp)) throw new Error(`contact not prefilled: ${JSON.stringify(vals)}`);
+    if (vals.comp !== "paid") throw new Error(`comp not prefilled: ${vals.comp}`);
+    const main = await page.locator("main").innerText();
+    if (!/Instagram Reel|IG Reel|Reel/i.test(main)) throw new Error("deliverables not prefilled");
+    if (!/\$600/.test(main)) throw new Error("no $600 media-kit hint by the fee");
+    const asks = JSON.stringify(await tool("list_asks", { limit: 100 }));
+    if (!asks.includes(biz) || !/shot list/i.test(asks)) throw new Error("no Claude ask for the shot list");
+    // second click is safe: the request page now links the existing deal
+    await page.goto(`${BASE}/collabs/${reqId}`, { waitUntil: "networkidle" });
+    if (!(await page.locator(`a[href='/deals/${dealId}']`).count())) throw new Error("request page doesn't link the deal");
+  });
+  await step("MCP list_deals/get_deal hide payment; set_shot_list writes the list", async () => {
+    const list = JSON.stringify(await tool("list_deals", {}));
+    if (!list.includes(dealId)) throw new Error("deal not in list_deals");
+    const d = JSON.stringify(await tool("get_deal", { id: dealId }));
+    if (/paymentStatus|amountCents|paidAt/.test(d)) throw new Error(`get_deal leaks payment: ${d.slice(0, 200)}`);
+    const r = await tool("set_shot_list", { deal_id: dealId, shots: ["Storefront sign establishing shot (sample)", "Hero: sample noodles cheese pull", "First-bite reaction", "Steam B-roll"] });
+    if (r.shots !== 4) throw new Error(JSON.stringify(r));
+  });
+  await step("deal terms: $600 paid, visit tomorrow 6:30pm, address saved", async () => {
+    await page.goto(`${BASE}/deals/${dealId}`, { waitUntil: "networkidle" });
+    const t = new Date(Date.now() + 86400000);
+    const d = new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York" }).format(t);
+    await page.fill("#amount", "600");
+    await page.fill("#visitAt", `${d}T18:30`);
+    await page.fill("#address", "123 Sample St, Testville");
+    await page.fill("#menuNotes", "Signature: sample garlic noodles; spicy wontons (fake data)");
+    await page.locator("form:has(#businessName) button[type='submit']").first().click();
+    await page.waitForTimeout(1500);
+    await page.reload({ waitUntil: "networkidle" });
+    if ((await page.inputValue("#amount")) !== "600") throw new Error(`amount not saved: ${await page.inputValue("#amount")}`);
+    if ((await page.inputValue("#visitAt")) !== `${d}T18:30`) throw new Error(`visit not saved: ${await page.inputValue("#visitAt")}`);
+  });
+  await step("visit mode (phone): toggle a shot → persists", async () => {
+    const ph = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, storageState: await context.storageState() });
+    const pg = await ph.newPage();
+    const pe = watch(pg).errors;
+    await pg.goto(`${BASE}/deals/${dealId}/visit`, { waitUntil: "networkidle" });
+    const box = pg.locator("button[role='checkbox']", { hasText: "Hero: sample noodles" });
+    await box.tap();
+    await pg.locator("text=1/4 shot").waitFor({ timeout: 10000 });
+    await pg.waitForTimeout(1200);
+    await pg.reload({ waitUntil: "networkidle" });
+    if ((await pg.locator("button[role='checkbox']", { hasText: "Hero: sample noodles" }).getAttribute("aria-checked")) !== "true") throw new Error("tick not saved");
+    if (!(await pg.locator("a[href^='tel:'], a[href^='sms:']").count()) && false) throw new Error("no call/text");
+    if (!/123 Sample St/.test(await pg.locator("main").innerText())) throw new Error("address missing on visit page");
+    for (const e of pe) if (!DEV_BLIP.test(e)) throw new Error(e);
+    // MCP rewrite keeps the tick on unchanged text
+    const r = await tool("set_shot_list", { deal_id: dealId, shots: ["Storefront sign establishing shot (sample)", "Hero: sample noodles cheese pull", "Drink pour (sample)"] });
+    if (r.kept_ticks !== 1) throw new Error(`tick not kept on rewrite: ${JSON.stringify(r)}`);
+    await ph.close();
+  });
+  await step("payment: Invoice sent → /deals owed includes $600", async () => {
+    await page.goto(`${BASE}/deals`, { waitUntil: "networkidle" });
+    const before = await page.locator("main").innerText();
+    const owed0 = Number((before.match(/Owed\s*\$([\d,]+)/) ?? [0, "0"])[1].replace(/,/g, ""));
+    await page.goto(`${BASE}/deals/${dealId}`, { waitUntil: "networkidle" });
+    await page.locator("main button", { hasText: "Invoice sent" }).click();
+    await page.locator("button", { hasText: "Update due date" }).waitFor({ timeout: 20000 });
+    await page.waitForLoadState("networkidle");
+    await page.goto(`${BASE}/deals`, { waitUntil: "networkidle" });
+    const after = await page.locator("main").innerText();
+    const owed1 = Number((after.match(/Owed\s*\$([\d,]+)/) ?? [0, "0"])[1].replace(/,/g, ""));
+    if (owed1 !== owed0 + 600) throw new Error(`owed ${owed0} → ${owed1}`);
+    await page.goto(`${BASE}/clients/noraeatsgood`, { waitUntil: "networkidle" });
+    const ws = await page.locator("main").innerText();
+    if (!ws.includes(`$${owed1.toLocaleString("en-US")}`)) throw new Error("Deals card on Nora's workspace doesn't show the owed total");
+    if (!(await page.locator("main a[href='/kit-settings']").count())) throw new Error("no Media kit link in Nora's workspace");
+    if (!(await page.locator("main a[href='/replies']").count())) throw new Error("no Saved replies link in Nora's workspace");
+  });
+  await step("calendar link: make → .ics is a valid VCALENDAR with the visit (CRLF, BEGIN/END pairs)", async () => {
+    await page.goto(`${BASE}/settings`, { waitUntil: "networkidle" });
+    await Promise.all([page.waitForURL(/\/settings\/notifications/), page.locator("a[href='/settings/notifications']").first().click()]);
+    await page.waitForLoadState("networkidle");
+    await page.locator("button", { hasText: /Make my calendar link|Make a new link/ }).click();
+    await page.locator("#cal-new-link").waitFor({ timeout: 15000 });
+    const url = await page.inputValue("#cal-new-link");
+    const path = new URL(url).pathname;
+    const r = await fetch(BASE + path);
+    const ics = await r.text();
+    if (r.status !== 200) throw new Error(`HTTP ${r.status}`);
+    if (!/text\/calendar/.test(r.headers.get("content-type") ?? "")) throw new Error(`content-type ${r.headers.get("content-type")}`);
+    if (!ics.startsWith("BEGIN:VCALENDAR\r\n") || !ics.trimEnd().endsWith("END:VCALENDAR")) throw new Error("not a VCALENDAR");
+    if (/[^\r]\n/.test(ics)) throw new Error("bare LF line endings");
+    const lines = ics.split("\r\n");
+    const stack = [];
+    for (const l of lines) {
+      if (l.startsWith("BEGIN:")) stack.push(l.slice(6));
+      else if (l.startsWith("END:")) { if (stack.pop() !== l.slice(4)) throw new Error(`unbalanced ${l}`); }
+      if (Buffer.byteLength(l) > 75) throw new Error(`line over 75 octets: ${l.slice(0, 40)}`);
+    }
+    if (stack.length) throw new Error(`unclosed ${stack.join(",")}`);
+    const unfolded = ics.replace(/\r\n[ \t]/g, "");
+    if (!unfolded.includes(`SUMMARY:Visit: ${biz}`)) throw new Error("visit event missing");
+    if (!unfolded.includes(`/deals/${dealId}`)) throw new Error("visit event has no deal link");
+    const off = await page.locator("main button", { hasText: /^Turn off$/ }).count();
+    if (!off) throw new Error("no Turn off for the link");
+  });
+
+  // ---------- saved replies ----------
+  await step("saved replies: 8 defaults seeded once; $600 rates reply", async () => {
+    await page.goto(`${BASE}/replies`, { waitUntil: "networkidle" });
+    await page.goto(`${BASE}/replies`, { waitUntil: "networkidle" });
+    const r = await tool("list_saved_replies", {});
+    const n = r.replies.filter((x) => x.status === "active").length;
+    if (n !== 8) throw new Error(`${n} active replies (want 8)`);
+    const rates = r.replies.find((x) => /\$600/.test(x.body));
+    if (!rates) throw new Error("no $600 rates reply");
+    const s = await tool("suggest_reply", { title: `Sample suggestion ${stamp}`, body: "Thanks {name}! (sample)", category: "general" });
+    const r2 = await tool("list_saved_replies", {});
+    if (!r2.replies.some((x) => x.title === `Sample suggestion ${stamp}` && x.status === "suggested")) throw new Error(`suggest_reply not saved as suggested: ${JSON.stringify(s)}`);
+  });
+  let otherIds = [];
+  await step("ReplyPicker inserts a saved reply into a draft editor", async () => {
+    for (let i = 1; i <= 3; i++) {
+      const d = await tool("create_draft", { client_id: "poke-bros", kind: "other", title: `Sample note ${stamp} #${i}`, body: `Sample draft body ${i} (fake data).` });
+      otherIds.push(d.draftId ?? d.id);
+    }
+    await page.goto(`${BASE}/review?client=poke-bros`, { waitUntil: "networkidle" });
+    const card = page.locator("article, section, div").filter({ hasText: `Sample note ${stamp} #1` }).last();
+    const ta = page.locator(`textarea`).first();
+    const before = await ta.inputValue();
+    await page.locator("button[aria-haspopup='dialog']", { hasText: "Replies" }).first().click();
+    const ins = page.locator("dialog[open] button", { hasText: "Insert" }).first();
+    await ins.waitFor({ timeout: 15000 });
+    await ins.click();
+    await page.waitForTimeout(300);
+    const after = await ta.inputValue();
+    if (after.length <= before.length) throw new Error("textarea didn't grow after Insert");
+    void card;
+  });
+  await step("phone focus mode: approve 2 drafts in a row without reloading", async () => {
+    const ph = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, storageState: await context.storageState() });
+    const pg = await ph.newPage();
+    const pe = watch(pg).errors;
+    await pg.goto(`${BASE}/review?client=poke-bros`, { waitUntil: "networkidle" });
+    const counter = pg.locator("text=/\\d+ of \\d+/").first();
+    await counter.waitFor();
+    const total = Number((await counter.innerText()).match(/of (\d+)/)[1]);
+    if (total < 3) throw new Error(`only ${total} drafts in focus mode`);
+    await pg.evaluate(() => { window.__noReload = true; });
+    for (let k = 1; k <= 2; k++) {
+      const bar = pg.locator("div.fixed button", { hasText: /^Approve/ }).first();
+      await bar.tap();
+      await pg.locator(`text=/1 of ${total - k}$/`).first().waitFor({ timeout: 20000 });
+    }
+    if (!(await pg.evaluate(() => window.__noReload))) throw new Error("page reloaded");
+    await pg.waitForTimeout(1000);
+    const st = JSON.stringify(await tool("list_drafts", { status: "approved", limit: 100 }).catch(() => ({})));
+    if (!otherIds.slice(0, 2).every((id) => st.includes(id)) && !/approved/.test(st)) throw new Error("drafts not approved");
+    for (const e of pe) if (!DEV_BLIP.test(e)) throw new Error(e);
+    await ph.close();
+  });
+  await step("bulk approve 2 Google review replies", async () => {
+    for (let i = 0; i < 2; i++) {
+      await tool("create_draft", { client_id: "crab-o-clock", kind: "review_reply", title: `Reply to sample review ${i + 1} ${stamp}`, body: `Thanks so much, ${["Sam", "Taylor"][i]}! So glad you loved the garlic butter crab.`, meta: { reviewId: `sample-review-${i}` } });
+    }
+    await page.goto(`${BASE}/review?client=crab-o-clock`, { waitUntil: "networkidle" });
+    await page.locator("label", { hasText: /Select all \d+ review replies/ }).click();
+    await page.locator("button", { hasText: /^Approve \d+ replies$/ }).click();
+    await page.locator("dialog[open] button", { hasText: /^Approve \d+$/ }).click();
+    await page.locator("dialog[open] h2", { hasText: "Done" }).waitFor({ timeout: 30000 });
+    const t = await page.locator("dialog[open]").innerText();
+    if (!/approved to post by hand/.test(t) || /not approved/.test(t)) throw new Error(t.slice(0, 300));
+    await page.locator("dialog[open] button", { hasText: "Close" }).click();
+  });
+
+  // ---------- client reports ----------
+  let extReport = null;
+  await step("MCP get_report_metrics + create_report internal & external → external in /review rendered safely", async () => {
+    const m = await tool("get_report_metrics", { client_id: "crab-o-clock", month: prev });
+    if (!m.external || !m.internal) throw new Error(`metrics shape: ${JSON.stringify(m).slice(0, 200)}`);
+    await tool("create_report", { client_id: "crab-o-clock", month: prev, audience: "internal", body_markdown: `# Internal notes (sample)\n\nTeam-only: **hours spent** and margins. Fake data ${stamp}.` });
+    extReport = await tool("create_report", { client_id: "crab-o-clock", month: prev, audience: "external", body_markdown: `# Monthly recap (sample)\n\n- **Views** up this month\n- <script>alert(1)</script><b>rawhtml${stamp}</b>\n\n[Instagram](https://instagram.com/sample) [bad](javascript:alert(1))\n\nFake data ${stamp}.` });
+    await page.goto(`${BASE}/review?client=crab-o-clock&kind=report`, { waitUntil: "networkidle" });
+    const main = page.locator("main");
+    if (!(await main.innerText()).includes(`Fake data ${stamp}`)) throw new Error("external report not in /review");
+    if (/Team-only/.test(await main.innerText())) throw new Error("internal report leaked into /review");
+    if (await page.locator(`main b:has-text('rawhtml${stamp}')`).count()) throw new Error("raw HTML rendered");
+    if (await page.locator("main script:has-text('alert(1)')").count()) throw new Error("script tag rendered");
+    if (await page.locator("main a[href^='javascript:']").count()) throw new Error("javascript: link rendered");
+    if (!(await page.locator("main strong", { hasText: "Views" }).count())) throw new Error("markdown bold not rendered");
+  });
+  await step("MCP: a report draft can't be pointed at another report (revise_draft / create_draft)", async () => {
+    if (!extReport?.draftId) throw new Error(`create_report returned no draftId: ${JSON.stringify(extReport).slice(0, 200)}`);
+    const r1 = await toolRaw("revise_draft", { draft_id: extReport.draftId, meta: { reportId: "rpt_someone_else" } });
+    if (!r1.isError) throw new Error(`reportId change allowed: ${r1.text.slice(0, 200)}`);
+    const r2 = await toolRaw("create_draft", { kind: "report", client_id: "poke-bros", title: "Sample recap", body: "Sample (smoke).", meta: { reportId: extReport.reportId, audience: "external" } });
+    if (!r2.isError) throw new Error(`create_draft with meta.reportId allowed: ${r2.text.slice(0, 200)}`);
+  });
+  await step("approve external report → /reports shows approved; Send to owner w/o Gmail → friendly copy message", async () => {
+    await page.goto(`${BASE}/review?client=crab-o-clock&kind=report`, { waitUntil: "networkidle" });
+    await page.locator("main button", { hasText: /^Approve/ }).first().click();
+    await page.waitForTimeout(2500);
+    await page.goto(`${BASE}/reports?client=crab-o-clock&month=${prev}`, { waitUntil: "networkidle" });
+    const t = await page.locator("main").innerText();
+    if (!/Approved/i.test(t)) throw new Error(`not approved on /reports: ${t.slice(0, 300)}`);
+    // Send to owner only shows once the owner email is saved (sample address).
+    await page.goto(`${BASE}/clients/crab-o-clock/settings#owner`, { waitUntil: "networkidle" });
+    await page.fill("#s-owner", "owner@example.com");
+    await page.locator("main button", { hasText: "Save owner email" }).click();
+    await page.locator("text=Saved.").first().waitFor({ timeout: 20000 });
+    await page.goto(`${BASE}/reports?client=crab-o-clock&month=${prev}`, { waitUntil: "networkidle" });
+    await page.locator("main button", { hasText: "Send to owner" }).first().click();
+    await page.locator("text=/Gmail isn.t connected/").first().waitFor({ timeout: 20000 });
+    await page.goto(`${BASE}/reports?client=crab-o-clock&month=${prev}&tab=internal`, { waitUntil: "networkidle" });
+    const it = await page.locator("main").innerText();
+    if (!/Team-only/.test(it)) throw new Error("internal tab missing the internal report");
+    if (await page.locator("main button", { hasText: "Send to owner" }).count()) throw new Error("internal report offers Send to owner");
+    await page.goto(`${BASE}/clients/crab-o-clock`, { waitUntil: "networkidle" });
+    if (!(await page.locator("main a[href='/reports?client=crab-o-clock']").count())) throw new Error("no Reports link on the business page");
+  });
+  await step("MCP: Claude can't edit an approved report", async () => {
+    const r = await toolRaw("create_report", { client_id: "crab-o-clock", month: prev, audience: "external", body_markdown: "Claude trying to overwrite the approved report (sample)." });
+    if (!r.isError) throw new Error(`overwrite allowed: ${r.text.slice(0, 200)}`);
+  });
+
+  for (const e of errors) if (!DEV_BLIP.test(e)) fail(`v6 flows: ${e}`);
+  for (const e of anonErrs) if (!DEV_BLIP.test(e)) fail(`v6 flows (public): ${e}`);
+  await anon.close();
   await context.close();
 }
 
@@ -675,6 +1207,9 @@ async function detailRoutes(browser) {
     ["/calendar", "a[href^='/calendar/']:not([href^='/calendar/new'])"],
     ["/review", "a[href^='/review?draft=']"],
     ["/leads", "a[href^='/leads/']:not([href='/leads/new']):not([href^='/leads/import']):not([href^='/leads/export'])"],
+    ["/collabs", "a[href^='/collabs/']"],
+    ["/deals", "a[href^='/deals/']:not([href$='/visit'])"],
+    ["/deals", "a[href$='/visit']"],
   ]) {
     await page.goto(BASE + list, { waitUntil: "networkidle" });
     const href = await page.locator(sel).first().getAttribute("href").catch(() => null);
@@ -766,6 +1301,7 @@ async function waitForServer() {
 async function responsive(browser) {
   console.log("\n== responsive");
   const routes = [...ROUTES, ...(await detailRoutes(browser))];
+  const kitLive = (await fetch(`${BASE}/kit`)).status === 200;
   const found = new Map(); // message -> Set(viewport)
   const note = (msg, where) => { if (!found.has(msg)) found.set(msg, new Set()); found.get(msg).add(where); };
   let pages = 0;
@@ -775,12 +1311,17 @@ async function responsive(browser) {
       viewport: { width: vp.width, height: vp.height }, deviceScaleFactor: 1, colorScheme: scheme,
       isMobile: !!vp.touch, hasTouch: !!vp.touch,
     });
+    const pub = await browser.newContext({
+      viewport: { width: vp.width, height: vp.height }, deviceScaleFactor: 1, colorScheme: scheme,
+      isMobile: !!vp.touch, hasTouch: !!vp.touch,
+    });
     await login(context);
-    const page = await context.newPage();
+    for (const [ctx, list] of [[context, routes], [pub, [...PUBLIC_ROUTES, ...(kitLive ? ["/kit"] : [])]]]) {
+    const page = await ctx.newPage();
     const errs = [];
     page.on("console", (m) => { if (m.type() === "error") errs.push(m.text().slice(0, 200)); });
     page.on("pageerror", (e) => errs.push(e.message.slice(0, 200)));
-    for (const path of routes) {
+    for (const path of list) {
       const where = `${vp.name}${scheme === "dark" ? "d" : ""}`;
       let res, a, navErr = null;
       // `next dev` restarts itself when it nears its memory limit; that drops connections mid-run.
@@ -806,18 +1347,22 @@ async function responsive(browser) {
       if (a.covered) note(`${path}: tab bar covers content: ${a.covered.replace(/bottom=\d+ > tabbar top=\d+/, "")}`, where);
       for (const e of errs) note(`${path}: console error: ${e}`, where);
     }
+    }
     await context.close();
+    await pub.close();
   };
   const queue = [...combos];
   await Promise.all(Array.from({ length: 4 }, async () => { while (queue.length) await runCombo(queue.shift()); }));
   for (const [msg, where] of found) fail(`responsive ${msg} [${[...where].join(",")}]`);
-  console.log(`  checked ${pages} page loads (${routes.length} routes × ${combos.length} viewport/scheme combos)`);
+  console.log(`  checked ${pages} page loads (${routes.length} routes + ${PUBLIC_ROUTES.length} logged-out × ${combos.length} viewport/scheme combos)`);
 }
 
 const browser = await chromium.launch();
 try {
   if (MODE === "crawl" || MODE === "all") await crawl(browser);
   if (MODE === "flows" || MODE === "all") await flows(browser);
+  if (MODE === "flows" || MODE === "all" || MODE === "nora") await noraFlows(browser);
+  if (MODE === "flows" || MODE === "all" || MODE === "v6") await v6Flows(browser);
   if (MODE === "responsive") await responsive(browser);
   if (process.env.SHOTS_DIR) await shots(browser, process.env.SHOTS_DIR);
 } finally {

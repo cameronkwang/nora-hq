@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { buttonClass, cx } from "./ui";
 
-async function copyText(text: string) {
+export async function copyText(text: string) {
   try {
     if (navigator.clipboard && window.isSecureContext) {
       await navigator.clipboard.writeText(text);
