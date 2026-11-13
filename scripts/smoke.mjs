@@ -1,5 +1,6 @@
 // Smoke test for Nora HQ. Usage:
-//   BASE_URL=http://localhost:3200 NODE_PATH=$(npm root -g) node scripts/smoke.mjs [crawl|flows|all|responsive]
+//   BASE_URL=http://localhost:3200 NODE_PATH=$(npm root -g) node scripts/smoke.mjs [crawl|flows|all|responsive|nora|v6|v7]
+// V7_SHOTS=/path saves the onboarding-form screenshots (device scale 2) during the v7 flows.
 // Optional: SHOTS_DIR=/path to save screenshots, MCP_TOKEN=... to exercise /api/mcp in the flows.
 import { createRequire } from "node:module";
 const require = createRequire(import.meta.url);
@@ -14,7 +15,7 @@ const ROUTES = ["/", "/asks", "/asks/new", "/tasks", "/tasks?view=list", "/tasks
   "/creators", "/creators?view=table", "/creators?view=pipeline", "/creators/new", "/creators/import", "/leads", "/leads?view=board", "/leads/new", "/leads/import", "/numbers", "/reviews", "/activity", "/settings", "/settings/capture", "/stats", "/tasks?scope=adhoc", "/tasks?scope=plan", "/tasks?scope=all", "/clients", "/clients/new", "/clients/noraeatsgood", "/clients/noraeatsgood/settings", "/collabs",
   "/deals", "/replies", "/kit-settings", "/reports", "/reports?client=crab-o-clock", "/reports?client=crab-o-clock&tab=internal", "/settings/notifications",
   ...CLIENT_IDS.flatMap((id) => [`/clients/${id}`, `/clients/${id}/settings`])];
-const PUBLIC_ROUTES = ["/collab"];
+const PUBLIC_ROUTES = ["/collab", "/start/smoke-not-a-real-token", "/start/smoke-not-a-real-token?lang=zh-Hans", "/start/smoke-not-a-real-token?lang=zh-Hant"];
 const VIEWPORTS = [{ name: "desktop", width: 1280, height: 900 }, { name: "mobile", width: 390, height: 844 }];
 
 const failures = [];
@@ -1185,6 +1186,261 @@ async function v6Flows(browser) {
 }
 
 /* ── responsive QA: every route × 7 viewports × light/dark ── */
+/* ── v7: Services & plans (Facebook, creator areas) + client onboarding form (/start/<token>) ── */
+const INTAKE_LANGS = { en: { next: "Next", thanks: /Thank you/, already: "Thanks — we got your answers", expired: "This link has expired" },
+  "zh-Hans": { next: "下一步", thanks: /谢谢您/, already: "谢谢，我们已经收到您的资料", expired: "这个链接已经失效" },
+  "zh-Hant": { next: "下一步", thanks: /謝謝您/, already: "謝謝，我們已經收到您的資料", expired: "這個連結已經失效" } };
+
+async function intakeNext(page) {
+  await page.locator(".sticky-actions button[type='button']:has-text('→'):visible").click();
+  await page.waitForTimeout(250);
+}
+async function intakeAudit(page, touch, label) {
+  const a = await page.evaluate(auditPage, touch);
+  const probs = [];
+  if (a.overflow) probs.push(`overflow ${a.overflow}`);
+  for (const f of a.smallFonts) probs.push(`input font < 16px: ${f}`);
+  for (const t of a.smallTargets) probs.push(`tap target < 40px: ${t}`);
+  if (probs.length) throw new Error(`${label}: ${probs.join("; ")}`);
+}
+
+async function v7Flows(browser) {
+  console.log("\n== v7: services & plans, client onboarding form");
+  const stamp = Date.now().toString(36);
+  const SHOTS = process.env.V7_SHOTS;
+  if (SHOTS) (await import("node:fs")).mkdirSync(SHOTS, { recursive: true });
+  const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: SHOTS ? 2 : 1 });
+  await login(context);
+  const page = await context.newPage();
+  const { errors } = watch(page);
+  page.setDefaultTimeout(30000);
+  page.on("dialog", (d) => d.accept().catch(() => {}));
+  const pubCtx = (opts = {}) => browser.newContext({ deviceScaleFactor: SHOTS ? 2 : 1, extraHTTPHeaders: { "x-forwarded-for": randIp() }, ...opts });
+  const phone = { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true };
+  const name = `Smoke Intake ${stamp}`;
+  const site = `https://smoke-intake-${stamp}.example.com`;
+  let id = null, url = null;
+
+  await step("New client form: 6 service chips, IG+FB+TT+Google default", async () => {
+    const pctx = await browser.newContext({ ...phone, deviceScaleFactor: SHOTS ? 2 : 1 });
+    await login(pctx);
+    const pp = await pctx.newPage();
+    await pp.goto(`${BASE}/clients/new`, { waitUntil: "networkidle" });
+    const n = await pp.locator("input[name='services']").count();
+    if (n !== 6) throw new Error(`expected 6 service chips, got ${n}`);
+    const on = await pp.locator("input[name='services']:checked").evaluateAll((els) => els.map((e) => e.value).sort().join(","));
+    if (on !== "facebook,google,instagram,tiktok") throw new Error(`default services: ${on}`);
+    await intakeAudit(pp, true, "/clients/new 390");
+    if (SHOTS) await pp.screenshot({ path: `${SHOTS}/new-client-390.png` });
+    await pctx.close();
+  });
+
+  await step("New client: IG+FB+TT+Google+Creators, areas Richmond + 757 → 6 plan items, outreachAreas saved", async () => {
+    await page.goto(`${BASE}/clients/new`, { waitUntil: "networkidle" });
+    await page.fill("#onb-q", site);
+    await page.locator("#onb-name").waitFor();
+    await page.fill("#onb-name", name);
+    await page.fill("#onb-city", "Richmond");
+    await tick(page, "input[name='services'][value='creators']");
+    await page.locator("input[name='outreachArea'][value='Richmond']").waitFor({ state: "attached" });
+    await tick(page, "input[name='outreachArea'][value='Richmond']");
+    await tick(page, "input[name='outreachArea'][value='757 / Hampton Roads']");
+    await page.locator("button[type='submit']:has-text('Add client')").click();
+    await page.waitForURL(/\/clients\/(?!new)[^/?]+\?welcome=1/, { timeout: 60000 });
+    id = new URL(page.url()).pathname.split("/")[2];
+    const m = await tool("get_client_month", { client_id: id });
+    const titles = m.plan.map((p) => `${p.platform}:${p.title}`).sort();
+    const want = ["facebook:Facebook posts (cross-post from Instagram)", "google:Reply to Google reviews", "instagram:Instagram posts / reels", "instagram:Instagram stories", "other:Local creator outreach", "tiktok:TikTok videos"];
+    if (JSON.stringify(titles) !== JSON.stringify(want)) throw new Error(`plan: ${JSON.stringify(titles)}`);
+    if (m.business.outreachAreas !== "Richmond, 757 / Hampton Roads") throw new Error(`outreachAreas: ${m.business.outreachAreas}`);
+    if (m.business.website !== site) throw new Error(`website: ${m.business.website}`);
+  });
+  if (!id) return;
+
+  await step("business page: Onboarding form card → Send onboarding form → private link + 3 messages", async () => {
+    await page.goto(`${BASE}/clients/${id}`, { waitUntil: "networkidle" });
+    if (!(await page.locator("text=Onboarding form").count())) throw new Error("no Onboarding form card");
+    await page.locator("button:has-text('Send onboarding form')").click();
+    const input = page.locator("input[aria-label='Onboarding form link']");
+    await input.waitFor({ timeout: 30000 });
+    url = await input.inputValue();
+    if (!/\/start\/[A-Za-z0-9_-]{30,}$/.test(url)) throw new Error(`bad link ${url}`);
+    for (const t of ["Message · English", "简体", "繁體"]) if (!(await page.locator(`summary:has-text('${t}')`).count())) throw new Error(`no ${t} message`);
+    url = BASE + new URL(url).pathname; // dev: same origin as the test server
+    if (SHOTS) {
+      await page.reload({ waitUntil: "networkidle" });
+      const card = page.locator("section:has(h2:has-text('Onboarding form')), div:has(> h2:has-text('Onboarding form'))").first();
+      await card.scrollIntoViewIfNeeded().catch(() => {});
+      await page.screenshot({ path: `${SHOTS}/business-intake-card-1440.png` });
+    }
+  });
+  if (!url) return;
+
+  for (const [lang, L] of Object.entries(INTAKE_LANGS)) {
+    for (const vp of [{ name: "390", ...phone }, { name: "1440", viewport: { width: 1440, height: 900 } }]) {
+      await step(`/start ${lang} ${vp.name}: all 7 steps render, no overflow, inputs ≥16px, no console errors`, async () => {
+        const c = await pubCtx(vp);
+        const p = await c.newPage();
+        const errs = watch(p).errors;
+        const res = await p.goto(`${url}?lang=${lang}`, { waitUntil: "networkidle" });
+        if (res?.status() !== 200) throw new Error(`HTTP ${res?.status()}`);
+        const htmlLang = await p.locator("main").getAttribute("lang");
+        if (htmlLang !== lang) throw new Error(`main lang=${htmlLang}`);
+        const robots = await p.locator("meta[name='robots']").getAttribute("content");
+        if (!/noindex/.test(robots ?? "")) throw new Error(`robots: ${robots}`);
+        const touch = !!vp.isMobile;
+        for (let s = 0; s < 7; s++) {
+          await intakeAudit(p, touch, `step ${s + 1}`);
+          if (SHOTS && vp.name === "390" && s === 0) await p.screenshot({ path: `${SHOTS}/start-step1-${lang}-390.png` });
+          if (SHOTS && vp.name === "390" && s === 4 && lang !== "zh-Hant") {
+            await p.locator(".intake-step:not([data-off='true']) h3").first().scrollIntoViewIfNeeded();
+            await p.screenshot({ path: `${SHOTS}/start-step5-access-${lang}-390.png` });
+          }
+          if (SHOTS && vp.name === "1440" && s === 1 && lang === "en") await p.screenshot({ path: `${SHOTS}/start-step2-en-1440.png`, fullPage: true });
+          if (s < 6) {
+            const nextTxt = await p.locator(".sticky-actions button[type='button']:has-text('→'):visible").innerText();
+            if (s > 0 && !nextTxt.includes(L.next)) throw new Error(`Next button says "${nextTxt}"`);
+            await intakeNext(p);
+          }
+        }
+        if (!(await p.locator("button[type='submit']:visible").count())) throw new Error("no submit on last step");
+        if (errs.length) throw new Error(errs.join(" | "));
+        await c.close();
+      });
+    }
+  }
+
+  await step("/start language: switch en → 繁體 → 简体 via the top switch, and phone language zh-TW → 繁體", async () => {
+    const c = await pubCtx(phone);
+    const p = await c.newPage();
+    await p.goto(`${url}?lang=en`, { waitUntil: "networkidle" });
+    await p.locator("nav a:has-text('繁體')").click();
+    await p.waitForURL(/lang=zh-Hant/);
+    await p.waitForLoadState("networkidle");
+    if ((await p.locator("main").getAttribute("lang")) !== "zh-Hant") throw new Error("switch to 繁體 failed");
+    await p.locator("nav a:has-text('简体')").click();
+    await p.waitForURL(/lang=zh-Hans/);
+    await p.waitForLoadState("networkidle");
+    if ((await p.locator("main").getAttribute("lang")) !== "zh-Hans") throw new Error("switch to 简体 failed");
+    await p.waitForTimeout(300);
+    await p.goto(url, { waitUntil: "networkidle" }); // remembered choice
+    if ((await p.locator("main").getAttribute("lang")) !== "zh-Hans") throw new Error("choice not remembered");
+    await c.close();
+    const tw = await pubCtx({ ...phone, locale: "zh-TW" });
+    const tp = await tw.newPage();
+    await tp.goto(url, { waitUntil: "networkidle" });
+    if ((await tp.locator("main").getAttribute("lang")) !== "zh-Hant") throw new Error("zh-TW phone didn't get 繁體");
+    await tw.close();
+  });
+
+  await step("/start zh-Hant: fill & send → thank-you in 繁體; second visit shows already-sent", async () => {
+    const c = await pubCtx(phone);
+    const p = await c.newPage();
+    const errs = watch(p).errors;
+    await p.goto(`${url}?lang=zh-Hant`, { waitUntil: "networkidle" });
+    await intakeNext(p);
+    if ((await p.inputValue("#f-businessName")) !== name) throw new Error("business name not prefilled");
+    await p.fill("#f-businessNameZh", "煙霧測試小館");
+    await p.fill("#f-address", "100 Granby St, Norfolk, VA 23510");
+    await p.fill("#f-website", "https://other-site.example.com");
+    await p.fill("#f-signatureDishes", "小籠包、牛肉麵 (smoke test)");
+    await tick(p, "input[name='priceRange'][value='2']");
+    await intakeNext(p);
+    await tick(p, "input[name='customers'][value='families']");
+    await tick(p, "input[name='goals'][value='walkIns']");
+    await intakeNext(p);
+    await tick(p, "input[name='tone'][value='friendly']");
+    await tick(p, "input[name='postLangs'][value='both']");
+    await intakeNext(p);
+    await p.fill("#f-instagram", `@smoke_ig_${stamp}`);
+    await tick(p, "input[name='accessMeta'][value='done']");
+    await tick(p, "input[name='accessGoogle'][value='help']");
+    await intakeNext(p);
+    await tick(p, "input[name='creatorsOk'][value='yes']");
+    await intakeNext(p);
+    await p.fill("#f-contactName", "王小明");
+    await p.fill("#f-contactEmail", `owner-${stamp}@example.com`);
+    await tick(p, "input[name='talkLang'][value='mandarin']");
+    await p.locator("button[type='submit']:visible").click();
+    const thanks = p.locator(`text=${INTAKE_LANGS["zh-Hant"].thanks.source}`).first();
+    await thanks.waitFor({ timeout: 30000 });
+    if (SHOTS) { await p.evaluate(() => window.scrollTo(0, 0)); await p.screenshot({ path: `${SHOTS}/start-thanks-zh-Hant-390.png` }); }
+    if (errs.length) throw new Error(errs.join(" | "));
+    await p.goto(`${url}?lang=zh-Hant`, { waitUntil: "networkidle" });
+    if (!(await p.locator(`text=${INTAKE_LANGS["zh-Hant"].already}`).count())) throw new Error("second visit doesn't show already-sent");
+    if (await p.locator("input[name='contactName']").count()) throw new Error("form still shown after submit");
+    await c.close();
+  });
+
+  await step("after submit: client fields filled only where empty; Claude ask created; MCP get_client_intake", async () => {
+    const m = await tool("get_client_month", { client_id: id });
+    if (m.business.website !== site) throw new Error(`website overwritten: ${m.business.website}`);
+    if (m.business.instagramHandle !== `smoke_ig_${stamp}`) throw new Error(`instagram not filled: ${m.business.instagramHandle}`);
+    const c = await tool("list_clients", {});
+    const row = (Array.isArray(c) ? c : c.clients ?? []).find((x) => x.id === id);
+    if (row && row.location && row.location !== "Richmond") throw new Error(`location overwritten: ${row.location}`);
+    const asks = JSON.stringify(await tool("list_asks", { client_id: id, limit: 50 }));
+    if (!asks.includes(`/clients/${id}/intake`)) throw new Error("no Claude ask for the form");
+    const it = JSON.stringify(await tool("get_client_intake", { client_id: id }));
+    if (!it.includes("王小明") || !it.includes("untrusted")) throw new Error(`get_client_intake: ${it.slice(0, 300)}`);
+    if (it.includes("ipHash") || it.includes("_meta")) throw new Error("get_client_intake leaks _meta");
+  });
+
+  await step("/clients/[id]/intake shows the answers (Answered in 繁體); card says Answers in", async () => {
+    await page.goto(`${BASE}/clients/${id}/intake`, { waitUntil: "networkidle" });
+    const t = await page.locator("main").innerText();
+    for (const s of ["王小明", "煙霧測試小館", "繁體", "100 Granby St"]) if (!t.includes(s)) throw new Error(`answers page missing ${s}`);
+    if (/ipHash|_meta/.test(t)) throw new Error("answers page leaks _meta");
+    if (SHOTS) await page.screenshot({ path: `${SHOTS}/intake-answers-1440.png`, fullPage: true });
+    await page.goto(`${BASE}/clients/${id}`, { waitUntil: "networkidle" });
+    if (!(await page.locator("text=View answers").count())) throw new Error("card has no View answers");
+  });
+
+  await step("revoked link → expired message; random token → expired (no info leak); /start → 404", async () => {
+    await page.goto(`${BASE}/clients/${id}`, { waitUntil: "networkidle" });
+    await page.locator("button:has-text('Send another form')").click();
+    await page.locator("button:has-text('Yes — send a fresh form')").click();
+    const input = page.locator("input[aria-label='Onboarding form link']");
+    await input.waitFor({ timeout: 30000 });
+    const url2 = BASE + new URL(await input.inputValue()).pathname;
+    await page.waitForLoadState("networkidle");
+    await page.locator("button:has-text('Turn off')").click();
+    await page.locator("button:has-text('Send a new link')").waitFor({ timeout: 30000 });
+    const c = await pubCtx(phone);
+    const p = await c.newPage();
+    await p.goto(`${url2}?lang=en`, { waitUntil: "networkidle" });
+    if (!(await p.locator(`text=${INTAKE_LANGS.en.expired}`).count())) throw new Error("revoked link not expired");
+    const r = await p.goto(`${BASE}/start/${"x".repeat(43)}?lang=zh-Hans`, { waitUntil: "networkidle" });
+    const body = await p.locator("body").innerText();
+    if (!body.includes(INTAKE_LANGS["zh-Hans"].expired)) throw new Error(`random token: HTTP ${r?.status()} ${body.slice(0, 120)}`);
+    if (body.includes(name) || body.includes("Smoke Intake")) throw new Error("random token leaks a business");
+    const r2 = await p.goto(`${BASE}/start`, { waitUntil: "networkidle" });
+    if (r2?.status() !== 404) throw new Error(`/start → HTTP ${r2?.status()}`);
+    const r3 = await fetch(`${BASE}/start/abc/upload`, { method: "POST", body: "{}" });
+    if (r3.status < 400) throw new Error(`upload route on bad token → ${r3.status}`);
+    await c.close();
+  });
+
+  await step("Facebook as a platform: quick-add a Facebook task; tasks + calendar load cleanly", async () => {
+    const before = errors.length;
+    await page.goto(`${BASE}/clients/${id}`, { waitUntil: "networkidle" });
+    if (!(await page.locator("#qa-platform option[value='facebook']").count())) throw new Error("no Facebook in quick-add platforms");
+    await page.fill("#qa-title", `FB smoke post ${stamp}`);
+    await page.selectOption("#qa-platform", "facebook");
+    await page.locator("form[aria-label='Quick add task'] button[type='submit']").click();
+    await page.locator(`text=FB smoke post ${stamp}`).first().waitFor({ timeout: 30000 });
+    const tasks = JSON.stringify(await tool("list_tasks", { client_id: id, limit: 100 }));
+    if (!/FB smoke post[^}]*"platform":"facebook"|"platform":"facebook"[^}]*FB smoke post/.test(tasks)) throw new Error("task not saved as facebook");
+    for (const path of ["/tasks?view=table", "/tasks?view=board", "/calendar", "/calendar?platform=facebook", "/calendar/new", `/clients/${id}/settings`]) {
+      const res = await page.goto(BASE + path, { waitUntil: "networkidle" });
+      if (res?.status() !== 200) throw new Error(`${path}: HTTP ${res?.status()}`);
+    }
+    if (errors.length > before) throw new Error(errors.slice(before).join(" | "));
+  });
+
+  await context.close();
+}
+
 const RESP_VIEWPORTS = [
   { name: "375", width: 375, height: 667, touch: true },
   { name: "390", width: 390, height: 844, touch: true },
@@ -1363,6 +1619,7 @@ try {
   if (MODE === "flows" || MODE === "all") await flows(browser);
   if (MODE === "flows" || MODE === "all" || MODE === "nora") await noraFlows(browser);
   if (MODE === "flows" || MODE === "all" || MODE === "v6") await v6Flows(browser);
+  if (MODE === "flows" || MODE === "all" || MODE === "v7") await v7Flows(browser);
   if (MODE === "responsive") await responsive(browser);
   if (process.env.SHOTS_DIR) await shots(browser, process.env.SHOTS_DIR);
 } finally {
