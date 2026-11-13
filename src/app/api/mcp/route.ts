@@ -1,6 +1,5 @@
-import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { checkMcpAuth } from "@/lib/mcp/auth";
-import { createMcpServer } from "@/lib/mcp/server";
+import { handleMcp } from "@/lib/mcp/handler";
 
 /**
  * Remote MCP endpoint for the "Nora HQ" custom connector in Claude.
@@ -12,31 +11,11 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
-function baseUrl(req: Request): string {
-  if (process.env.APP_URL) return process.env.APP_URL.replace(/\/$/, "");
-  const url = new URL(req.url);
-  const host = req.headers.get("x-forwarded-host") ?? url.host;
-  const proto = req.headers.get("x-forwarded-proto") ?? url.protocol.replace(":", "");
-  return `${proto}://${host}`;
-}
 
 export async function POST(req: Request): Promise<Response> {
   const denied = checkMcpAuth(req);
   if (denied) return denied;
-
-  const server = createMcpServer({ baseUrl: baseUrl(req) });
-  const transport = new WebStandardStreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
-  try {
-    await server.connect(transport);
-    return await transport.handleRequest(req);
-  } catch (e) {
-    console.error("[mcp] request failed", e);
-    return Response.json({ jsonrpc: "2.0", error: { code: -32603, message: "Internal server error" }, id: null }, { status: 500 });
-  } finally {
-    // JSON response mode resolves only after every response is ready, so it's safe to tear down here.
-    void transport.close().catch(() => {});
-    void server.close().catch(() => {});
-  }
+  return handleMcp(req);
 }
 
 /** Stateless server: no standalone SSE stream and no sessions to delete. */

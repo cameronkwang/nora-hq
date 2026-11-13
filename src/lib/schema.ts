@@ -18,7 +18,7 @@ import {
  *  - actors (createdBy / reviewedBy / actor) are a user email, or "claude" for agent writes.
  */
 
-export const PLATFORMS = ["instagram", "tiktok", "google", "email", "other"] as const;
+export const PLATFORMS = ["instagram", "facebook", "tiktok", "google", "email", "other"] as const;
 export type Platform = (typeof PLATFORMS)[number];
 
 export const clients = pgTable("clients", {
@@ -37,6 +37,8 @@ export const clients = pgTable("clients", {
   kind: text("kind").$type<"business" | "creator">().notNull().default("business"),
   /** Where approved external monthly reports are emailed. Owners only ever receive what we send. */
   ownerEmail: text("owner_email"),
+  /** Where to look for creators to feature this business, e.g. "Richmond, VA; 757 / Hampton Roads". */
+  outreachAreas: text("outreach_areas"),
   sortOrder: integer("sort_order").notNull().default(0),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
@@ -688,3 +690,35 @@ export const loginAttempts = pgTable(
   },
   (t) => [index("login_attempts_ip_idx").on(t.ipHash, t.createdAt), index("login_attempts_email_idx").on(t.email, t.createdAt)],
 );
+
+/* ───────────────────────── Client onboarding form (private link per client) ───────────────────────── */
+
+export const INTAKE_STATUSES = ["sent", "opened", "submitted", "revoked"] as const;
+export type IntakeStatus = (typeof INTAKE_STATUSES)[number];
+export const INTAKE_LANGS = ["en", "zh-Hans", "zh-Hant"] as const;
+export type IntakeLang = (typeof INTAKE_LANGS)[number];
+
+/**
+ * A private onboarding-form link sent to one client. The raw token is never stored: tokenHash (sha256) is used
+ * for lookup and tokenEnc (lib/crypto) lets Cameron/Nora re-copy the link later. answers = the full submission.
+ */
+export const clientIntakes = pgTable(
+  "client_intakes",
+  {
+    id: text("id").primaryKey(),
+    clientId: text("client_id").notNull().references(() => clients.id, { onDelete: "cascade" }),
+    tokenHash: text("token_hash").notNull().unique(),
+    tokenEnc: text("token_enc").notNull(),
+    status: text("status").$type<IntakeStatus>().notNull().default("sent"),
+    lang: text("lang").$type<IntakeLang>(), // language the client used
+    answers: jsonb("answers").$type<Record<string, unknown>>(),
+    createdBy: text("created_by").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    openedAt: timestamp("opened_at", { withTimezone: true }),
+    submittedAt: timestamp("submitted_at", { withTimezone: true }),
+    expiresAt: timestamp("expires_at", { withTimezone: true }),
+  },
+  (t) => [index("client_intakes_client_idx").on(t.clientId)],
+);
+
+export type ClientIntake = typeof clientIntakes.$inferSelect;

@@ -22,6 +22,7 @@
   --ig: #c13584;
   --tt: #111111;
   --google: #1a73e8;
+  --facebook: #1877f2;
   color-scheme: light;
 }
 
@@ -47,6 +48,7 @@
     --ig: #f472b6;
     --tt: #e5e5e5;
     --google: #8ab4f8;
+    --facebook: #6ea8ff;
     color-scheme: dark;
   }
 }
@@ -72,6 +74,7 @@
   --color-ig: var(--ig);
   --color-tt: var(--tt);
   --color-google: var(--google);
+  --color-facebook: var(--facebook);
   --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
 }
 

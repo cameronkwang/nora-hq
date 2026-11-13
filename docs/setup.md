@@ -37,6 +37,7 @@ Set these under **Vercel → Project → Settings → Environment Variables** (P
 | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | From step 6 |
 | `OUTREACH_FROM_NAME` | e.g. `Nora` (optional) |
 | `OUTREACH_FOOTER` | Optional. See step 7 |
+| `INTAKE_ACCESS_EMAIL` | Optional. The email new clients add as a helper on their accounts in the onboarding form (`/start/<token>`). Suggested: `norachen.2019@gmail.com` (Nora's). Without it the form says "we'll text it to you". See [client-onboarding-form.md](client-onboarding-form.md) |
 
 `DATABASE_URL` and `BLOB_READ_WRITE_TOKEN` come from step 2. Now deploy.
 

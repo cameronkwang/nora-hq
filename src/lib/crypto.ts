@@ -6,7 +6,8 @@ import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
  * Format: v1.<iv>.<tag>.<ciphertext> (all base64url).
  */
 function key(): Buffer {
-  const raw = process.env.TOKEN_ENC_KEY;
+  // Local dev only (like AUTH_SECRET/APP_PASSWORD): a fixed throwaway key so links and tokens work without setup.
+  const raw = process.env.TOKEN_ENC_KEY ?? (process.env.NODE_ENV !== "production" ? Buffer.alloc(32, "nora-hq-dev-only").toString("base64") : undefined);
   if (!raw) throw new Error("TOKEN_ENC_KEY is not set (generate with: openssl rand -base64 32)");
   const k = Buffer.from(raw, "base64");
   if (k.length !== 32) throw new Error("TOKEN_ENC_KEY must decode to 32 bytes");
