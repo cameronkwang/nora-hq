@@ -57,6 +57,13 @@
       "when": 1794527312776,
       "tag": "0007_login_attempts",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1794595708351,
+      "tag": "0008_client_intake_facebook_areas",
+      "breakpoints": true
     }
   ]
 }

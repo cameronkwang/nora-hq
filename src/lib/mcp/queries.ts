@@ -280,6 +280,7 @@ export async function getBriefingData(ctx: Ctx) {
       kind: c.kind,
       name: businessName(c),
       hasBrandVoice: !!c.brandVoice?.trim(),
+      creatorSearchAreas: c.outreachAreas || undefined,
       plan: cm.plan.map((p) => ({ deliverable: p.deliverable.title, platform: p.deliverable.platform, done: p.done, target: p.target || "as needed", tasksPlanned: p.planned })),
       needsMonthTasks: cm.plan.some((p) => p.planned === 0),
       openTasks: cm.openTasks.length,

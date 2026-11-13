@@ -7,6 +7,15 @@ import { currentMonth } from "./dates";
 import { logActivity } from "./activity";
 import { createClient, OpsError } from "./ops";
 import { createRoutedAsk } from "./ops-asks";
+import {
+  ACCEPTED_SERVICES,
+  SERVICE_LABELS,
+  joinOutreachAreas,
+  normalizeServices,
+  planFor,
+  type AnyService,
+  type Service,
+} from "./onboard-services";
 
 /**
  * Adding a business we manage ("land a client → set up in seconds"): creates the client, sets a monthly plan that
@@ -18,14 +27,11 @@ import { createRoutedAsk } from "./ops-asks";
 
 export const ONBOARDING_TAG = "onboarding";
 
-export const SERVICES = ["social", "google", "collab"] as const;
-export type Service = (typeof SERVICES)[number];
+export { SERVICES, SERVICE_LABELS, DEFAULT_SERVICES, normalizeServices } from "./onboard-services";
+export type { Service, AnyService } from "./onboard-services";
 
-export const SERVICE_LABELS: Record<Service, string> = {
-  social: "Social media",
-  google: "Google reviews",
-  collab: "Creator collab",
-};
+/** Most Getting started steps we ever add; extra steps get folded into others. */
+export const MAX_ONBOARDING_STEPS = 7;
 
 export const OnboardInput = z.object({
   name: z.string().trim().min(1, "Give the business a name.").max(200),
@@ -33,77 +39,106 @@ export const OnboardInput = z.object({
   instagramHandle: z.string().max(200).nullish(),
   tiktokHandle: z.string().max(200).nullish(),
   website: z.string().max(500).nullish(),
-  services: z.array(z.enum(SERVICES)).min(1, "Pick at least one service."),
+  /** Current names (instagram, facebook, tiktok, google, creators, collab) or legacy "social" (→ Instagram + TikTok + creator outreach). */
+  services: z.array(z.enum(ACCEPTED_SERVICES)).min(1, "Pick at least one service."),
   notes: z.string().max(5000).nullish(),
   leadId: z.string().nullish(),
   googleMapsUrl: z.string().max(1000).nullish(),
   copyPlanFrom: z.string().max(200).nullish(),
+  /** Where to look for local creators, e.g. "Richmond, 757 / Hampton Roads". Saved to clients.outreachAreas. */
+  outreachAreas: z.string().max(500).nullish(),
+  /** Facebook Page link or name. Not a column: noted in the business notes. */
+  facebookPage: z.string().max(500).nullish(),
 });
 
 type PlanItem = Pick<schema.Deliverable, "title" | "platform" | "targetPerMonth">;
 
-const PLAN: Record<Service, PlanItem[]> = {
-  social: [
-    { title: "Instagram feed posts / reels", platform: "instagram", targetPerMonth: 8 },
-    { title: "Instagram stories", platform: "instagram", targetPerMonth: 12 },
-    { title: "TikTok videos", platform: "tiktok", targetPerMonth: 4 },
-    { title: "Creator outreach", platform: "other", targetPerMonth: 5 },
-  ],
-  google: [{ title: "Reply to Google reviews", platform: "google", targetPerMonth: 0 }],
-  collab: [{ title: "Collab content with Nora", platform: "instagram", targetPerMonth: 1 }],
-};
-
 type Step = { title: string; assignee: schema.Assignee; platform?: schema.Platform; details?: string };
 
-/**
- * Getting started, trimmed to what actually blocks the work (6 steps for social + Google reviews).
- * Research and the brand-voice draft are Claude's job — handed off as an ask, not a checklist item.
- * Order: first → service steps → last.
- */
-const STEPS: { first: Step[]; last: Step[] } & Record<Service, Step[]> = {
-  first: [
-    {
-      title: "Kickoff call: goals, offers, signature dishes, what to avoid",
-      assignee: "nora",
-      details: "Jot notes as you go and drop them in Claude's onboarding ask — they sharpen the brand voice.",
-    },
-  ],
-  social: [
-    {
-      title: "Get Instagram & TikTok access",
-      assignee: "cameron",
-      platform: "instagram",
-      details: "Owner adds us in Meta Business Suite (and TikTok), or logins go in the password manager. Never paste passwords into Nora HQ. Make sure Instagram is a Business/Creator account.",
-    },
-    { title: "Collect logo, brand photos & videos", assignee: "nora" },
-  ],
-  google: [
-    { title: "Owner adds Nora as Manager on the Google Business Profile", assignee: "nora", platform: "google" },
-    { title: "Link Google location in Settings", assignee: "cameron", platform: "google", details: "Settings & plan → Google location, once Nora has Manager access." },
-  ],
-  collab: [
-    { title: "Agree collab terms (gifted/paid, deliverables, dates) & FTC disclosure", assignee: "nora" },
-    { title: "Schedule visit / shoot", assignee: "nora" },
-  ],
-  last: [
-    {
-      title: "Approve brand voice & first-month plan",
-      assignee: "nora",
-      details: "Claude is researching them and drafting both in Asks. Tweak, then save the voice on Settings & plan.",
-    },
-  ],
+const KICKOFF: Step = {
+  title: "Kickoff call: goals, offers, signature dishes, what to avoid",
+  assignee: "nora",
+  details: "Jot notes as you go and drop them in Claude's onboarding ask — they sharpen the brand voice.",
 };
+const PHOTOS: Step = { title: "Collect logo, brand photos & videos", assignee: "nora" };
+const APPROVE: Step = {
+  title: "Approve brand voice & first-month plan",
+  assignee: "nora",
+  details: "Claude is researching them and drafting both in Asks. Tweak, then save the voice on Settings & plan.",
+};
+const GOOGLE_MANAGER: Step = { title: "Owner adds Nora as Manager on the Google Business Profile", assignee: "nora", platform: "google" };
+const GOOGLE_LINK: Step = { title: "Link Google location in Settings", assignee: "cameron", platform: "google", details: "Settings & plan → Google location, once Nora has Manager access." };
+
+/** Instagram / TikTok access, worded for whichever of the two we run. */
+function accessStep(ig: boolean, tt: boolean): Step | null {
+  if (!ig && !tt) return null;
+  const which = ig && tt ? "Instagram & TikTok" : ig ? "Instagram" : "TikTok";
+  return {
+    title: `Get ${which} access`,
+    assignee: "cameron",
+    platform: ig ? "instagram" : "tiktok",
+    details: [
+      ig ? "Owner adds us in Meta Business Suite" : null,
+      tt ? (ig ? "and TikTok" : "Owner shares TikTok access") : null,
+      "(or logins go in the password manager). Never paste passwords into Nora HQ.",
+      ig ? "Make sure Instagram is a Business/Creator account." : null,
+    ].filter(Boolean).join(" "),
+  };
+}
+
+/**
+ * Getting started, trimmed to what actually blocks the work (≤ 7 steps).
+ * Research and the brand-voice draft are Claude's job — handed off as an ask, not a checklist item.
+ * Order: kickoff → access → content → reviews → creators → collab → approve.
+ * When more than 7 would apply: photos fold into the kickoff, then the two Google steps become one.
+ */
+export function onboardingSteps(services: readonly Service[]): Step[] {
+  const has = (s: Service) => services.includes(s);
+  let photosFolded = false;
+  let googleMerged = false;
+  const build = (): Step[] => {
+    const steps: Array<Step | null> = [
+      photosFolded ? { ...KICKOFF, title: KICKOFF.title, details: `${KICKOFF.details} Ask for their logo, brand photos & videos too.` } : KICKOFF,
+      accessStep(has("instagram"), has("tiktok")),
+      has("facebook")
+        ? {
+            title: "Get Facebook Page access (owner adds Nora in Meta Business Suite)",
+            assignee: "cameron",
+            platform: "facebook",
+            details: "The onboarding form walks the owner through adding Nora as a person in Meta Business Suite (Settings → Users/People → Invite). If they get stuck, do it together on the kickoff call. Save the Page link in the business notes.",
+          }
+        : null,
+      !photosFolded && (has("instagram") || has("facebook") || has("tiktok")) ? PHOTOS : null,
+      ...(has("google")
+        ? googleMerged
+          ? [{ ...GOOGLE_MANAGER, title: "Get Google Business Profile access & link it in Settings", details: "Owner adds Nora as Manager, then link the location in Settings & plan → Google location." }]
+          : [GOOGLE_MANAGER, GOOGLE_LINK]
+        : []),
+      has("creators")
+        ? { title: "Confirm what creators can be offered (meal, budget) and visit times", assignee: "nora", details: "Free meal? Paid? How many guests? Best days and times to visit, and anything off-limits." }
+        : null,
+      has("collab") ? { title: "Agree collab terms (gifted/paid, deliverables, dates) & schedule the visit", assignee: "nora", details: "Include the FTC disclosure (#ad / paid partnership)." } : null,
+      APPROVE,
+    ];
+    return steps.filter((x): x is Step => !!x);
+  };
+  let steps = build();
+  if (steps.length > MAX_ONBOARDING_STEPS && steps.includes(PHOTOS)) {
+    photosFolded = true;
+    steps = build();
+  }
+  if (steps.length > MAX_ONBOARDING_STEPS && has("google")) {
+    googleMerged = true;
+    steps = build();
+  }
+  return steps;
+}
 
 const blank = (s: string | null | undefined) => (s && s.trim() ? s.trim() : null);
 const isPerson = (actor: string) => {
   const a = actor.trim().toLowerCase();
   return !!a && a !== "claude" && a !== "system";
 };
-
-/** Services in a stable order, without duplicates. */
-function normalize(services: readonly Service[]): Service[] {
-  return SERVICES.filter((s) => services.includes(s));
-}
 
 /**
  * People only: add a business we now manage. In one call:
@@ -120,17 +155,22 @@ export async function onboardClient(
     instagramHandle?: string | null;
     tiktokHandle?: string | null;
     website?: string | null;
-    services: Array<"google" | "social" | "collab">;
+    /** instagram | facebook | tiktok | google | creators | collab — or legacy "social" (= Instagram + TikTok + creator outreach). */
+    services: AnyService[];
     notes?: string | null;
     leadId?: string | null;
     googleMapsUrl?: string | null;
     copyPlanFrom?: string | null;
+    outreachAreas?: string | null;
+    facebookPage?: string | null;
   },
   actor: string,
 ): Promise<string> {
   if (!isPerson(actor)) throw new OpsError("Only a person can add a business we manage");
   const v = OnboardInput.parse(input);
-  const services = normalize(v.services);
+  const services = normalizeServices(v.services);
+  if (services.length === 0) throw new OpsError("Pick at least one service.");
+  const outreachAreas = joinOutreachAreas(v.outreachAreas);
   const db = await getDb();
 
   let lead: schema.Lead | null = null;
@@ -160,14 +200,16 @@ export async function onboardClient(
   const mapsUrl = blank(v.googleMapsUrl);
   // From a lead with no notes of its own: carry over the pitch angle and the lead's notes (convertLead passes these itself).
   const leadNotes = lead && !blank(v.notes) ? [lead.why ? `Why we pitched them: ${lead.why}` : null, blank(lead.notes)] : [];
-  const notes = [blank(v.notes), ...leadNotes, mapsUrl ? `Google Maps: ${mapsUrl}` : null].filter(Boolean).join("\n\n") || null;
+  const fbPage = blank(v.facebookPage);
+  const notes = [blank(v.notes), ...leadNotes, mapsUrl ? `Google Maps: ${mapsUrl}` : null, fbPage ? `Facebook Page: ${fbPage}` : null].filter(Boolean).join("\n\n") || null;
 
   const clientId = await createClient(
     { name: v.name, location: v.location, instagramHandle: v.instagramHandle, tiktokHandle: v.tiktokHandle, website: v.website, notes },
     actor,
   );
 
-  await setPlan(clientId, copied ?? services.flatMap((s) => PLAN[s]));
+  if (outreachAreas) await db.update(schema.clients).set({ outreachAreas }).where(eq(schema.clients.id, clientId));
+  await setPlan(clientId, copied ?? planFor(services));
   const added = await addOnboardingTasks(clientId, services, actor);
 
   const what = services.map((s) => SERVICE_LABELS[s].toLowerCase()).join(", ");
@@ -185,7 +227,7 @@ export async function onboardClient(
     await logActivity({ actor, action: "lead.converted", entityType: "lead", entityId: lead.id, clientId, summary: `Won: ${lead.name} is now a business we manage` });
   }
 
-  await handOffToClaude(clientId, { name: v.name.trim(), location: v.location, instagramHandle: v.instagramHandle, tiktokHandle: v.tiktokHandle, website: v.website, mapsUrl, services, lead }, actor);
+  await handOffToClaude(clientId, { name: v.name.trim(), location: v.location, instagramHandle: v.instagramHandle, tiktokHandle: v.tiktokHandle, website: v.website, mapsUrl, facebookPage: fbPage, outreachAreas, services, lead }, actor);
   return clientId;
 }
 
@@ -197,6 +239,8 @@ export function onboardingBrief(c: {
   tiktokHandle?: string | null;
   website?: string | null;
   mapsUrl?: string | null;
+  facebookPage?: string | null;
+  outreachAreas?: string | null;
   services: readonly Service[];
   lead?: Pick<schema.Lead, "why"> | null;
 }): string {
@@ -206,11 +250,12 @@ export function onboardingBrief(c: {
     c.website ? `- Website: ${c.website}` : null,
     at(c.instagramHandle) ? `- Instagram: ${at(c.instagramHandle)}` : null,
     at(c.tiktokHandle) ? `- TikTok: ${at(c.tiktokHandle)}` : null,
+    c.facebookPage ? `- Facebook Page: ${c.facebookPage}` : null,
     c.mapsUrl ? `- Google Maps: ${c.mapsUrl}` : null,
     c.lead?.why ? `- Why we pitched them: ${c.lead.why}` : null,
   ].filter(Boolean);
   return [
-    `New client ${c.name}: research their public presence (website, Google rating/reviews, Instagram/TikTok), draft a brand voice for their settings, suggest a first-month content plan, and list anything we need from the owner.`,
+    `New client ${c.name}: research their public presence (website, Google rating/reviews, Instagram/Facebook/TikTok), draft a brand voice for their settings, suggest a first-month content plan, and list anything we need from the owner.`,
     "",
     `We're doing: ${c.services.map((s) => SERVICE_LABELS[s]).join(", ")}.`,
     ...(known.length ? ["", "What we know so far:", ...known] : ["", "We only have the name — find their website and socials first."]),
@@ -220,6 +265,9 @@ export function onboardingBrief(c: {
     "2. Brand voice — a short draft for their Settings page (tone, words to use/avoid, signature dishes).",
     "3. First-month plan — content ideas that fit the monthly plan on their page.",
     "4. What we need from the owner — logins/access, photos, offers, anything missing.",
+    ...(c.services.includes("creators")
+      ? [`5. Local creators — a shortlist of food creators near ${c.outreachAreas || c.location || "the business"} who'd fit (handle, follower count, why). Search those areas only; draft nothing until we confirm what we can offer them.`]
+      : []),
     "If you find handles or a website we don't have, list them in your reply. Research public info only — don't contact the business.",
   ].join("\n");
 }
@@ -243,7 +291,7 @@ async function setPlan(clientId: string, items: PlanItem[]) {
  */
 async function addOnboardingTasks(clientId: string, services: Service[], actor: string) {
   const db = await getDb();
-  const steps = [...STEPS.first, ...services.flatMap((s) => STEPS[s]), ...STEPS.last];
+  const steps = onboardingSteps(services);
   const existing = await db.select({ title: schema.tasks.title }).from(schema.tasks)
     .where(and(eq(schema.tasks.clientId, clientId), eq(schema.tasks.tag, ONBOARDING_TAG)));
   const have = new Set(existing.map((t) => t.title));
@@ -265,6 +313,35 @@ async function addOnboardingTasks(clientId: string, services: Service[], actor: 
     }));
   if (rows.length) await db.insert(schema.tasks).values(rows);
   return rows.length;
+}
+
+export const OutreachAreasInput = z.object({
+  clientId: z.string().min(1),
+  /** Chip picks and/or free text; joined into one comma-separated string. Empty clears it. */
+  areas: z.union([z.string().max(1000), z.array(z.string().max(200)).max(20)]).nullish(),
+});
+
+/**
+ * Where Claude/Nora should look for local creators for this business ("Richmond, 757 / Hampton Roads").
+ * People and Claude may both set it (it's a search hint, not an outbound action). Returns the saved value.
+ */
+export async function setOutreachAreas(input: z.input<typeof OutreachAreasInput>, actor: string): Promise<string | null> {
+  const v = OutreachAreasInput.parse(input);
+  const value = joinOutreachAreas(v.areas ?? null);
+  const db = await getDb();
+  const [cur] = await db.select({ id: schema.clients.id, outreachAreas: schema.clients.outreachAreas }).from(schema.clients).where(eq(schema.clients.id, v.clientId));
+  if (!cur) throw new OpsError("client not found");
+  if ((cur.outreachAreas ?? null) === value) return value;
+  await db.update(schema.clients).set({ outreachAreas: value }).where(eq(schema.clients.id, v.clientId));
+  await logActivity({
+    actor,
+    action: "client.updated",
+    entityType: "client",
+    entityId: v.clientId,
+    clientId: v.clientId,
+    summary: value ? `Creator search areas: ${value}` : "Cleared creator search areas",
+  });
+  return value;
 }
 
 /** All Getting started steps for a business (done and open), in checklist order. */

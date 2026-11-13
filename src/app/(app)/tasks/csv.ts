@@ -59,6 +59,7 @@ const HEADER_ALIASES: Record<string, (typeof IMPORT_HEADERS)[number]> = {
 
 const PLATFORM_ALIASES: Record<string, Platform> = {
   instagram: "instagram", ig: "instagram", insta: "instagram",
+  facebook: "facebook", fb: "facebook", "facebook page": "facebook", meta: "facebook",
   tiktok: "tiktok", tt: "tiktok", "tik tok": "tiktok",
   google: "google", "google reviews": "google", gbp: "google",
   email: "email", "e-mail": "email",
@@ -160,7 +161,7 @@ export function buildImportPreview(text: string, clients: Pick<Client, "id" | "n
     let platform: Platform | null = null;
     if (platRaw) {
       platform = PLATFORM_ALIASES[platRaw] ?? null;
-      if (!platform) errors.push(`Platform “${get(r, "platform")}” should be Instagram, TikTok, Google, Email or Other`);
+      if (!platform) errors.push(`Platform “${get(r, "platform")}” should be Instagram, Facebook, TikTok, Google, Email or Other`);
     }
 
     const details = get(r, "details");

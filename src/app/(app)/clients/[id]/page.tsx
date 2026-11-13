@@ -21,6 +21,7 @@ import { OnboardWelcome } from "@/components/onboard-welcome";
 import { CollabLeadsCard, CollabRequestsCard, CreatorHeader, CreatorRow, CreatorStatsCard, DealsCard } from "@/components/creator-workspace-cards";
 import { SavedRepliesCard } from "@/components/reply-links";
 import { dealsCardData } from "@/lib/ops-deals";
+import { ClientIntakeCard } from "@/components/client-intake-card";
 
 export const dynamic = "force-dynamic";
 
@@ -145,6 +146,8 @@ export default async function ClientPage({
             </ul>
           </Card>
         )}
+
+        <ClientIntakeCard clientId={client.id} clientName={client.name} />
 
         <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
           {/* a. Plan */}

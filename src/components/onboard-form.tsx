@@ -1,18 +1,23 @@
 "use client";
 
 import { useState } from "react";
-import { onboardAction } from "@/app/(app)/clients/actions";
+import { onboardNewClientAction } from "@/app/(app)/clients/new/actions";
 import { PARSED_LABEL, parseBusinessInput, parsedText } from "@/lib/onboard-parse";
+import {
+  DEFAULT_SERVICES,
+  SERVICES,
+  SERVICE_HINTS,
+  SERVICE_LABELS,
+  STARTING_PLAN_NOTE,
+  normalizeServices,
+  planFor,
+  type Service,
+} from "@/lib/onboard-services";
 import { ActionForm, SubmitButton } from "./client-form";
-import { cx } from "./ui";
+import { OutreachAreasField } from "./onboard-areas";
+import { PlatformTag, cx } from "./ui";
 
-type Service = "social" | "google" | "collab";
-
-const SERVICE_CHIPS: Array<{ value: Service; label: string }> = [
-  { value: "social", label: "Social media" },
-  { value: "google", label: "Google reviews" },
-  { value: "collab", label: "Creator collab" },
-];
+const isFacebookUrl = (u: string) => /^(https?:\/\/)?((www|m|web)\.)?(facebook|fb)\.com\//i.test(u.trim());
 
 export type OnboardPrefill = {
   leadId?: string | null;
@@ -22,7 +27,9 @@ export type OnboardPrefill = {
   tiktokHandle?: string | null;
   website?: string | null;
   googleMapsUrl?: string | null;
-  services?: Service[];
+  /** Current service names, or legacy lead opportunities ("social" → Instagram + TikTok). */
+  services?: readonly string[];
+  outreachAreas?: string | null;
 };
 
 export type PlanSource = { id: string; name: string; items: number };
@@ -37,7 +44,11 @@ export function OnboardForm({ prefill = {}, planSources = [] }: { prefill?: Onbo
   const [copyFrom, setCopyFrom] = useState("");
   const parsed = parseBusinessInput(q);
   const isLink = parsed.kind !== "name";
-  const services = prefill.services?.length ? prefill.services : (["social", "google"] as Service[]);
+  const initial = normalizeServices(prefill.services ?? []);
+  const [picked, setPicked] = useState<Service[]>(initial.length ? initial : [...DEFAULT_SERVICES]);
+  const toggle = (s: Service, on: boolean) => setPicked((cur) => normalizeServices(on ? [...cur, s] : cur.filter((x) => x !== s)));
+  const plan = planFor(picked);
+  const pastedFacebook = parsed.kind === "website" && isFacebookUrl(parsed.url);
   const fromLead = [
     prefill.instagramHandle && `IG @${prefill.instagramHandle}`,
     prefill.tiktokHandle && `TikTok @${prefill.tiktokHandle}`,
@@ -47,7 +58,7 @@ export function OnboardForm({ prefill = {}, planSources = [] }: { prefill?: Onbo
   const source = planSources.find((p) => p.id === copyFrom);
 
   return (
-    <ActionForm action={onboardAction} className="flex flex-col gap-5" ariaLabel="New client">
+    <ActionForm action={onboardNewClientAction} className="group/onb flex flex-col gap-5" ariaLabel="New client">
       {prefill.leadId && <input type="hidden" name="leadId" value={prefill.leadId} />}
       {/* Lead details ride along; a pasted link in the big field wins over the matching one. */}
       {prefill.instagramHandle && <input type="hidden" name="instagramHandle" value={prefill.instagramHandle} />}
@@ -75,10 +86,10 @@ export function OnboardForm({ prefill = {}, planSources = [] }: { prefill?: Onbo
         {isLink ? (
           <p className="mt-2 inline-flex max-w-full items-center gap-1.5 rounded-full bg-ok-soft px-3 py-1 text-sm text-ok" role="status">
             <span aria-hidden>✓</span>
-            <span className="truncate">{PARSED_LABEL[parsed.kind]} · {parsedText(parsed)}</span>
+            <span className="truncate">{pastedFacebook ? "Facebook Page" : PARSED_LABEL[parsed.kind]} · {parsedText(parsed)}</span>
           </p>
         ) : (
-          <p className="mt-1.5 text-xs text-muted">Or paste their Instagram, TikTok, Google Maps or website link.</p>
+          <p className="mt-1.5 text-xs text-muted">Or paste their Instagram, Facebook, TikTok, Google Maps or website link.</p>
         )}
         {fromLead.length > 0 && <p className="mt-1.5 text-xs text-muted">From the lead: {fromLead.join(" · ")}</p>}
       </div>
@@ -97,28 +108,74 @@ export function OnboardForm({ prefill = {}, planSources = [] }: { prefill?: Onbo
 
       <fieldset className="min-w-0">
         <legend className="label">What we&apos;ll do for them</legend>
-        <div className="grid grid-cols-3 gap-2">
-          {SERVICE_CHIPS.map((s) => (
+        <p className="-mt-0.5 mb-2 text-xs text-muted">Tap to pick or unpick. You can change this later.</p>
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+          {SERVICES.map((s) => (
             <label
-              key={s.value}
+              key={s}
               className={cx(
-                "flex min-h-12 cursor-pointer select-none items-center justify-center rounded-xl border border-border px-2 py-2 text-center text-sm font-medium leading-tight transition",
-                "has-[:checked]:border-accent has-[:checked]:bg-accent-soft has-[:checked]:text-accent",
+                "group flex min-h-14 cursor-pointer select-none flex-col items-start justify-center rounded-xl border border-border px-3 py-2 text-left leading-tight transition",
+                "has-[:checked]:border-accent has-[:checked]:bg-accent-soft",
                 "has-[:focus-visible]:outline has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-accent",
               )}
             >
-              <input type="checkbox" name="services" value={s.value} defaultChecked={services.includes(s.value)} className="sr-only" />
-              {s.label}
+              <input
+                type="checkbox"
+                id={`onb-svc-${s}`}
+                name="services"
+                value={s}
+                checked={picked.includes(s)}
+                onChange={(e) => toggle(s, e.target.checked)}
+                className="sr-only"
+              />
+              <span className="flex items-center gap-1.5 text-sm font-medium group-has-[:checked]:text-accent">
+                <span aria-hidden className="inline-flex size-4 shrink-0 items-center justify-center rounded border border-border text-[10px] group-has-[:checked]:border-accent group-has-[:checked]:bg-accent group-has-[:checked]:text-accent-fg">
+                  <span className="hidden group-has-[:checked]:inline">✓</span>
+                </span>
+                {SERVICE_LABELS[s]}
+              </span>
+              <span className="mt-0.5 pl-5.5 text-xs text-muted">{SERVICE_HINTS[s]}</span>
             </label>
           ))}
         </div>
       </fieldset>
 
+      {/* Shown by CSS when the chip is checked, so it also works before JS loads. */}
+      <div className="hidden group-has-[#onb-svc-creators:checked]/onb:block">
+        <OutreachAreasField idPrefix="onb" defaultValue={prefill.outreachAreas} />
+      </div>
+
+      {!pastedFacebook && (
+        <div className="hidden group-has-[#onb-svc-facebook:checked]/onb:block">
+          <label className="label" htmlFor="onb-fb">Facebook Page link <span className="font-normal">(optional)</span></label>
+          <input id="onb-fb" name="facebookPage" autoComplete="off" autoCapitalize="none" spellCheck={false} inputMode="url" className="input" placeholder="facebook.com/their-page" />
+          <p className="mt-1.5 text-xs text-muted">Saved in the business notes.</p>
+        </div>
+      )}
+
+      {!source && plan.length > 0 && (
+        <div className="rounded-xl bg-surface-2 p-3">
+          <p className="text-sm font-medium">Monthly plan <span className="text-xs font-normal text-muted">({STARTING_PLAN_NOTE})</span></p>
+          <ul className="mt-2 flex flex-col gap-1.5 text-sm">
+            {plan.map((p) => (
+              <li key={p.title} className="flex items-center justify-between gap-3">
+                <span className="flex min-w-0 items-center gap-2">
+                  <PlatformTag platform={p.platform} />
+                  <span className="truncate">{p.title}</span>
+                </span>
+                <span className="shrink-0 tabular-nums text-muted">{p.targetPerMonth ? `${p.targetPerMonth} / month` : "as needed"}</span>
+              </li>
+            ))}
+          </ul>
+          <p className="mt-2 text-xs text-muted">Change the numbers anytime in Settings &amp; plan.</p>
+        </div>
+      )}
+
       {planSources.length > 0 && (
         <div>
           <label className="label" htmlFor="onb-copy">Monthly plan</label>
           <select id="onb-copy" name="copyPlanFrom" value={copyFrom} onChange={(e) => setCopyFrom(e.target.value)} className="input">
-            <option value="">Standard plan for these services</option>
+            <option value="">Starting plan for these services</option>
             {planSources.map((p) => (
               <option key={p.id} value={p.id}>Copy from {p.name} ({p.items} item{p.items === 1 ? "" : "s"})</option>
             ))}
