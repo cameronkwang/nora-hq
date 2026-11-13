@@ -111,7 +111,7 @@ export default async function StartPage({ params, searchParams }: Props) {
         <div className="rounded-3xl border border-border bg-surface p-4 shadow-sm sm:p-8">{body}</div>
 
         {link.state === "open" && (
-          <p className="mx-auto mt-6 max-w-sm text-center text-sm leading-relaxed text-muted">
+          <p className="mx-auto mt-6 max-w-sm text-center text-sm leading-relaxed text-muted [main:has([data-intake-done])_&]:hidden">
             {C.common.autosave} {C.common.neverPasswords}
           </p>
         )}

@@ -5,7 +5,7 @@ import type { IntakeCopy } from "@/lib/intake-copy";
 
 export function IntakeThanks({ C, name }: { C: IntakeCopy; name: string }) {
   return (
-    <div role="status" className="px-1 py-6 text-center sm:px-4">
+    <div role="status" data-intake-done="" className="px-1 py-6 text-center sm:px-4">
       <span aria-hidden className="mx-auto mb-4 flex size-14 items-center justify-center rounded-full bg-ok-soft text-2xl text-ok">✓</span>
       <h2 className="text-2xl font-semibold tracking-tight">{C.thanks.title(name || "")}</h2>
       <p className="mx-auto mt-2 max-w-sm text-[17px] leading-relaxed text-muted">{C.thanks.body}</p>

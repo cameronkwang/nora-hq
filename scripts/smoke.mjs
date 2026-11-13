@@ -537,14 +537,14 @@ async function flows(browser) {
       await page.goto(`${BASE}/clients/new`, { waitUntil: "networkidle" });
       await page.fill("#onb-q", `Sample Taco Stand ${stamp}`);
       await page.fill("#onb-city", "Norfolk");
-      for (const [v, on] of [["social", false], ["google", false], ["collab", true]]) await page.locator(`input[name='services'][value='${v}']`).setChecked(on, { force: true });
+      for (const [v, on] of [["instagram", false], ["facebook", false], ["tiktok", false], ["google", false], ["collab", true]]) await page.locator(`input[name='services'][value='${v}']`).setChecked(on, { force: true });
       await page.locator("button[type='submit']:has-text('Add client')").click();
       await page.waitForURL(/\/clients\/(?!new)[^/?]+\?welcome=1/, { timeout: 60000 });
       await page.waitForLoadState("networkidle");
       const t = await page.locator("main").innerText();
       if (!t.includes(`Sample Taco Stand ${stamp}`)) throw new Error("not on the new business page");
       if (!t.includes("Getting started") || !t.includes("Agree collab terms")) throw new Error("collab onboarding checklist missing");
-      if (t.includes("Get Instagram & TikTok access")) throw new Error("social steps shown though social wasn't picked");
+      if (/Get (Instagram|TikTok|Facebook)[^\n]* access/.test(t)) throw new Error("social steps shown though no social service was picked");
     });
   }
 

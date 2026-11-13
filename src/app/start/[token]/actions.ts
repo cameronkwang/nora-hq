@@ -1,7 +1,6 @@
 "use server";
 
 import { headers } from "next/headers";
-import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { collabIpHash } from "@/lib/ops-collab";
 import { IntakeLinkError, IntakeRateLimitError, intakeFieldErrors, submitIntake } from "@/lib/ops-intake";
@@ -60,8 +59,8 @@ export async function submitIntakeAction(_prev: IntakeFormState, fd: FormData): 
 
   try {
     const res = await submitIntake(token, values, lang, { ipHash: collabIpHash(await clientIp()) });
-    revalidatePath(`/clients/${res.clientId}`);
-    revalidatePath(`/clients/${res.clientId}/intake`);
+    // No revalidatePath here: it would re-render this public page, which then shows "already sent" instead of
+    // the thank-you screen. The team pages are dynamic (signed-in) and read fresh data on their next visit.
     return { at, done: { name: res.name } };
   } catch (e) {
     if (e instanceof z.ZodError) {

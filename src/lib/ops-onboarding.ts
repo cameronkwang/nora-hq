@@ -102,10 +102,10 @@ export function onboardingSteps(services: readonly Service[]): Step[] {
       accessStep(has("instagram"), has("tiktok")),
       has("facebook")
         ? {
-            title: "Get Facebook Page access (Meta Business Suite partner)",
+            title: "Get Facebook Page access (owner adds Nora in Meta Business Suite)",
             assignee: "cameron",
             platform: "facebook",
-            details: "Send the owner a partner request in Meta Business Suite (Settings → Business assets → Pages), or have them add us to the Page. Save the Page link in the business notes.",
+            details: "The onboarding form walks the owner through adding Nora as a person in Meta Business Suite (Settings → Users/People → Invite). If they get stuck, do it together on the kickoff call. Save the Page link in the business notes.",
           }
         : null,
       !photosFolded && (has("instagram") || has("facebook") || has("tiktok")) ? PHOTOS : null,
