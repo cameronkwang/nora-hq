@@ -14,8 +14,7 @@ import {
   upsertDeliverable,
   upsertMetric,
 } from "@/lib/ops";
-import { onboardClient, SERVICES, type Service } from "@/lib/ops-onboarding";
-import { parseBusinessInput } from "@/lib/onboard-parse";
+import { onboardNewClientAction } from "./new/actions";
 
 /** Result shape for forms wired through <ActionForm> (useActionState). */
 export type FormState = { ok?: boolean; error?: string; message?: string; at?: number };
@@ -48,41 +47,9 @@ function refresh(clientId?: string) {
  * (parsed again here so it works without JS). Creates the business with its plan, Getting started checklist
  * and Claude's research ask; from a lead it also marks the lead Won. Lands on the business page.
  */
-export async function onboardAction(_prev: FormState, fd: FormData): Promise<FormState> {
-  const user = await requireUser();
-  const parsed = parseBusinessInput(str(fd, "q"));
-  const name = (parsed.kind === "name" ? parsed.name : str(fd, "name")).trim();
-  if (!name) return { error: parsed.kind === "name" ? "Give the business a name." : "Add the business name too." };
-  const services = fd.getAll("services").filter((v): v is Service => typeof v === "string" && (SERVICES as readonly string[]).includes(v));
-  if (services.length === 0) return { error: "Pick at least one service." };
-  const leadId = opt(fd, "leadId");
-  let id: string;
-  try {
-    id = await onboardClient(
-      {
-        name,
-        location: opt(fd, "location"),
-        instagramHandle: parsed.kind === "instagram" ? parsed.handle : opt(fd, "instagramHandle"),
-        tiktokHandle: parsed.kind === "tiktok" ? parsed.handle : opt(fd, "tiktokHandle"),
-        website: parsed.kind === "website" ? parsed.url : opt(fd, "website"),
-        googleMapsUrl: parsed.kind === "maps" ? parsed.url : opt(fd, "googleMapsUrl"),
-        copyPlanFrom: opt(fd, "copyPlanFrom"),
-        services,
-        leadId,
-      },
-      user.email,
-    );
-  } catch (e) {
-    return { error: errorMessage(e) };
-  }
-  refresh(id);
-  revalidatePath("/tasks");
-  revalidatePath("/asks");
-  if (leadId) {
-    revalidatePath("/leads");
-    revalidatePath(`/leads/${leadId}`);
-  }
-  redirect(`/clients/${id}?welcome=1${leadId ? "&lead=1" : ""}`);
+/** Kept for older callers — same flow as the New client form (services, Facebook Page, creator areas). */
+export async function onboardAction(prev: FormState, fd: FormData): Promise<FormState> {
+  return onboardNewClientAction(prev, fd);
 }
 
 /** Older "Add business" form signature — same flow as New client. */

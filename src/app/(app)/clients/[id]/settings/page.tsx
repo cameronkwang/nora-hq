@@ -7,6 +7,9 @@ import { ActionForm, ConfirmButton, SubmitButton } from "@/components/client-for
 import { deleteDeliverableAction, saveDeliverableAction, setArchivedAction, updateClientAction } from "../../actions";
 import { listDeliverables } from "../../queries";
 import { setOwnerEmailAction } from "../../../reports/actions";
+import { setOutreachAreasAction } from "./actions";
+import { OutreachAreasField } from "@/components/onboard-areas";
+import { STARTING_PLAN_NOTE } from "@/lib/onboard-services";
 
 export const dynamic = "force-dynamic";
 
@@ -98,7 +101,7 @@ export default async function ClientSettingsPage({ params }: { params: Promise<{
 
             <div>
               <label className="label" htmlFor="s-notes">Notes</label>
-              <textarea id="s-notes" name="notes" defaultValue={client.notes ?? ""} rows={4} className="input" placeholder="Contacts, owner preferences, posting rules…" />
+              <textarea id="s-notes" name="notes" defaultValue={client.notes ?? ""} rows={4} className="input" placeholder="Contacts, Facebook Page link, owner preferences, posting rules…" />
             </div>
 
             <div>
@@ -128,11 +131,30 @@ export default async function ClientSettingsPage({ params }: { params: Promise<{
             </section>
           )}
 
+          {/* Creator search areas — where Claude/Nora look for local creators to feature this business. */}
+          {!isCreatorClient(client) && (
+            <section id="creator-areas" className="scroll-mt-4">
+              <Card title="Creator search areas">
+                <ActionForm action={setOutreachAreasAction.bind(null, client.id)} className="flex flex-col gap-3" ariaLabel="Creator search areas">
+                  <OutreachAreasField
+                    idPrefix="s"
+                    defaultValue={client.outreachAreas}
+                    label="Where should we look for creators?"
+                    hint="Claude searches these areas when it researches local food creators for this business. Leave empty to use the business's city."
+                  />
+                  <div>
+                    <SubmitButton size="sm">Save areas</SubmitButton>
+                  </div>
+                </ActionForm>
+              </Card>
+            </section>
+          )}
+
           {/* Monthly plan */}
           <section id="plan" className="scroll-mt-4">
             <Card title="Monthly plan">
               <p className="mb-4 text-xs text-muted">
-                What you deliver every month. Each item becomes checklist tasks on the business page. Target 0 means “as needed” (e.g. reply to every review).
+                What you deliver every month. Each item becomes checklist tasks on the business page. Target 0 means “as needed” (e.g. reply to every review). New businesses get a {STARTING_PLAN_NOTE}. Facebook posts are posted by hand (auto-publish is Instagram only).
               </p>
 
               {deliverables.length === 0 ? (

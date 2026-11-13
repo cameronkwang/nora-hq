@@ -71,6 +71,7 @@ export function StatusBadge({ status }: { status: string }) {
 
 const PLATFORM_META: Record<string, { label: string; cls: string }> = {
   instagram: { label: "Instagram", cls: "text-ig" },
+  facebook: { label: "Facebook", cls: "text-facebook" },
   tiktok: { label: "TikTok", cls: "text-tt" },
   google: { label: "Google", cls: "text-google" },
   email: { label: "Email", cls: "text-info" },

@@ -208,7 +208,7 @@ export function registerTools(server: McpServer, ctx: Ctx) {
   server.registerTool("list_clients", {
     title: "List businesses",
     description:
-      "Lists the businesses we manage with their ids, location, Instagram/TikTok handles, website, brand voice, notes and monthly plan (deliverables with target per month; 0 = as needed). " +
+      "Lists the businesses we manage with their ids, location, Instagram/TikTok handles, website, brand voice, notes, creator search areas (outreachAreas: where to look for local creators, e.g. \"Richmond, 757 / Hampton Roads\") and monthly plan (deliverables with target per month; 0 = as needed; platform facebook = Facebook Page posts, posted by hand). " +
       "Use the id as client_id in other tools. Always read brandVoice before drafting anything for a business. " +
       "kind \"creator\" (id \"noraeatsgood\") is Nora's own content-creator workspace (her @noraeatsgood content, stats and collab inbox), not a managed business: file her own content work under it, and don't treat it like a client (no Google mapping, business brand voice or client pitches). ",
     inputSchema: { include_archived: z.boolean().default(false).describe("Include archived businesses.") },
@@ -230,6 +230,7 @@ export function registerTools(server: McpServer, ctx: Ctx) {
       googleConnected: !!c.googleLocation,
       brandVoice: c.brandVoice,
       notes: c.notes,
+      outreachAreas: c.outreachAreas,
       archived: c.archived || undefined,
       monthlyPlan: dels.filter((d) => d.clientId === c.id).map((d) => ({ deliverableId: d.id, title: d.title, platform: d.platform, targetPerMonth: d.targetPerMonth })),
     }));
@@ -250,7 +251,7 @@ export function registerTools(server: McpServer, ctx: Ctx) {
     if (!cm) throw new ToolError(`No business with id "${client_id}". Call list_clients for valid ids.`);
     const names = await clientNames();
     return {
-      business: { id: cm.client.id, kind: cm.client.kind, name: businessName(cm.client), instagramHandle: cm.client.instagramHandle, tiktokHandle: cm.client.tiktokHandle, website: cm.client.website, googleConnected: !!cm.client.googleLocation, brandVoice: cm.client.brandVoice, notes: cm.client.notes },
+      business: { id: cm.client.id, kind: cm.client.kind, name: businessName(cm.client), instagramHandle: cm.client.instagramHandle, tiktokHandle: cm.client.tiktokHandle, website: cm.client.website, googleConnected: !!cm.client.googleLocation, brandVoice: cm.client.brandVoice, notes: cm.client.notes, outreachAreas: cm.client.outreachAreas },
       month: cm.month,
       plan: cm.plan.map((p) => ({ deliverableId: p.deliverable.id, title: p.deliverable.title, platform: p.deliverable.platform, target: p.target || "as needed", done: p.done, tasksPlanned: p.planned })),
       monthTasks: cm.monthTasks.map((t) => shapeTask(t, names)),
@@ -712,7 +713,8 @@ export function registerTools(server: McpServer, ctx: Ctx) {
     description:
       "Searches the creator/influencer database by name, handle, email, city, niche or notes, optionally only creators in a business's outreach pipeline and/or at a stage. " +
       "Each creator includes their outreach relationships with every business. Do-not-contact creators are hidden unless include_do_not_contact is true. " +
-      "Always search before adding a creator to avoid duplicates.",
+      "Always search before adding a creator to avoid duplicates. " +
+      "When researching new local creators for a business, look in its outreachAreas (from list_clients / get_client_month, e.g. Richmond or 757 / Hampton Roads); if empty, use the business's city.",
     inputSchema: {
       q: z.string().optional(),
       client_id: clientId.optional(),

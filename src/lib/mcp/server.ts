@@ -9,6 +9,7 @@ import { registerCollabTools } from "./tools-collab";
 import { registerDealTools } from "./tools-deals";
 import { registerReplyTools } from "./tools-replies";
 import { registerReportTools } from "./tools-reports";
+import { registerIntakeTools } from "./tools-intake";
 import type { Ctx } from "./queries";
 
 /** A fresh MCP server per request (stateless Streamable HTTP — works on serverless). */
@@ -25,5 +26,6 @@ export function createMcpServer(ctx: Ctx): McpServer {
   registerDealTools(server);
   registerReplyTools(server);
   registerReportTools(server);
+  registerIntakeTools(server);
   return server;
 }
