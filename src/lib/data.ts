@@ -1,6 +1,7 @@
 import "server-only";
-import { asc, desc, eq, and, inArray, isNull, ne, sql } from "drizzle-orm";
+import { asc, desc, eq, and, inArray, isNotNull, isNull, lte, ne, sql } from "drizzle-orm";
 import { getDb, schema } from "./db";
+import { today } from "./dates";
 
 /** Small shared read helpers used across pages. Module-specific queries live next to their pages. */
 
@@ -19,14 +20,22 @@ export async function getClient(id: string) {
   return c ?? null;
 }
 
-/** Counts for nav badges. */
-export async function navCounts() {
+/**
+ * Counts for nav badges.
+ * - newAsks: open asks nobody has picked up (ideas excluded)
+ * - needsReview: drafts waiting for approval
+ * - tasksDue: open tasks due today or earlier — the viewer's own when `assignee` is given, else everyone's (Claude's excluded)
+ */
+export async function navCounts(opts: { assignee?: string } = {}) {
   const db = await getDb();
-  const [[asks], [drafts]] = await Promise.all([
+  const t = schema.tasks;
+  const who = opts.assignee ? eq(t.assignee, opts.assignee as schema.Assignee) : ne(t.assignee, "claude");
+  const [[asks], [drafts], [due]] = await Promise.all([
     db.select({ n: sql<number>`count(*)::int` }).from(schema.asks).where(and(eq(schema.asks.status, "new"), ne(schema.asks.kind, "idea"))),
     db.select({ n: sql<number>`count(*)::int` }).from(schema.drafts).where(and(eq(schema.drafts.status, "needs_review"))),
+    db.select({ n: sql<number>`count(*)::int` }).from(t).where(and(ne(t.status, "done"), who, isNotNull(t.dueDate), lte(t.dueDate, today()))),
   ]);
-  return { newAsks: asks.n, needsReview: drafts.n };
+  return { newAsks: asks.n, needsReview: drafts.n, tasksDue: due.n };
 }
 
 /* ───────────────────────── Nora's creator workspace ───────────────────────── */

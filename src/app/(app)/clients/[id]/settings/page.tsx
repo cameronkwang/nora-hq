@@ -4,10 +4,12 @@ import { getClient, isCreatorClient } from "@/lib/data";
 import { schema } from "@/lib/db";
 import { Badge, Card, EmptyState, PageHeader, humanize } from "@/components/ui";
 import { ActionForm, ConfirmButton, SubmitButton } from "@/components/client-form";
-import { deleteDeliverableAction, saveDeliverableAction, setArchivedAction, updateClientAction } from "../../actions";
+import { deleteDeliverableAction, saveDeliverableAction, updateClientAction } from "../../actions";
 import { listDeliverables } from "../../queries";
 import { setOwnerEmailAction } from "../../../reports/actions";
-import { setOutreachAreasAction } from "./actions";
+import { setBusinessActiveAction, setOutreachAreasAction } from "./actions";
+import { ActiveToggle } from "./active-toggle";
+import { NotesField } from "./notes-field";
 import { OutreachAreasField } from "@/components/onboard-areas";
 import { STARTING_PLAN_NOTE } from "@/lib/onboard-services";
 
@@ -41,7 +43,7 @@ export default async function ClientSettingsPage({ params }: { params: Promise<{
           </>
         }
         subtitle={client.location ?? undefined}
-        actions={client.archived ? <Badge>Archived</Badge> : undefined}
+        actions={client.archived ? <Badge>Inactive</Badge> : undefined}
       />
 
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
@@ -99,10 +101,7 @@ export default async function ClientSettingsPage({ params }: { params: Promise<{
               />
             </div>
 
-            <div>
-              <label className="label" htmlFor="s-notes">Notes</label>
-              <textarea id="s-notes" name="notes" defaultValue={client.notes ?? ""} rows={4} className="input" placeholder="Contacts, Facebook Page link, owner preferences, posting rules…" />
-            </div>
+            <NotesField defaultValue={client.notes ?? ""} />
 
             <div>
               <SubmitButton>Save details</SubmitButton>
@@ -226,22 +225,16 @@ export default async function ClientSettingsPage({ params }: { params: Promise<{
             </Card>
           </section>
 
-          {/* Archive — never offered for Nora's own workspace (only a restore, if it was archived before). */}
+          {/* Active / Inactive — Nora's own workspace is always active (only a switch back, if it was ever made inactive). */}
           {(!isCreatorClient(client) || client.archived) && (
-          <Card title={client.archived ? "Archived" : "Archive"}>
-            <form action={setArchivedAction.bind(null, client.id, !client.archived)} className="flex flex-col items-start gap-3">
-              <p className="text-sm text-muted">
+            <Card title="Status">
+              <ActiveToggle active={!client.archived} action={setBusinessActiveAction.bind(null, client.id, !!client.archived)} />
+              <p className="mt-1 text-sm text-muted">
                 {client.archived
-                  ? "This business is hidden from the sidebar and lists. Its history is kept."
-                  : "Stopped working with this business? Archiving hides it from the sidebar and lists. Nothing is deleted."}
+                  ? "Turn it back on when you start working with them again. Its history is all here."
+                  : "Stopped or paused working with this business? Switch it to Inactive. Nothing is deleted."}
               </p>
-              {client.archived ? (
-                <SubmitButton variant="secondary" pendingLabel="Restoring…">Restore business</SubmitButton>
-              ) : (
-                <ConfirmButton size="md" confirm={`Archive ${client.name}?`}>Archive business</ConfirmButton>
-              )}
-            </form>
-          </Card>
+            </Card>
           )}
         </div>
       </div>

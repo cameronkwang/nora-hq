@@ -8,6 +8,7 @@ import { DELIVERABLE_LABEL } from "@/lib/ops-deals";
 import { formatDate, relativeTime } from "@/lib/dates";
 import { STAGE_LABEL } from "@/app/(app)/leads/shared";
 import { NextStep } from "./lead-bits";
+import { reelsToPostCount } from "@/lib/ops-schedule";
 import { Badge, Card, EmptyState, LinkButton, cx, formatNumber, humanize } from "./ui";
 
 /**
@@ -28,6 +29,7 @@ export function CreatorHeader({ client }: { client: Client }) {
         </h1>
         <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
           <span className="text-muted">Your own content &amp; collabs</span>
+          <ReelsToPostLink />
           {ig && (
             <a href={`https://instagram.com/${ig}`} target="_blank" rel="noopener noreferrer" className="inline-flex min-h-11 items-center text-ig hover:underline md:min-h-0">
               Instagram
@@ -47,6 +49,25 @@ export function CreatorHeader({ client }: { client: Client }) {
         </LinkButton>
       </div>
     </div>
+  );
+}
+
+/**
+ * "Reels to post: N" → the schedule filtered to reels still owed (📸 not ticked). Fetches its own count
+ * (async server component) so the workspace page needs no extra wiring; renders nothing at 0.
+ */
+export async function ReelsToPostLink() {
+  let n = 0;
+  try {
+    n = await reelsToPostCount();
+  } catch {
+    return null; // never break the workspace over a count
+  }
+  if (!n) return null;
+  return (
+    <Link href="/calendar?show=reels" className="inline-flex min-h-11 items-center gap-1 font-medium text-warn hover:underline md:min-h-0">
+      <span aria-hidden>📸</span> Reels to post: {n}
+    </Link>
   );
 }
 

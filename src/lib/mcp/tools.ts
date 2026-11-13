@@ -4,6 +4,7 @@ import { and, asc, eq } from "drizzle-orm";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { getDb, schema } from "@/lib/db";
+import { redactSecrets } from "@/lib/credential-guard";
 import { getClientMonth } from "@/lib/reports";
 import { addMonths, currentMonth, isMonth } from "@/lib/dates";
 import {
@@ -228,8 +229,8 @@ export function registerTools(server: McpServer, ctx: Ctx) {
       tiktokHandle: c.tiktokHandle,
       website: c.website,
       googleConnected: !!c.googleLocation,
-      brandVoice: c.brandVoice,
-      notes: c.notes,
+      brandVoice: c.brandVoice ? redactSecrets(c.brandVoice) : c.brandVoice,
+      notes: c.notes ? redactSecrets(c.notes) : c.notes,
       outreachAreas: c.outreachAreas,
       archived: c.archived || undefined,
       monthlyPlan: dels.filter((d) => d.clientId === c.id).map((d) => ({ deliverableId: d.id, title: d.title, platform: d.platform, targetPerMonth: d.targetPerMonth })),
@@ -251,7 +252,7 @@ export function registerTools(server: McpServer, ctx: Ctx) {
     if (!cm) throw new ToolError(`No business with id "${client_id}". Call list_clients for valid ids.`);
     const names = await clientNames();
     return {
-      business: { id: cm.client.id, kind: cm.client.kind, name: businessName(cm.client), instagramHandle: cm.client.instagramHandle, tiktokHandle: cm.client.tiktokHandle, website: cm.client.website, googleConnected: !!cm.client.googleLocation, brandVoice: cm.client.brandVoice, notes: cm.client.notes, outreachAreas: cm.client.outreachAreas },
+      business: { id: cm.client.id, kind: cm.client.kind, name: businessName(cm.client), instagramHandle: cm.client.instagramHandle, tiktokHandle: cm.client.tiktokHandle, website: cm.client.website, googleConnected: !!cm.client.googleLocation, brandVoice: cm.client.brandVoice ? redactSecrets(cm.client.brandVoice) : cm.client.brandVoice, notes: cm.client.notes ? redactSecrets(cm.client.notes) : cm.client.notes, outreachAreas: cm.client.outreachAreas },
       month: cm.month,
       plan: cm.plan.map((p) => ({ deliverableId: p.deliverable.id, title: p.deliverable.title, platform: p.deliverable.platform, target: p.target || "as needed", done: p.done, tasksPlanned: p.planned })),
       monthTasks: cm.monthTasks.map((t) => shapeTask(t, names)),

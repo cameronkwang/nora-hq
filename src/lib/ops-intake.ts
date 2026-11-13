@@ -21,8 +21,9 @@ import {
  * Client onboarding form: a private link per client (/start/<token>) where a new restaurant owner tells us
  * about their business in English, 简体 or 繁體.
  *
- * - createIntakeLink (people only): new link for a client; any older link that hasn't been submitted is revoked,
- *   so only one link works at a time. Token = 32 random bytes (base64url); only its sha256 is used for lookup,
+ * - createIntakeLink (people, or Claude when a person asked): new link for a client; any older link that hasn't been
+ *   submitted is revoked, so only one link works at a time. Claude never replaces a link: if one still works it gets
+ *   that same link back (a person may already have texted it), and it can't start a new form once one was submitted. Token = 32 random bytes (base64url); only its sha256 is used for lookup,
  *   and an encrypted copy (lib/crypto) lets the team re-copy the link later.
  * - getIntakeLinkUrl (people only, via the app): decrypts the link for "Copy link".
  * - revokeIntake (people only).
@@ -64,13 +65,33 @@ export function intakeAccessEmail(): string | null {
   return v && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v) ? v : null;
 }
 
-export async function createIntakeLink(clientId: string, actor: string, opts: { origin?: string | null } = {}) {
-  if (!isPerson(actor)) throw new OpsError("Only Nora or Cameron can send an onboarding form.");
+export async function createIntakeLink(clientId: string, actor: string, opts: { origin?: string | null } = {}): Promise<{ id: string; url: string; reused?: boolean }> {
+  const byClaude = actor.toLowerCase() === "claude";
+  if (!isPerson(actor) && !byClaude) throw new OpsError("Only Nora or Cameron can send an onboarding form.");
   const db = await getDb();
   const [client] = await db.select({ id: schema.clients.id, name: schema.clients.name, kind: schema.clients.kind })
     .from(schema.clients).where(eq(schema.clients.id, clientId));
   if (!client) throw new OpsError(`No business with id "${clientId}"`);
   if (client.kind === "creator") throw new OpsError("The onboarding form is for businesses we manage.");
+
+  if (byClaude) {
+    // Claude never turns off a link a person may already have sent, and never reopens a submitted form.
+    const rows = await db.select().from(schema.clientIntakes).where(eq(schema.clientIntakes.clientId, clientId))
+      .orderBy(desc(schema.clientIntakes.createdAt)).limit(20);
+    if (rows.some((r) => r.status === "submitted")) {
+      throw new OpsError(`${client.name} already sent their onboarding form — read it with get_client_intake. Only Nora or Cameron can send a new one (from the business page).`);
+    }
+    const live = rows.find((r) => (r.status === "sent" || r.status === "opened") && (!r.expiresAt || r.expiresAt.getTime() > Date.now()));
+    if (live) {
+      try {
+        const { t } = decryptJson<{ t: string }>(live.tokenEnc);
+        return { id: live.id, url: linkFor(t, opts.origin), reused: true };
+      } catch (e) {
+        console.error("[intake] decrypt failed", e);
+        throw new OpsError("There's already a working link for this business, but it can't be re-copied here. Nora or Cameron can copy it from the business page.");
+      }
+    }
+  }
 
   const token = randomBytes(32).toString("base64url");
   let tokenEnc: string;

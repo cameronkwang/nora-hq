@@ -6,6 +6,8 @@ import { addMonths, currentMonth, today } from "@/lib/dates";
 import { monthBounds } from "@/lib/integrations/time"; // app-timezone month edges
 import { listAskMessagesFor } from "@/lib/ops";
 import { taskScopeWhere, type TaskScope } from "@/lib/ops-tasks";
+import { findCredentialNotes } from "@/lib/ops-business";
+import { reelsToPostCount } from "@/lib/ops-schedule";
 
 /**
  * Read-side queries for the Claude connector. Everything here returns plain, compact objects
@@ -314,6 +316,81 @@ export async function getBriefingData(ctx: Ctx) {
     followUpsDue: followUps,
     draftsAwaitingHumanReview: awaiting[0].n,
     businesses: businesses.filter((b) => b !== null),
+    ...(await reelsBrief()),
+    ...(await briefingHousekeeping(clients)),
+  };
+}
+
+/** Nora's owed reels (📸 on her schedule, not yet posted) — left out when zero; never a reason for Claude to act alone. */
+async function reelsBrief() {
+  const n = await reelsToPostCount().catch(() => 0);
+  return n ? { reelsToPostOnNorasSchedule: n } : {};
+}
+
+const NUDGE_AFTER_DAYS = 3;
+
+/**
+ * Briefing extras: businesses whose notes hold something that looks like a password (ids + names only — never the
+ * text), and onboarding forms that need a person (sent > 3 days ago and not back; back but not worked yet).
+ * Keys are left out when there's nothing to say.
+ */
+async function briefingHousekeeping(activeClients: schema.Client[]) {
+  const db = await getDb();
+  const names = new Map(activeClients.map((c) => [c.id, businessName(c)]));
+  const ids = activeClients.filter((c) => c.kind === "business").map((c) => c.id);
+  const [creds, intakes, intakeAsks] = await Promise.all([
+    findCredentialNotes(),
+    ids.length
+      ? db.select().from(schema.clientIntakes).where(inArray(schema.clientIntakes.clientId, ids)).orderBy(desc(schema.clientIntakes.createdAt))
+      : Promise.resolve([] as schema.ClientIntake[]),
+    ids.length
+      ? db.select({ id: schema.asks.id, clientId: schema.asks.clientId, status: schema.asks.status }).from(schema.asks)
+          .where(and(inArray(schema.asks.clientId, ids), eq(schema.asks.createdBy, "public"), ilike(schema.asks.body, "Onboarding form received for%")))
+      : Promise.resolve([] as { id: string; clientId: string | null; status: schema.AskStatus }[]),
+  ]);
+
+  const latest = new Map<string, schema.ClientIntake>();
+  for (const r of intakes) if (!latest.has(r.clientId)) latest.set(r.clientId, r);
+  const nudgeBefore = Date.now() - NUDGE_AFTER_DAYS * 86_400_000;
+  const day = (d: Date | null) => (d ? d.toISOString().slice(0, 10) : undefined);
+
+  const waiting = [...latest.values()]
+    .filter((r) => (r.status === "sent" || r.status === "opened") && r.createdAt.getTime() < nudgeBefore && (!r.expiresAt || r.expiresAt.getTime() > Date.now()))
+    .map((r) => ({ businessId: r.clientId, business: names.get(r.clientId) ?? r.clientId, status: r.status, sentOn: day(r.createdAt), openedOn: day(r.openedAt) }));
+  const openAsk = new Map(intakeAsks.filter((a) => a.status === "new" || a.status === "in_progress").map((a) => [a.clientId, a.id]));
+  const unprocessed = [...latest.values()]
+    .filter((r) => r.status === "submitted" && openAsk.has(r.clientId))
+    .map((r) => ({ businessId: r.clientId, business: names.get(r.clientId) ?? r.clientId, submittedOn: day(r.submittedAt), askId: openAsk.get(r.clientId) }));
+
+  return {
+    ...(creds.length
+      ? {
+          businessesWithPasswordsInNotes: {
+            instruction:
+              "These businesses' notes (or brand voice) look like they contain a password or login. Tell Nora/Cameron in your summary: " +
+              "remove it from the business's Settings page and keep it in a password manager. Never repeat, copy or use the password, and don't edit those notes yourself.",
+            businesses: creds.map((c) => ({ id: c.id, name: c.name, where: c.fields, ...(c.active ? {} : { inactive: true }) })),
+          },
+        }
+      : {}),
+    ...(waiting.length || unprocessed.length
+      ? {
+          onboarding: {
+            ...(waiting.length
+              ? {
+                  formsWaitingOnOwner: waiting,
+                  formsWaitingInstruction: `Sent more than ${NUDGE_AFTER_DAYS} days ago and not sent back. Suggest a friendly nudge: create a task for Nora (create_task, assignee nora) unless one is already open — never contact the owner yourself.`,
+                }
+              : {}),
+            ...(unprocessed.length
+              ? {
+                  formsToProcess: unprocessed,
+                  formsToProcessInstruction: "The owner sent the form back. Read it with get_client_intake and work its ask (brand voice draft, first-month plan, what's missing).",
+                }
+              : {}),
+          },
+        }
+      : {}),
   };
 }
 

@@ -9,6 +9,7 @@ type Opt = { id: string; label: string };
 export function CalendarFilters({ month, client, platform, clients }: { month: string; client: string; platform: string; clients: Opt[] }) {
   return (
     <form method="get" action="/calendar" className="flex flex-col gap-2 sm:flex-row sm:items-end">
+      <input type="hidden" name="tab" value="posts" />
       {month && <input type="hidden" name="month" value={month} />}
       <div className="sm:w-64">
         <label htmlFor="cf-client" className="label">Business</label>
@@ -31,7 +32,7 @@ export function CalendarFilters({ month, client, platform, clients }: { month: s
         <button type="submit" className={buttonClass("secondary")}>Filter</button>
       </noscript>
       {(client || platform) && (
-        <Link href={month ? `/calendar?month=${month}` : "/calendar"} className={buttonClass("ghost")}>
+        <Link href={month ? `/calendar?tab=posts&month=${month}` : "/calendar?tab=posts"} className={buttonClass("ghost")}>
           Clear
         </Link>
       )}

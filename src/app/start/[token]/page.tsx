@@ -3,7 +3,11 @@ import { cookies, headers } from "next/headers";
 import { IntakeForm } from "@/components/intake-form";
 import { IntakeLangSwitch } from "@/components/intake-lang";
 import { IntakeAlready, IntakeExpired } from "@/components/intake-screens";
-import { INTAKE_LANG_COOKIE, intakeCopy, isIntakeLang, langFromAcceptLanguage, parseIntakeLang, type IntakeLangCode } from "@/lib/intake-copy";
+import { and, eq } from "drizzle-orm";
+import { getDb, schema } from "@/lib/db";
+import {
+  INTAKE_LANG_COOKIE, intakeCopy, isIntakeLang, langFromAcceptLanguage, parseIntakeLang, welcomeIntro, welcomeServicesFromPlan, type IntakeLangCode,
+} from "@/lib/intake-copy";
 import { getIntakeByToken, intakeAccessEmail, markIntakeOpened } from "@/lib/ops-intake";
 import { blobEnabled } from "@/lib/uploads";
 
@@ -47,6 +51,19 @@ const NO_JS_CSS = `
 .intake-step + .intake-step { margin-top: 2.5rem; padding-top: 2rem; border-top: 1px solid var(--border); }
 `;
 
+/** "We'll take care of your Instagram and TikTok…" — from this business's active plan and creator search areas. */
+async function tailoredIntro(client: schema.Client, lang: IntakeLangCode): Promise<string> {
+  try {
+    const db = await getDb();
+    const plan = await db.select({ title: schema.deliverables.title, platform: schema.deliverables.platform, active: schema.deliverables.active })
+      .from(schema.deliverables).where(and(eq(schema.deliverables.clientId, client.id), eq(schema.deliverables.active, true)));
+    return welcomeIntro(lang, { services: welcomeServicesFromPlan(plan), areas: client.outreachAreas });
+  } catch (e) {
+    console.error("[intake] welcome intro failed", e);
+    return welcomeIntro(lang, { services: [] });
+  }
+}
+
 export default async function StartPage({ params, searchParams }: Props) {
   const [{ token }, sp] = await Promise.all([params, searchParams]);
   const { lang, explicit } = await pickLang(sp);
@@ -69,6 +86,8 @@ export default async function StartPage({ params, searchParams }: Props) {
       ...(c.website ? { website: c.website } : {}),
       ...(c.ownerEmail ? { contactEmail: c.ownerEmail } : {}),
     };
+    // Tailored welcome sentence built from the business's active plan + outreach areas.
+    const intro = await tailoredIntro(c, lang);
     body = (
       <IntakeForm
         token={token}
@@ -78,6 +97,7 @@ export default async function StartPage({ params, searchParams }: Props) {
         initial={initial}
         accessEmail={intakeAccessEmail()}
         uploadsEnabled={blobEnabled()}
+        intro={intro}
       />
     );
   } else if (link.state === "submitted") {

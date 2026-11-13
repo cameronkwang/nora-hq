@@ -21,8 +21,9 @@ import {
  * Adding a business we manage ("land a client → set up in seconds"): creates the client, sets a monthly plan that
  * matches the services we sell them (or copies another business's), drops a short "Getting started" checklist
  * (tasks tagged "onboarding") on its page, and hands the research to Claude as one routed ask.
- * Same conventions as lib/ops: zod-validated input, `actor` is a user email. People only — Claude never
- * decides who becomes a client.
+ * Same conventions as lib/ops: zod-validated input, `actor` is a user email or "claude".
+ * Claude may set a business up only when a person asked it to (create_business, via ops-business.createBusiness,
+ * which also refuses passwords and dedupes); it can't convert a lead (marking a lead Won is a person's call).
  */
 
 export const ONBOARDING_TAG = "onboarding";
@@ -137,11 +138,12 @@ export function onboardingSteps(services: readonly Service[]): Step[] {
 const blank = (s: string | null | undefined) => (s && s.trim() ? s.trim() : null);
 const isPerson = (actor: string) => {
   const a = actor.trim().toLowerCase();
-  return !!a && a !== "claude" && a !== "system";
+  return !!a && a !== "claude" && a !== "system" && a !== "public";
 };
+const isClaude = (actor: string) => actor.trim().toLowerCase() === "claude";
 
 /**
- * People only: add a business we now manage. In one call:
+ * People (or Claude, when a person asked it to): add a business we now manage. In one call:
  *  - creates it (createClient) with the monthly plan for `services` — or a copy of another business's plan (`copyPlanFrom`);
  *  - adds the short Getting started checklist;
  *  - hands research to Claude: one ask routed to Claude (brand voice, first-month plan, what we need from the owner);
@@ -166,8 +168,9 @@ export async function onboardClient(
   },
   actor: string,
 ): Promise<string> {
-  if (!isPerson(actor)) throw new OpsError("Only a person can add a business we manage");
+  if (!isPerson(actor) && !isClaude(actor)) throw new OpsError("Only Nora, Cameron or Claude (when asked) can add a business we manage");
   const v = OnboardInput.parse(input);
+  if (isClaude(actor) && v.leadId) throw new OpsError("Turning a lead into a client marks it Won — that's for Nora or Cameron. Create the business without lead_id, or ask them to use Convert on the lead.");
   const services = normalizeServices(v.services);
   if (services.length === 0) throw new OpsError("Pick at least one service.");
   const outreachAreas = joinOutreachAreas(v.outreachAreas);
