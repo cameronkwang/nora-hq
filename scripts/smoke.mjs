@@ -842,6 +842,10 @@ async function noraFlows(browser) {
     await page.waitForURL(/\/clients\/(?!new)[^/?]+\?welcome=1&lead=1/, { timeout: 60000 });
     const l = JSON.stringify(await tool("get_lead", { lead_id: lead.leadId }));
     if (!l.includes('"stage":"won"') || !l.includes("convertedClientId")) throw new Error(`lead not won: ${l.slice(0, 300)}`);
+    // Legacy "social" keeps the plan it always had, creator outreach included.
+    const newId = new URL(page.url()).pathname.split("/")[2];
+    const plan = JSON.stringify(await tool("get_client_month", { client_id: newId }));
+    if (!plan.includes("Local creator outreach")) throw new Error("legacy social lead lost the creator outreach plan item");
     // double submit is safe: revisiting redirects to the business
     await page.goto(`${BASE}/clients/new?lead=${lead.leadId}`, { waitUntil: "networkidle" });
     if (new URL(page.url()).pathname === "/clients/new") throw new Error("converted lead didn't redirect to its business");
@@ -1352,7 +1356,8 @@ async function v7Flows(browser) {
     await tick(p, "input[name='tone'][value='friendly']");
     await tick(p, "input[name='postLangs'][value='both']");
     await intakeNext(p);
-    await p.fill("#f-instagram", `@smoke_ig_${stamp}`);
+    // Scheme-less profile link, the way phones copy it: must save the handle, not "instagram.com".
+    await p.fill("#f-instagram", `www.instagram.com/smoke_ig_${stamp}/`);
     await tick(p, "input[name='accessMeta'][value='done']");
     await tick(p, "input[name='accessGoogle'][value='help']");
     await intakeNext(p);
@@ -1361,6 +1366,13 @@ async function v7Flows(browser) {
     await p.fill("#f-contactName", "王小明");
     await p.fill("#f-contactEmail", `owner-${stamp}@example.com`);
     await tick(p, "input[name='talkLang'][value='mandarin']");
+    // A hand-crafted upload (another store / another folder) must never reach the team page.
+    await p.evaluate(() => {
+      const h = document.querySelector("input[name='uploads']");
+      if (h) h.value = JSON.stringify([
+        { url: "https://attackerstore.public.blob.vercel-storage.com/intake/x/forged-upload.html", name: "forged-logo.png" },
+      ]);
+    });
     await p.locator("button[type='submit']:visible").click();
     const thanks = p.locator(`text=${INTAKE_LANGS["zh-Hant"].thanks.source}`).first();
     await thanks.waitFor({ timeout: 30000 });
@@ -1376,6 +1388,9 @@ async function v7Flows(browser) {
     const m = await tool("get_client_month", { client_id: id });
     if (m.business.website !== site) throw new Error(`website overwritten: ${m.business.website}`);
     if (m.business.instagramHandle !== `smoke_ig_${stamp}`) throw new Error(`instagram not filled: ${m.business.instagramHandle}`);
+    const notes = m.business.notes ?? "";
+    if (!notes.includes(`/clients/${id}/intake`)) throw new Error("notes have no pointer to the form");
+    for (const typed of ["王小明", "小籠包", "煙霧測試小館", `owner-${stamp}`]) if (notes.includes(typed)) throw new Error(`client-typed text copied into notes: ${typed}`);
     const c = await tool("list_clients", {});
     const row = (Array.isArray(c) ? c : c.clients ?? []).find((x) => x.id === id);
     if (row && row.location && row.location !== "Richmond") throw new Error(`location overwritten: ${row.location}`);
@@ -1384,6 +1399,7 @@ async function v7Flows(browser) {
     const it = JSON.stringify(await tool("get_client_intake", { client_id: id }));
     if (!it.includes("王小明") || !it.includes("untrusted")) throw new Error(`get_client_intake: ${it.slice(0, 300)}`);
     if (it.includes("ipHash") || it.includes("_meta")) throw new Error("get_client_intake leaks _meta");
+    if (/forged|attackerstore/.test(it)) throw new Error("forged upload URL kept");
   });
 
   await step("/clients/[id]/intake shows the answers (Answered in 繁體); card says Answers in", async () => {
@@ -1391,6 +1407,7 @@ async function v7Flows(browser) {
     const t = await page.locator("main").innerText();
     for (const s of ["王小明", "煙霧測試小館", "繁體", "100 Granby St"]) if (!t.includes(s)) throw new Error(`answers page missing ${s}`);
     if (/ipHash|_meta/.test(t)) throw new Error("answers page leaks _meta");
+    if (/forged/.test(t) || (await page.locator("a[href*='attackerstore']").count())) throw new Error("answers page shows a forged upload");
     if (SHOTS) await page.screenshot({ path: `${SHOTS}/intake-answers-1440.png`, fullPage: true });
     await page.goto(`${BASE}/clients/${id}`, { waitUntil: "networkidle" });
     if (!(await page.locator("text=View answers").count())) throw new Error("card has no View answers");

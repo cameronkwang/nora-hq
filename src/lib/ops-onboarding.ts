@@ -39,7 +39,7 @@ export const OnboardInput = z.object({
   instagramHandle: z.string().max(200).nullish(),
   tiktokHandle: z.string().max(200).nullish(),
   website: z.string().max(500).nullish(),
-  /** Current names (instagram, facebook, tiktok, google, creators, collab) or legacy "social" (→ Instagram + TikTok). */
+  /** Current names (instagram, facebook, tiktok, google, creators, collab) or legacy "social" (→ Instagram + TikTok + creator outreach). */
   services: z.array(z.enum(ACCEPTED_SERVICES)).min(1, "Pick at least one service."),
   notes: z.string().max(5000).nullish(),
   leadId: z.string().nullish(),
@@ -155,7 +155,7 @@ export async function onboardClient(
     instagramHandle?: string | null;
     tiktokHandle?: string | null;
     website?: string | null;
-    /** instagram | facebook | tiktok | google | creators | collab — or legacy "social" (= Instagram + TikTok). */
+    /** instagram | facebook | tiktok | google | creators | collab — or legacy "social" (= Instagram + TikTok + creator outreach). */
     services: AnyService[];
     notes?: string | null;
     leadId?: string | null;

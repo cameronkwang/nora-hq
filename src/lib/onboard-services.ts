@@ -3,14 +3,14 @@
  * ops-onboarding (server) and anything else that needs the service list — so it must stay free of
  * server-only imports.
  *
- * Older callers (leads, the original form) still send "social" — it means Instagram + TikTok.
+ * Older callers (leads, the original form) still send "social" — it means Instagram + TikTok + creator outreach (the plan "social" always had).
  */
 
 export const SERVICES = ["instagram", "facebook", "tiktok", "google", "creators", "collab"] as const;
 export type Service = (typeof SERVICES)[number];
 
 /** Old service names that are still accepted and mapped onto the new ones. */
-export const LEGACY_SERVICE_MAP = { social: ["instagram", "tiktok"] } as const satisfies Record<string, readonly Service[]>;
+export const LEGACY_SERVICE_MAP = { social: ["instagram", "tiktok", "creators"] } as const satisfies Record<string, readonly Service[]>;
 export type LegacyService = keyof typeof LEGACY_SERVICE_MAP;
 /** Anything onboardClient accepts: a current service or a legacy one. */
 export type AnyService = Service | LegacyService;

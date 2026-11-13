@@ -76,7 +76,7 @@ export function registerIntakeTools(server: McpServer) {
       untrustedSource: UNTRUSTED_SOURCE,
       access: intakeAccessChecklist(intake.answers).map((a) => ({ platform: a.platform, status: a.status })),
       untrusted_answers: Object.fromEntries(
-        intakeAnswerGroups(intake.answers).map((g) => [g.title, g.items.map((i) => ({ question: i.label, answer: i.value, ...(i.href ? { link: i.href } : {}) }))]),
+        intakeAnswerGroups(intake.answers, intake.id).map((g) => [g.title, g.items.map((i) => ({ question: i.label, answer: i.value, ...(i.href ? { link: i.href } : {}) }))]),
       ),
       teamView: `/clients/${client_id}/intake`,
     };

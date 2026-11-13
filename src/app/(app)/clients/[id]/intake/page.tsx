@@ -44,7 +44,7 @@ export default async function ClientIntakePage({ params }: { params: Promise<{ i
     );
   }
 
-  const groups = intakeAnswerGroups(intake.answers);
+  const groups = intakeAnswerGroups(intake.answers, intake.id);
   const access = intakeAccessChecklist(intake.answers);
   const all = intakeAnswersText(client.name, intake);
 
