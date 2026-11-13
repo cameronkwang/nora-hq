@@ -50,6 +50,13 @@
       "when": 1794453979968,
       "tag": "0006_deals_notify_replies_reports",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1794527312776,
+      "tag": "0007_login_attempts",
+      "breakpoints": true
     }
   ]
 }
