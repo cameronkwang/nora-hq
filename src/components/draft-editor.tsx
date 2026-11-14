@@ -309,7 +309,7 @@ export function DraftEditor({
               )}
               {links}
               <ActionButton action={markSentAction} pendingText="Saving…" variant={canSendReport ? "ghost" : "secondary"}>
-                {isReport ? (report?.audience === "internal" ? "Mark done" : "Mark sent (sent it myself)") : "Mark sent"}
+                {isReport ? (report?.audience === "internal" ? "Mark done" : "Mark sent (sent it myself)") : kind === "profile_copy" ? "Mark done (pasted it in)" : "Mark sent"}
               </ActionButton>
               {dirty && (
                 <ActionButton action={saveDraftAction} pendingText="Saving…" variant="ghost">

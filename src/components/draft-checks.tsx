@@ -3,6 +3,9 @@
  * No "use client" / no server-only imports, so both sides can call them.
  */
 
+import { readsAsNora } from "@/lib/outreach-profile";
+import { PROFILE_COPY_LABEL, checkProfileCopy, profileCopySurface } from "@/lib/profile-copy";
+
 export const KIND_LABELS: Record<string, string> = {
   instagram_post: "Instagram post",
   tiktok_post: "TikTok post",
@@ -17,8 +20,8 @@ export const KIND_LABELS: Record<string, string> = {
   other: "Other",
 };
 
-/** Kinds that end up "approved" and wait for a person to send them (by hand, or "Send to owner" for reports). */
-export const MANUAL_SEND_KINDS = ["review_reply", "outreach_email", "outreach_dm", "lead_email", "lead_dm", "comment_reply", "report"] as const;
+/** Kinds that end up "approved" and wait for a person to send them (by hand, or "Send to owner" for reports; profile text is pasted into the profile). */
+export const MANUAL_SEND_KINDS = ["review_reply", "outreach_email", "outreach_dm", "lead_email", "lead_dm", "comment_reply", "report", "profile_copy"] as const;
 
 /** The only kind that may be approved in bulk. Outreach, pitches, posts and reports always get one-by-one review. */
 export const BULK_APPROVE_KINDS = ["review_reply"] as const;
@@ -29,6 +32,10 @@ export function kindLabel(kind: string, meta?: Record<string, unknown>) {
     const ch = meta?.channel;
     if (ch === "instagram_dm") return `${base} (Instagram)`;
     if (ch === "tiktok_dm") return `${base} (TikTok)`;
+  }
+  if (kind === "profile_copy") {
+    const surface = profileCopySurface(meta);
+    if (surface) return PROFILE_COPY_LABEL[surface];
   }
   return KIND_LABELS[kind] ?? kind.replace(/_/g, " ");
 }
@@ -47,6 +54,13 @@ export function textLimit(kind: string, meta?: Record<string, unknown>): { max: 
     case "outreach_dm":
     case "lead_dm":
       return meta?.channel === "instagram_dm" ? { max: 1000, label: "Instagram DM", hard: false } : null;
+    case "profile_copy": {
+      // A bio / Google description over the platform's limit can't be pasted in.
+      const surface = profileCopySurface(meta);
+      if (!surface) return null;
+      const c = checkProfileCopy(surface, "");
+      return { max: c.max, label: c.label, hard: true };
+    }
     default:
       return null;
   }
@@ -84,6 +98,13 @@ export function draftWarnings(kind: string, body: string, meta?: Record<string, 
       out.push({ tone: "danger", text: "This asks for a Google or Yelp review in exchange for a visit. That's an illegal incentivized review — remove it before sending." });
     if (!hasDisclosureLanguage(body))
       out.push({ tone: "warn", text: "No disclosure language. Mention it's gifted/a partnership and that posts need #ad or a paid-partnership label." });
+    if (readsAsNora(body))
+      out.push({ tone: "warn", text: "This reads as if Nora is writing. Outreach goes out as the business, from the business's own account: reword it as “we”." });
+  }
+  if (kind === "profile_copy") {
+    const surface = profileCopySurface(meta);
+    if (!surface) out.push({ tone: "warn", text: "This profile text doesn't say where it goes (Instagram bio, TikTok bio or Google description), so its length can't be checked." });
+    else for (const text of checkProfileCopy(surface, body).warnings) out.push({ tone: "warn", text });
   }
   if ((kind === "lead_email" || kind === "lead_dm") && /\b(buy|purchase|paid|fake)\b[^.!?\n]*\breviews?\b/i.test(body))
     out.push({ tone: "danger", text: "This mentions buying or faking reviews. Remove it before sending." });

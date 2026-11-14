@@ -132,6 +132,8 @@ export function registerBusinessTools(server: McpServer, ctx: Ctx) {
       "Changes only the fields you pass; an empty string clears a field (not name). notes are ADDED as a new dated paragraph — you can't replace or delete notes. " +
       "brand_voice replaces the whole brand voice: read the current one first (list_clients) and send the full new text. " +
       "You can't change the Google location or the owner email that receives reports (a person sets those in Settings). Returns each change as before → after. " +
+      "Outreach profile (send_from, send_from_kind, creator_offer): the account creator outreach is sent from — the business's own, never Nora's — and the standing offer for creators. " +
+      "Save these only with the exact account and offer Nora or Cameron gave you; never guess a sender or make up an offer. " +
       NO_PASSWORDS,
     inputSchema: {
       client_id: clientId,
@@ -144,6 +146,9 @@ export function registerBusinessTools(server: McpServer, ctx: Ctx) {
       outreach_areas: areas.optional(),
       brand_voice: z.string().max(8000).optional(),
       add_note: z.string().max(5000).optional().describe("Appended to the business notes."),
+      send_from: z.string().max(200).optional().describe("Outreach profile: the business's own account that creator outreach goes out from, e.g. \"@craboclockfredericksburg\" or an email address. Not a password or login."),
+      send_from_kind: z.enum(schema.SEND_FROM_KINDS).optional().describe("What send_from is: instagram, tiktok, email or other. Left out, it's worked out from the value."),
+      creator_offer: z.string().max(300).optional().describe("Outreach profile: the standing offer for creators, exactly as the owner agreed it, e.g. \"Free all-you-can-eat seafood boil for 2\"."),
     },
     annotations: WRITE,
   }, async (a) => run(async () => {
@@ -151,6 +156,7 @@ export function registerBusinessTools(server: McpServer, ctx: Ctx) {
     const r = await updateBusinessDetails(a.client_id, {
       name: a.name, location: a.location, brand: a.brand, instagramHandle: a.instagram, tiktokHandle: a.tiktok, website: a.website,
       outreachAreas: a.outreach_areas, brandVoice: a.brand_voice,
+      sendFrom: a.send_from, sendFromKind: a.send_from_kind, creatorOffer: a.creator_offer,
       ...(a.add_note !== undefined ? { notes: a.add_note, notesMode: "append" as const } : {}),
     }, ACTOR);
     return { business: c.name, client_id: c.id, changed: r.changed.length ? r.changed : undefined, note: r.changed.length ? undefined : "Nothing changed — the values were already the same." };

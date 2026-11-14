@@ -20,6 +20,30 @@ export function blobEnabled(): boolean {
   return !!process.env.BLOB_READ_WRITE_TOKEN;
 }
 
+/** This app's own Blob store host, from BLOB_READ_WRITE_TOKEN (vercel_blob_rw_<storeId>_<secret>). Null when uploads are off. */
+export function ownBlobHost(): string | null {
+  const storeId = (process.env.BLOB_READ_WRITE_TOKEN ?? "").split("_")[3] ?? "";
+  return /^[a-z0-9]+$/i.test(storeId) ? `${storeId.toLowerCase()}.public.blob.vercel-storage.com` : null;
+}
+
+/**
+ * True only for a file in OUR Blob store under `folder` ("drop/<link id>/"). Public pages post the URLs of files the
+ * browser uploaded, so they're never trusted otherwise (same check as the onboarding form's isIntakeUploadUrl).
+ */
+export function isOwnBlobUrl(url: unknown, folder: string): url is string {
+  if (typeof url !== "string" || url.length > 1000 || !folder || !/^[A-Za-z0-9_-]+(\/[A-Za-z0-9_-]+)*\/$/.test(folder)) return false;
+  const host = ownBlobHost();
+  if (!host) return false;
+  let u: URL;
+  try {
+    u = new URL(url);
+  } catch {
+    return false;
+  }
+  return u.protocol === "https:" && u.host.toLowerCase() === host && !u.username && !u.password && !u.port
+    && u.pathname.startsWith(`/${folder}`) && !/(^|\/)\.\.?(\/|$)|%2e%2e|%2f|%5c/i.test(u.pathname);
+}
+
 export function isAllowedType(contentType: string | null | undefined): boolean {
   return !!contentType && (contentType.startsWith("image/") || contentType.startsWith("video/"));
 }

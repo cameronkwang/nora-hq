@@ -124,6 +124,8 @@ export async function markSentAction(formData: FormData) {
         ? "Marked sent. The review now shows as replied."
         : kind === "report"
         ? "Marked sent. The report is filed as sent."
+        : kind === "profile_copy"
+        ? "Marked done. The profile text is filed as pasted in."
         : "Marked sent.";
   redirect(withFlash(back, msg, "ok"));
 }
@@ -213,4 +215,27 @@ export async function sendReportAction(formData: FormData) {
   }
   refresh();
   redirect(withFlash(back, out.message, out.status === "sent" ? "ok" : out.status === "failed" ? "danger" : "warn"));
+}
+
+/* ───────────── Send mode ("Ready to send") ───────────── */
+
+/**
+ * Marks one approved creator-outreach message as sent from the send mode, without leaving the page.
+ * Same path as the “Mark sent” button (markDraftSent): the outreach moves to contacted and a follow-up is set.
+ * Only outreach DMs and emails; a person taps it after sending the message from the business's own account.
+ */
+export async function markOutreachSentQuickAction(input: { id: string }): Promise<QuickOutcome> {
+  const user = await requireUser();
+  const id = clean(input?.id);
+  const draft = id ? await getDraft(id) : null;
+  if (!draft) return { ok: false, message: "That message doesn't exist anymore." };
+  if (draft.kind !== "outreach_email" && draft.kind !== "outreach_dm") return { ok: false, message: "Send mode is only for creator outreach." };
+  if (draft.status === "sent") return { ok: true, status: "sent", message: "Already marked sent." };
+  if (draft.status !== "approved") return { ok: false, message: "This one isn't approved anymore. Reload the page." };
+  try {
+    await markDraftSent(id, user.email);
+    return { ok: true, status: "sent", message: "Marked sent. A follow-up is due in 5 days." };
+  } catch (e) {
+    return { ok: false, message: errorMessage(e) };
+  }
 }

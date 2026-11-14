@@ -829,6 +829,14 @@ export const dropLinks = pgTable(
     lang: text("lang").$type<IntakeLang>(),
     useCount: integer("use_count").notNull().default(0), // drops received through this link
     lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
+    // Rate limits (lib/ops-drop): each counter is claimed with one conditional UPDATE, so a burst of parallel
+    // requests can't get past it. Drops in the current hour / day window, and upload tokens handed out today (UTC).
+    hourStart: timestamp("hour_start", { withTimezone: true }),
+    hourCount: integer("hour_count").notNull().default(0),
+    dayStart: timestamp("day_start", { withTimezone: true }),
+    dayCount: integer("day_count").notNull().default(0),
+    uploadDay: text("upload_day"), // "YYYY-MM-DD" (UTC) the upload count is for
+    uploadCount: integer("upload_count").notNull().default(0),
     revokedAt: timestamp("revoked_at", { withTimezone: true }),
     createdBy: text("created_by").notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),

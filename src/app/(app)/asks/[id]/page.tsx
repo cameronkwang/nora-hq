@@ -63,7 +63,8 @@ export default async function AskPage({ params }: { params: Promise<{ id: string
           <span className="flex flex-wrap items-center gap-2">
             <StatusBadge status={ask.status} />
             <span>
-              From {actorName(ask.createdBy)} · {formatDate(ask.createdAt, true)} ({relativeTime(ask.createdAt)})
+              {/* Sent through a business's owner drop link (/drop/<token>): the note and files are the owner's. */}
+              From {ask.dropLinkId ? "the owner (drop link)" : actorName(ask.createdBy)} · {formatDate(ask.createdAt, true)} ({relativeTime(ask.createdAt)})
             </span>
           </span>
         }

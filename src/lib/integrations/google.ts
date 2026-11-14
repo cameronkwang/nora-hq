@@ -1,6 +1,7 @@
 import "server-only";
-import { and, eq, isNotNull } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { getDb, schema } from "../db";
+import { recordGoogleSync, type GoogleSyncOutcome } from "../ops-google";
 import type { Connection, Review } from "../schema";
 import { notConfigured, type IntegrationResult } from "./types";
 import { fetchJson } from "./http";
@@ -127,34 +128,57 @@ const str = (v: unknown): string | null => {
   }
 };
 
-export type ReviewSyncResult = { ok: boolean; synced: number; locations: number; errors: string[]; notConfigured?: boolean };
+/**
+ * `empty` = businesses whose linked listing answered with 0 reviews (worth checking it's the right listing);
+ * `unlinked` = active businesses with no listing picked, which the sync can't reach at all. Both are labels for people.
+ */
+export type ReviewSyncResult = { ok: boolean; synced: number; locations: number; errors: string[]; notConfigured?: boolean; empty?: string[]; unlinked?: string[] };
+
+/** Per-business result (clients.googleSync*), so each business shows its own status instead of one global badge. Never throws. */
+async function noteSync(clientId: string, outcome: GoogleSyncOutcome) {
+  try {
+    await recordGoogleSync(clientId, outcome);
+  } catch {
+    /* bookkeeping only */
+  }
+}
 
 /** Pulls reviews for every business with a mapped location (up to 500 newest per location) into the reviews table. */
 export async function syncGoogleReviews(): Promise<ReviewSyncResult> {
   const a = await auth();
-  if (!isAuth(a)) return { ok: false, synced: 0, locations: 0, errors: [a.error], notConfigured: a.notConfigured };
   const db = await getDb();
-  const clients = await db.select({ id: schema.clients.id, name: schema.clients.name, location: schema.clients.location, googleLocation: schema.clients.googleLocation })
-    .from(schema.clients).where(and(isNotNull(schema.clients.googleLocation), eq(schema.clients.archived, false)));
-  const out: ReviewSyncResult = { ok: true, synced: 0, locations: 0, errors: [] };
+  const businesses = await db.select({ id: schema.clients.id, name: schema.clients.name, location: schema.clients.location, googleLocation: schema.clients.googleLocation, prelaunch: schema.clients.prelaunch })
+    .from(schema.clients).where(and(eq(schema.clients.archived, false), eq(schema.clients.kind, "business")));
+  const labelOf = (c: { name: string; location: string | null }) => (c.location ? `${c.name} (${c.location})` : c.name);
+  const clients = businesses.filter((c) => !!c.googleLocation?.trim());
+  if (!isAuth(a)) {
+    // Connected but the saved access no longer works: every linked business is failing, so say so on each of them.
+    if (!a.notConfigured) for (const c of clients) await noteSync(c.id, { status: "error", error: a.error });
+    return { ok: false, synced: 0, locations: 0, errors: [a.error], notConfigured: a.notConfigured };
+  }
+  // A business that isn't open yet has no listing to link; the others are silently skipped by the sync, so name them.
+  const unlinked = businesses.filter((c) => !c.googleLocation?.trim() && !c.prelaunch).map(labelOf);
+  const out: ReviewSyncResult = { ok: true, synced: 0, locations: 0, errors: [], empty: [], unlinked };
   if (clients.length === 0) {
     out.errors.push("No business is mapped to a Google location yet — pick one for each business in Settings.");
     return out;
   }
   const { upsertReviews } = await ops();
   let quotaHit = false;
-  for (const c of clients) {
+  for (const [i, c] of clients.entries()) {
     const loc = c.googleLocation!.replace(/^\/+|\/+$/g, "");
     const byId = new Map<string, ApiReview>();
     try {
       let pageToken: string | undefined;
       let pages = 0;
+      let total: number | null = null;
       do {
         const u = new URL(`https://mybusiness.googleapis.com/v4/${loc}/reviews`);
         u.searchParams.set("pageSize", "50");
         if (pageToken) u.searchParams.set("pageToken", pageToken);
-        const r = await fetchJson<{ reviews?: ApiReview[]; nextPageToken?: string }>(u.toString(), { headers: { Authorization: `Bearer ${a.token}` } });
+        const r = await fetchJson<{ reviews?: ApiReview[]; totalReviewCount?: number; nextPageToken?: string }>(u.toString(), { headers: { Authorization: `Bearer ${a.token}` } });
         for (const rv of r.reviews ?? []) if (rv.reviewId && !byId.has(rv.reviewId)) byId.set(rv.reviewId, rv);
+        if (typeof r.totalReviewCount === "number") total = r.totalReviewCount;
         pageToken = r.nextPageToken;
       } while (pageToken && ++pages < 10);
       await upsertReviews([...byId.values()].map((rv) => ({
@@ -171,16 +195,23 @@ export async function syncGoogleReviews(): Promise<ReviewSyncResult> {
       })));
       out.synced += byId.size;
       out.locations++;
+      // Google's own total when it gives one (we only keep the newest 500), else what came back.
+      const count = Math.max(byId.size, total ?? 0);
+      if (count === 0) out.empty!.push(labelOf(c));
+      await noteSync(c.id, { status: count > 0 ? "ok" : "empty", count });
     } catch (e) {
       const msg = friendlyGoogleError(e, "Business Profile");
       out.ok = false;
-      const label = c.location ? `${c.name} (${c.location})` : c.name;
+      const label = labelOf(c);
       if (msg.startsWith("Google hasn't approved")) {
         if (!quotaHit) out.errors.push(msg);
         quotaHit = true;
-        break; // every call will fail the same way
+        // Every call will fail the same way: mark this business and the ones not tried yet.
+        for (const rest of clients.slice(i)) await noteSync(rest.id, { status: "error", error: msg });
+        break;
       }
       out.errors.push(`${label}: ${msg}`);
+      await noteSync(c.id, { status: "error", error: msg });
     }
   }
   if (out.ok) await markOk(a.conn);
