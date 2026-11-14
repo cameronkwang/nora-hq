@@ -406,14 +406,17 @@ export function IntakeForm({
         )}
 
         <div className="sticky-actions mt-8">
-          <div className="flex items-center gap-2 rounded-2xl border border-border bg-surface/95 p-2 shadow-sm backdrop-blur supports-[backdrop-filter]:bg-surface/80">
+          {/* Page 2 shows three buttons. Below 420px Back is the arrow alone and the paddings tighten (again below
+              360px), so they fit a 320px phone on one line in all three languages. On anything narrower Send now /
+              Next shrink and wrap instead of poking out of the bar. */}
+          <div className="flex items-center gap-2 rounded-2xl border border-border bg-surface/95 p-2 shadow-sm backdrop-blur supports-[backdrop-filter]:bg-surface/80 max-[420px]:gap-1.5">
             <button
               type="button"
               onClick={() => go(step - 1)}
               data-off={step === 0}
-              className={cx(buttonClass("ghost"), "intake-js min-h-12 shrink-0 whitespace-nowrap px-3 text-[16px] data-[off=true]:hidden")}
+              className={cx(buttonClass("ghost"), "intake-js min-h-12 shrink-0 whitespace-nowrap px-3 text-[16px] data-[off=true]:hidden max-[360px]:px-2.5")}
             >
-              <span aria-hidden>←</span> <span className="max-[379px]:sr-only">{C.common.back}</span>
+              <span aria-hidden>←</span> <span className="max-[420px]:sr-only">{C.common.back}</span>
             </button>
             {/* Sends what's there: only page 1 has required answers. */}
             <button
@@ -422,7 +425,7 @@ export function IntakeForm({
               data-off={step === LAST}
               data-send-now=""
               onClick={sendNow}
-              className={cx(buttonClass("secondary"), "intake-js ml-auto min-h-12 shrink-0 whitespace-nowrap px-4 text-[16px] data-[off=true]:hidden")}
+              className={cx(buttonClass("secondary"), "intake-js ml-auto min-h-12 min-w-0 px-4 text-[16px] leading-tight data-[off=true]:hidden max-[420px]:px-3 max-[360px]:px-2.5")}
             >
               {pending ? C.common.sending : C.common.sendNow}
             </button>
@@ -430,7 +433,7 @@ export function IntakeForm({
               type="button"
               data-off={step === LAST}
               onClick={() => checkStep(step) && go(step + 1)}
-              className={cx(buttonClass("primary"), "intake-js min-h-12 shrink-0 whitespace-nowrap px-5 text-[16px] data-[off=true]:hidden")}
+              className={cx(buttonClass("primary"), "intake-js min-h-12 min-w-0 px-5 text-[16px] leading-tight data-[off=true]:hidden max-[420px]:px-3.5 max-[360px]:px-2.5")}
             >
               {C.common.next} →
             </button>

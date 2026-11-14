@@ -157,12 +157,36 @@ const handle = (h: string | null | undefined) => {
   return v ? `@${v}` : null;
 };
 
+// Before public_info existed, the Add-business form kept the Page in the notes as "Facebook Page: <link>".
+const FB_NOTE_LINE = /^Facebook Page:[ \t]*(\S+)[ \t]*$/gim;
+const isFbNoteLink = (link: string) => link.length <= FACT_MAX.facebook && FB_LINK.test(link);
+
+/** The Facebook Page read from that notes line (only used while public_info has none). */
+function facebookFromNotes(notes: string | null | undefined): string | null {
+  for (const m of (notes ?? "").matchAll(FB_NOTE_LINE)) if (isFbNoteLink(m[1])) return m[1];
+  return null;
+}
+
+/**
+ * Notes without their "Facebook Page: <link>" line(s). Used when the Facebook fact is cleared or changed, so the
+ * old link can't come back through the notes. Returns the notes unchanged when there is no such line.
+ */
+export function dropFacebookNote(notes: string | null | undefined): string | null {
+  if (!notes) return notes ?? null;
+  let dropped = false;
+  const out = notes.replace(FB_NOTE_LINE, (line, link: string) => {
+    if (!isFbNoteLink(link)) return line;
+    dropped = true;
+    return "";
+  });
+  if (!dropped) return notes;
+  return out.replace(/\n{3,}/g, "\n\n").trim() || null;
+}
+
 /** Every fact we hold for a business (null = we don't have it). Handles come back as "@handle". */
 export function businessFacts(c: FactsRow): Record<FactKey, string | null> {
   const info = readPublicInfo(c.publicInfo);
-  // Before public_info existed, the Add-business form kept the Page in the notes as "Facebook Page: <link>".
-  const fromNotes = c.notes?.match(/^Facebook Page:[ \t]*(\S+)[ \t]*$/im)?.[1] ?? "";
-  const facebook = info.facebook ?? (fromNotes && fromNotes.length <= FACT_MAX.facebook && FB_LINK.test(fromNotes) ? fromNotes : null);
+  const facebook = info.facebook ?? facebookFromNotes(c.notes);
   return {
     address: info.address ?? null,
     phone: info.phone ?? null,

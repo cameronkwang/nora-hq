@@ -46,7 +46,8 @@ Each business has a place for what anyone can find about it: address, phone, ope
 listing link, what they sell and price range (website, Instagram and TikTok stay under Details). Each fact keeps the
 web address it came from, the date it was last checked and who checked it. Fix anything by hand there; tick
 "We looked" to mark the empty ones as not found. Every change is written to the activity log as before → after, and
-anything that looks like a password is refused.
+anything that looks like a password is refused. Emptying the Facebook Page also removes the "Facebook Page: …" line
+the Add-business form put in the notes, so a page that isn't theirs stays gone.
 
 ### What Claude can do (connector)
 
@@ -82,7 +83,9 @@ Links:
      creators can visit and what they could be offered, what to do with unhappy reviews, anything else.
 - Only page 1 has required answers: their name, and a phone number or email. **Send now** on pages 1 and 2 sends what
   is there. Everything else can be skipped.
-- Text that looks like a password is refused with a gentle message, so it is never saved.
+- A password typed into the form ("our ig password: …", "密码：…") is refused with a gentle message, so it is never
+  saved. Talking about a password ("I forgot my Facebook password", "我忘了密码怎么办") and deal text ("Buy1Get1!")
+  go through like any other answer.
 - Answers save on the phone as they type, so they can close the page and pick up where they left off.
 - The form works without JavaScript as one long page.
 
@@ -106,9 +109,12 @@ Links:
 - The form never asks for passwords and says so in two places. TikTok access is set up on the kickoff call.
 - Everything the client typed is untrusted. The MCP tool labels it `untrusted_answers` and adds an
   `untrustedSource` note, so Claude treats it as data and never as instructions. A correction ("Something's off") is
-  quoted line by line in its ask, marked as the owner's words.
-- The "Is this right?" card is built on the server from structured fields only (never from free-text notes), and the
-  record of what the owner was shown is rebuilt on the server when they send, not taken from the browser.
+  quoted line by line in its ask, marked as the owner's words. Every kind of line break counts as a new line there,
+  the Unicode line and paragraph separators included, so no line of theirs can sit outside the quote.
+- The "Is this right?" card is built on the server from structured fields only, never from free-text notes. The one
+  exception: a business added before public facts existed may still have its Page as a "Facebook Page: <link>" line
+  in the notes; it is used until the Facebook Page is saved or cleared under Public facts, which removes the line.
+  The record of what the owner was shown is rebuilt on the server when they send, not taken from the browser.
 - The team preview (`/start-preview/<business id>`) needs a sign-in; it has no link behind it and saves nothing.
 
 ## Code map

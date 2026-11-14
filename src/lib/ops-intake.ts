@@ -12,7 +12,7 @@ import { cleanBlock, cleanLine } from "./ops-collab";
 import { personEmail, sendToUser } from "./notify";
 import { decryptJson, encryptJson } from "./crypto";
 import { formatDate } from "./dates";
-import { hasSecret } from "./credential-guard";
+import { looksLikeTypedSecret } from "./credential-guard";
 import {
   CHOICE_FIELDS, INTAKE_COPY, INTAKE_LANG_TAG, INTAKE_STEP_FIELDS, INTAKE_TEAM_SECTIONS, LEGACY_FIELDS, LEGACY_GROUPS, TALK_LANG_DEFAULT, TEXT_FIELDS,
   intakeOptionLabel, intakeTeamLabel, isIntakeLang,
@@ -304,9 +304,14 @@ export type IntakeAnswers = { [K in TextField]: string } & { [K in ChoiceField]:
 /** What the owner was shown on the "Is this right?" card when they answered it (our own data, saved with their answer). */
 export type FactsShown = { name: string } & Partial<Record<OwnerCardFact, string>>;
 
+/** Boxes where we ask for deals and anything else on their mind: a bare word like "Buy1Get1!" is no reason to refuse. */
+const PROSE_BOXES = new Set<TextField>(["promote", "anythingElse"]);
+
 /**
  * The current 3-page form. Unknown keys (e.g. an old browser tab posting the earlier form's fields) are stripped.
- * Free text that looks like a password is refused with a gentle message, so a credential never reaches the database.
+ * A password the owner typed ("our ig password: …", "密码：…") is refused with a gentle message, so a credential
+ * never reaches the database. The check is the calm one (looksLikeTypedSecret): talking about a password
+ * ("我忘了Facebook的密码怎么办", "I forgot my password: can you help") never stops a busy owner from sending.
  */
 export const IntakeInput = z.object(shape).superRefine((v, ctx) => {
   const phone = typeof v.contactPhone === "string" ? v.contactPhone : "";
@@ -314,7 +319,8 @@ export const IntakeInput = z.object(shape).superRefine((v, ctx) => {
   if (!phone && !email) ctx.addIssue({ code: "custom", path: ["contactPhone"], message: "contactMethod" satisfies IntakeErrorKey });
   for (const f of Object.keys(TEXT_FIELDS) as TextField[]) {
     const val = v[f];
-    if (f !== "contactEmail" && typeof val === "string" && val && hasSecret(val)) ctx.addIssue({ code: "custom", path: [f], message: "secret" satisfies IntakeErrorKey });
+    if (f === "contactEmail" || typeof val !== "string" || !val) continue;
+    if (looksLikeTypedSecret(val, { tokens: !PROSE_BOXES.has(f) }).length) ctx.addIssue({ code: "custom", path: [f], message: "secret" satisfies IntakeErrorKey });
   }
 }).transform((v) => {
   const a = v as unknown as IntakeAnswers;
@@ -516,12 +522,16 @@ const FACT_NAME = INTAKE_COPY.en.facts.labels;
 const shownLines = (shown: FactsShown) =>
   (Object.keys(FACT_NAME) as Array<keyof typeof FACT_NAME>).filter((k) => shown[k]).map((k) => `- ${FACT_NAME[k]}: ${String(shown[k]).replace(/\s*\n\s*/g, " / ")}`);
 
+/** Anything that reads as a new line: \n, \r, vertical tab, form feed, NEL and the Unicode line / paragraph separators. */
+const LINE_BREAK = /\r\n|[\n\r\v\f\u0085\u2028\u2029]/;
+
 /**
  * The ask Claude gets when the owner taps "Something's off". Their words are quoted line by line as data: they say
  * what's wrong with the facts above and are never instructions.
  */
 function factsFixAskBody(client: Pick<schema.Client, "id" | "name">, shown: FactsShown, words: string, language: IntakeLangCode, factsChanged: boolean): string {
-  const quoted = words ? words.split("\n").map((l) => `> ${l}`) : [];
+  // Every visual line gets the quote mark, whatever kind of line break the owner's text carries.
+  const quoted = words ? words.split(LINE_BREAK).map((l) => (l.trim() ? `> ${l}` : ">")) : [];
   return [
     `${FIX_ASK_PREFIX} ${client.name} — on their onboarding form the owner said something we showed them is off (client_id: ${client.id}).`,
     "",

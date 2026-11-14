@@ -10,7 +10,7 @@ import { joinOutreachAreas, normalizeServices, ACCEPTED_SERVICES, SERVICE_LABELS
 import { looksLikeSecret, secretRefusal } from "./credential-guard";
 import { cleanBlock, cleanLine } from "./ops-collab";
 import {
-  FACT_KEYS, FACT_LABEL, FACT_MAX, FB_LINK, INFO_FACT_KEYS, OWNER_SOURCE, PRICE_RANGES, SOURCE_MAX, businessFacts, forgetFactProvenance, sourceLabel, factsChecklist, isGoogleListingUrl, readPublicInfo,
+  FACT_KEYS, FACT_LABEL, FACT_MAX, FB_LINK, INFO_FACT_KEYS, OWNER_SOURCE, PRICE_RANGES, SOURCE_MAX, businessFacts, dropFacebookNote, forgetFactProvenance, sourceLabel, factsChecklist, isGoogleListingUrl, readPublicInfo,
   type FactKey, type FactsChecklist, type InfoFactKey, type PublicInfo,
 } from "./business-facts";
 
@@ -266,7 +266,8 @@ const isInfoFact = (k: FactKey): k is InfoFactKey => (INFO_FACT_KEYS as readonly
  * Save public facts about a business (what anyone can find on Google Maps, its website or its social profiles).
  * - Claude: every value needs the public URL it came from; a fact it looked for and couldn't find is marked
  *   notFound instead (which never removes a value that's already saved). Claude can't clear a fact.
- * - People (Settings): no source needed; an empty value clears the fact.
+ * - People (Settings): no source needed; an empty value clears the fact (for the Facebook Page, also its old
+ *   "Facebook Page: <link>" line in the notes, so it stays cleared).
  * Likely passwords are refused. Every change is logged before → after. Each call stamps "checked now, by <actor>".
  */
 export async function setBusinessFacts(
@@ -299,6 +300,12 @@ export async function setBusinessFacts(
     else if (isInfoFact(key)) {
       if (value) info[key] = value;
       else delete info[key];
+    }
+    // The Page used to be kept as a "Facebook Page: <link>" line in the notes, and the facts still fall back to it.
+    // Once the fact is cleared or changed here, that line goes too, or the old link would come straight back.
+    if (key === "facebook") {
+      const notes = dropFacebookNote(cur.notes);
+      if (notes !== cur.notes) set.notes = notes;
     }
   };
 
@@ -352,6 +359,7 @@ export async function setBusinessFacts(
   if (notFound.size) next.notFound = [...notFound];
   else delete next.notFound;
   set.publicInfo = next;
+  if ("notes" in set) changed.push("notes: removed the old “Facebook Page: …” line");
 
   const db = await getDb();
   await db.update(schema.clients).set(set).where(eq(schema.clients.id, clientId));
