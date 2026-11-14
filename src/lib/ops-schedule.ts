@@ -6,7 +6,7 @@ import { newId } from "./ids";
 import { logActivity } from "./activity";
 import { OpsError } from "./ops";
 import { isMonth, today as todayYmd } from "./dates";
-import { matchBusiness, parseSchedule, scheduleNameKey, scrubMoney, type ParsedSchedule } from "./schedule-parse";
+import { looksLikeMoney, matchBusiness, parseSchedule, scheduleNameKey, scrubMoney, type ParsedSchedule, type ParsedScheduleItem } from "./schedule-parse";
 import type { IcalEvent } from "./ical";
 
 /**
@@ -24,9 +24,8 @@ const isClaude = (actor: string) => actor.toLowerCase() === "claude";
 const sourceFor = (actor: string, fallback: Source): Source => (isClaude(actor) ? "claude" : fallback);
 const short = (ymd: string | null) => (ymd ? `${ymd.slice(5, 7)}/${ymd.slice(8, 10)}` : `no set day`);
 
-const MONEY = /\$\s*\d|\b\d+\.\d{2}\b|\u{1F6A9}/u;
 const refineNoMoney = (what: string) => (v: string | null | undefined, ctx: z.RefinementCtx) => {
-  if (v && MONEY.test(v)) ctx.addIssue({ code: "custom", message: `Leave money out of the ${what} — the schedule doesn't track payments.` });
+  if (looksLikeMoney(v)) ctx.addIssue({ code: "custom", message: `Leave money out of the ${what} — the schedule doesn't track payments.` });
 };
 
 const ymd = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Date should look like 2026-11-04.").refine((s) => !Number.isNaN(Date.parse(`${s}T12:00:00Z`)) && new Date(`${s}T12:00:00Z`).toISOString().slice(0, 10) === s, "That date doesn't exist.");
@@ -113,8 +112,12 @@ export const ScheduleItemInput = z.object({
 });
 export type ScheduleItemInput = z.input<typeof ScheduleItemInput>;
 
-function fromStructured(items: ScheduleItemInput[]): ParsedSchedule {
-  const byMonth = new Map<string, ParsedSchedule["months"][number]["items"]>();
+/** Like a parsed paste, but Free is undefined when Claude left it out (then the item's Free stays as it is). */
+type StructuredItem = Omit<ParsedScheduleItem, "isFree"> & { isFree?: boolean };
+type StructuredSchedule = { months: Array<{ month: string; items: StructuredItem[] }>; skipped: ParsedSchedule["skipped"] };
+
+function fromStructured(items: ScheduleItemInput[]): StructuredSchedule {
+  const byMonth = new Map<string, StructuredItem[]>();
   const skipped: ParsedSchedule["skipped"] = [];
   for (const raw of items) {
     const p = ScheduleItemInput.safeParse(raw);
@@ -143,7 +146,7 @@ function fromStructured(items: ScheduleItemInput[]): ParsedSchedule {
       skipped.push({ line: label, reason: `Listed twice in ${month}.` });
       continue;
     }
-    list.push({ date: v.date ?? null, businessName: v.businessName, nameKey, isFree: !!v.isFree, needsReel: !!v.needsReel, line: label });
+    list.push({ date: v.date ?? null, businessName: v.businessName, nameKey, isFree: v.isFree, needsReel: !!v.needsReel, line: label });
     byMonth.set(month, list);
   }
   return { months: [...byMonth.entries()].map(([month, items]) => ({ month, items })), skipped };
@@ -154,14 +157,14 @@ function fromStructured(items: ScheduleItemInput[]): ParsedSchedule {
  * (unless dryRun) apply it. Re-importing is safe: items are matched by month + normalized name.
  *  - a date that's now known replaces "no set day" (or an older date); a missing date never clears one
  *  - 📸 is only ever added: a pending reel stays flagged even if a later paste drops the emoji
- *  - Free follows the latest paste
+ *  - Free follows the latest paste; structured items without `isFree` leave Free as it is
  *  - new or unlinked items are linked to an active business when the name matches one
  */
 export async function importSchedule(input: string | ScheduleItemInput[], actor: string, opts: { dryRun?: boolean; today?: string } = {}): Promise<ImportResult> {
   const dryRun = !!opts.dryRun;
   if (typeof input === "string" && input.length > 50_000) throw new OpsError("That's too much text — paste one or two months at a time.");
   if (Array.isArray(input) && input.length > 300) throw new OpsError("Up to 300 items at a time.");
-  const parsed = typeof input === "string" ? parseSchedule(input, { today: opts.today ?? todayYmd() }) : fromStructured(input);
+  const parsed: StructuredSchedule = typeof input === "string" ? parseSchedule(input, { today: opts.today ?? todayYmd() }) : fromStructured(input);
   const months = parsed.months.map((m) => m.month);
 
   const db = await getDb();
@@ -175,10 +178,15 @@ export async function importSchedule(input: string | ScheduleItemInput[], actor:
   const rows: ImportRow[] = [];
   for (const { month, items } of parsed.months) {
     for (const it of items) {
+      if (looksLikeMoney(it.businessName)) {
+        // Last guard: the schedule never stores money, even if the parser missed some.
+        parsed.skipped.push({ line: scrubMoney(it.line), reason: "The business name looks like it has an amount in it — leave money out." });
+        continue;
+      }
       const cur = byKey.get(`${month}|${it.nameKey}`);
       const match = matchBusiness(it.businessName, businesses);
       if (!cur) {
-        rows.push({ action: "add", month, date: it.date, businessName: it.businessName, isFree: it.isFree, needsReel: it.needsReel, clientId: match?.id ?? null, clientName: match?.name ?? null, changes: [] });
+        rows.push({ action: "add", month, date: it.date, businessName: it.businessName, isFree: it.isFree ?? false, needsReel: it.needsReel, clientId: match?.id ?? null, clientName: match?.name ?? null, changes: [] });
         continue;
       }
       const changes: string[] = [];
@@ -186,12 +194,13 @@ export async function importSchedule(input: string | ScheduleItemInput[], actor:
       if (date !== cur.date) changes.push(`date: ${short(cur.date)} → ${short(date)}`);
       const needsReel = cur.needsReel || it.needsReel;
       if (needsReel !== cur.needsReel) changes.push("reel to post: added");
-      if (it.isFree !== cur.isFree) changes.push(it.isFree ? "now free" : "no longer free");
+      const isFree = it.isFree ?? cur.isFree;
+      if (isFree !== cur.isFree) changes.push(isFree ? "now free" : "no longer free");
       const clientId = cur.clientId ?? match?.id ?? null;
       if (clientId !== cur.clientId) changes.push(`linked to ${match?.name ?? "a business"}`);
       rows.push({
         action: changes.length ? "update" : "unchanged",
-        id: cur.id, month, date, businessName: cur.businessName, isFree: it.isFree, needsReel, clientId,
+        id: cur.id, month, date, businessName: cur.businessName, isFree, needsReel, clientId,
         clientName: clientId ? (nameOf.get(clientId) ?? null) : null, changes,
       });
     }

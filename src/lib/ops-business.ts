@@ -2,7 +2,7 @@ import "server-only";
 import { and, asc, eq, sql } from "drizzle-orm";
 import { z } from "zod";
 import { getDb, schema } from "./db";
-import { newId, slugify } from "./ids";
+import { newId } from "./ids";
 import { logActivity } from "./activity";
 import { OpsError } from "./ops";
 import { getOnboardingTasks, onboardClient } from "./ops-onboarding";
@@ -105,7 +105,7 @@ export type BusinessDetailsPatch = z.input<typeof BusinessDetailsPatch>;
 
 /**
  * Edit a business's details. Only the fields given change; null/"" clears (except name).
- * Refuses: any value that looks like a password; Claude touching googleLocation or replacing notes.
+ * Refuses: any value that looks like a password; Claude touching googleLocation or ownerEmail (who receives reports), or replacing notes.
  * Returns the list of changes (before → after), also written to the activity log.
  */
 export async function updateBusinessDetails(clientId: string, patch: BusinessDetailsPatch, actor: string): Promise<{ changed: string[] }> {
@@ -113,6 +113,7 @@ export async function updateBusinessDetails(clientId: string, patch: BusinessDet
   const v = BusinessDetailsPatch.parse(patch);
   const claude = isClaude(actor);
   if (claude && v.googleLocation !== undefined) throw new OpsError("Only Nora or Cameron can link the Google location (Settings & plan → Google location).");
+  if (claude && v.ownerEmail !== undefined) throw new OpsError("Only Nora or Cameron can change who receives reports.");
   const mode = v.notesMode ?? "append";
   if (claude && v.notes !== undefined && mode === "replace") throw new OpsError("Claude can only add to a business's notes (notesMode \"append\"), not replace them.");
 
@@ -284,27 +285,50 @@ export async function findCredentialNotes(): Promise<CredentialNote[]> {
 const NAME_NOISE = /\b(the|restaurant|restaurants|cafe|café|kitchen|bar|grill|llc|inc|co|company|and)\b/g;
 /** "The Golden Wok Restaurant, LLC" → "golden wok". */
 export function nameKey(name: string): string {
+  return fullNameKey(name).replace(NAME_NOISE, " ").replace(/\s+/g, " ").trim();
+}
+/** Lowercase words only, noise words kept: "Pike Kitchen" → "pike kitchen". */
+function fullNameKey(name: string): string {
   return name.toLowerCase().replace(/&/g, " and ").normalize("NFKD").replace(/[̀-ͯ]/g, "")
-    .replace(/[^\p{L}\p{N}\s]/gu, " ").replace(NAME_NOISE, " ").replace(/\s+/g, " ").trim();
+    .replace(/[^\p{L}\p{N}\s]/gu, " ").replace(/\s+/g, " ").trim();
 }
 
-/** An existing business with (nearly) the same name — and, when both have one, the same location. */
-export async function findSimilarBusiness(name: string, location?: string | null): Promise<schema.Client | null> {
-  const key = nameKey(name);
-  if (!key) return null;
+/**
+ * Same business name? Exact (noise words kept), or the same name once "Kitchen"/"Grill"/"The"… are dropped
+ * when that's still distinctive ("Pike Kitchen" ≠ "Pike Grill"), or every whole word of one is in the other
+ * ("Golden Wok" ~ "Golden Wok Chinese"; "Bloom" ≁ "Bloomfield Diner").
+ */
+function sameName(a: string, b: string): boolean {
+  const fa = fullNameKey(a), fb = fullNameKey(b);
+  if (!fa || !fb) return false;
+  if (fa === fb || fa.replace(/\s+/g, "") === fb.replace(/\s+/g, "")) return true;
+  const ka = nameKey(a), kb = nameKey(b);
+  if (!ka || !kb) return false;
+  if (ka === kb) return ka.replace(/\s+/g, "").length >= 5;
+  const ta = ka.split(" "), tb = kb.split(" ");
+  const [small, big] = ta.length <= tb.length ? [ta, tb] : [tb, ta];
+  return small.join("").length >= 5 && small.every((t) => big.includes(t));
+}
+
+/**
+ * An existing business with (nearly) the same name. Two locations of one brand are two businesses, so when both
+ * have a location they must match. `sure` is false when only one side has a location — maybe a second location,
+ * maybe the same place: the caller may confirm it's different.
+ */
+export async function findSimilarBusiness(name: string, location?: string | null): Promise<{ client: schema.Client; sure: boolean } | null> {
+  if (!fullNameKey(name)) return null;
   const loc = blank(location)?.toLowerCase() ?? null;
   const db = await getDb();
   const rows = await db.select().from(schema.clients).where(eq(schema.clients.kind, "business"));
-  const same = rows.filter((c) => {
-    const k = nameKey(c.name);
-    if (!k) return false;
-    const close = k === key || (Math.min(k.length, key.length) >= 5 && (k.includes(key) || key.includes(k))) || slugify(k) === slugify(key);
-    if (!close) return false;
-    // Two locations of one brand are two businesses.
-    const cl = blank(c.location)?.toLowerCase() ?? null;
-    return !(loc && cl && !cl.includes(loc) && !loc.includes(cl));
-  });
-  return same.sort((a, b) => Number(a.archived) - Number(b.archived))[0] ?? null;
+  const hits = rows
+    .filter((c) => sameName(name, c.name))
+    .map((c) => {
+      const cl = blank(c.location)?.toLowerCase() ?? null;
+      if (loc && cl) return cl.includes(loc) || loc.includes(cl) ? { client: c, sure: true } : null;
+      return { client: c, sure: !loc && !cl };
+    })
+    .filter((x): x is { client: schema.Client; sure: boolean } => !!x);
+  return hits.sort((a, b) => Number(b.sure) - Number(a.sure) || Number(a.client.archived) - Number(b.client.archived))[0] ?? null;
 }
 
 export const CreateBusinessInput = z.object({
@@ -317,6 +341,8 @@ export const CreateBusinessInput = z.object({
   ownerEmail: z.union([z.literal(""), z.email("Owner email doesn't look like an email address.")]).nullish(),
   outreachAreas: z.union([z.string().max(1000), z.array(z.string().max(200)).max(20)]).nullish(),
   notes: z.string().max(5000).nullish(),
+  /** The caller checked: a similar name without a matching location really is a different business. */
+  confirmDifferent: z.boolean().optional(),
 });
 
 export type CreateBusinessResult =
@@ -329,15 +355,20 @@ export type CreateBusinessResult =
  */
 export async function createBusiness(input: z.input<typeof CreateBusinessInput>, actor: string): Promise<CreateBusinessResult> {
   const v = CreateBusinessInput.parse(input);
+  if (isClaude(actor) && blank(v.ownerEmail)) throw new OpsError("Only Nora or Cameron can change who receives reports. Set the business up without it and mention the email in the ask thread.");
   assertNoSecrets({
     name: v.name, location: v.location, instagramHandle: v.instagramHandle, tiktokHandle: v.tiktokHandle, website: v.website,
     ownerEmail: v.ownerEmail, outreachAreas: v.outreachAreas as string | string[] | null | undefined, notes: v.notes,
   });
-  const dupe = await findSimilarBusiness(v.name, v.location);
-  if (dupe) {
+  const similar = await findSimilarBusiness(v.name, v.location);
+  if (similar && (similar.sure || !v.confirmDifferent)) {
+    const dupe = similar.client;
+    const where = dupe.location ? ` (${dupe.location})` : "";
     return {
       created: false, id: dupe.id, name: dupe.name, active: !dupe.archived,
-      message: `${dupe.name}${dupe.location ? ` (${dupe.location})` : ""} is already in Nora HQ (id ${dupe.id}${dupe.archived ? ", currently Inactive" : ""}) — nothing new was created. Update it with update_business${dupe.archived ? " or set_business_status" : ""}. If it really is a different business, include its location.`,
+      message: similar.sure
+        ? `${dupe.name}${where} is already in Nora HQ (id ${dupe.id}${dupe.archived ? ", currently Inactive" : ""}) — nothing new was created. Update it with update_business${dupe.archived ? " or set_business_status" : ""}. If it really is a different business, include its location.`
+        : `${dupe.name}${where || " (no location saved)"} may be the same business (id ${dupe.id}${dupe.archived ? ", currently Inactive" : ""}) — nothing new was created. If it's the same, update it with update_business; if the person confirmed it's a different business (e.g. another location), call create_business again with confirm_different: true.`,
     };
   }
   const ig = normalizeHandle(v.instagramHandle, "instagram");

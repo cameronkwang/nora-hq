@@ -1630,6 +1630,19 @@ async function v8Flows(browser) {
     const again = await tool("list_schedule", { month });
     if (JSON.stringify(again).includes(`Smoke Cafe ${stamp}`)) throw new Error("dry run wrote an item");
   });
+  await step("MCP add_to_schedule: bare amounts never reach a name; leaving free out keeps Free", async () => {
+    const mm = month.slice(5);
+    const dry = await tool("add_to_schedule", { raw_text: `${mm}/02 | Smoke Bloom ${stamp} 600.00 (Zelle)\n${mm}/03 | Smoke Anto ${stamp} - 450 (Check)\n${mm}/04 | Smoke Poke ${stamp} - paid $500`, dry_run: true });
+    const js = JSON.stringify(dry);
+    if (/600|450|500|Zelle|Check|paid/i.test(js.replace(stamp, ""))) throw new Error(`money in names: ${js.slice(0, 400)}`);
+    if (dry.added !== 3) throw new Error(`expected 3 adds: ${js.slice(0, 300)}`);
+    const nm = `Smoke Free ${stamp}`;
+    await tool("add_to_schedule", { items: [{ business: nm, month, free: true }] });
+    const re = await tool("add_to_schedule", { items: [{ business: nm, date: `${month}-05` }] });
+    if (JSON.stringify(re).includes("no longer free")) throw new Error(`free was cleared: ${JSON.stringify(re).slice(0, 300)}`);
+    const item = (await tool("list_schedule", { month })).items.find((i) => i.business === nm || i.businessName === nm || JSON.stringify(i).includes(nm));
+    if (!item || !JSON.stringify(item).includes('"free":true')) throw new Error(`item lost Free: ${JSON.stringify(item)}`);
+  });
   await step("iCal feed carries dated schedule items as all-day events", async () => {
     await page.goto(`${BASE}/settings/notifications`, { waitUntil: "networkidle" });
     await page.locator("button", { hasText: /Make my calendar link|Make a new link/ }).click();
@@ -1649,6 +1662,18 @@ async function v8Flows(browser) {
     if (!bistroId) throw new Error(`no id: ${JSON.stringify(r).slice(0, 200)}`);
     const again = await tool("create_business", { name: bistro, location: "Richmond", services: ["instagram"] });
     if (again.id !== bistroId || again.created !== false) throw new Error(`dedupe failed: ${JSON.stringify(again).slice(0, 200)}`);
+  });
+  await step("MCP create_business: same name without a location → 'may be the same', nothing created", async () => {
+    const r = await tool("create_business", { name: bistro, services: ["instagram"] });
+    if (r.created !== false || r.id !== bistroId || !/may be the same/.test(r.message)) throw new Error(`soft dupe: ${JSON.stringify(r).slice(0, 300)}`);
+  });
+  await step("MCP update_business can't change who receives reports", async () => {
+    const r = await toolRaw("update_business", { client_id: bistroId, owner_email: "reports@attacker.example" });
+    if (/attacker/.test(r.text) && !r.isError) throw new Error(`owner email changed: ${r.text.slice(0, 300)}`);
+    const tl = await mcp("tools/list", {});
+    const ub = tl.body?.result?.tools?.find((t) => t.name === "update_business");
+    const cb = tl.body?.result?.tools?.find((t) => t.name === "create_business");
+    if (!ub || "owner_email" in (ub.inputSchema?.properties ?? {}) || "owner_email" in (cb?.inputSchema?.properties ?? {})) throw new Error("owner_email is still a tool field");
   });
   await step("MCP update_business: note with a password is refused; a normal note is appended", async () => {
     const bad = await toolRaw("update_business", { client_id: bistroId, add_note: `Owner login — pw: ${SECRET}` });

@@ -39,6 +39,20 @@ export function scheduleNameKey(name: string): string {
     .replace(/\s+/g, " ");
 }
 
+const PAY = "(?:check|zelle|cash\\s?app|cash|venmo|paypal|paid|unpaid)";
+
+/**
+ * True when text still carries money: "$5", "600.00", 🚩, an amount next to a payment word ("450 (Check)",
+ * "paid 500"), or a payment word in brackets. Used as the last guard on business names and notes.
+ */
+export function looksLikeMoney(text: string | null | undefined): boolean {
+  if (!text) return false;
+  return (
+    /\$\s*\d|\b\d[\d,]*\.\d{2}\b|\u{1F6A9}/u.test(text) ||
+    new RegExp(`\\b\\d[\\d,]*\\s*\\(?\\s*${PAY}\\b|\\b${PAY}\\s*[:\\-–—]?\\s*\\$?\\d|\\(\\s*${PAY}\\s*\\)`, "i").test(text)
+  );
+}
+
 /** Removes every money-ish bit from a line so it can be shown back safely. */
 export function scrubMoney(line: string): string {
   let s = line;
@@ -46,6 +60,9 @@ export function scrubMoney(line: string): string {
   if (flag >= 0) s = s.slice(0, flag);
   return s
     .replace(/[-–—]?\s*\$\s*[\d,]+(?:\.\d+)?\s*[kK]?/g, "")
+    .replace(/[-–—]?\s*\b\d[\d,]*\.\d{2}\b/g, "")
+    .replace(new RegExp(`[-–—]?\\s*\\b\\d[\\d,]*(?=\\s*\\(?\\s*${PAY}\\b)`, "gi"), "")
+    .replace(new RegExp(`[-–—]?\\s*\\(?\\s*\\b(?:paid|unpaid)\\b\\s*\\)?`, "gi"), "")
     .replace(/\(\s*(check|zelle|cash|venmo|paypal|cashapp|cash app|paid|unpaid)?\s*\)/gi, "")
     .replace(/\s{2,}/g, " ")
     .trim();
@@ -76,10 +93,26 @@ function splitBusiness(rest: string): { name: string; isFree: boolean } {
   if (flag >= 0) s = s.slice(0, flag);
   s = s.replace(new RegExp(REEL.source, "gu"), " ").replace(/️/g, "");
   let tail = "";
-  const cut = s.match(/\s[-–—]\s*(?=\$|free\b)/i) ?? s.match(/\s(?=\$\s*\d)/);
-  if (cut && cut.index !== undefined) {
-    tail = s.slice(cut.index);
-    s = s.slice(0, cut.index);
+  // Where the money / payment part starts: " - $600", " $600", " - FREE", " 600.00", " - 450", "450 (Check)",
+  // " (Zelle)", " - paid", " paid $500" — the earliest of these wins.
+  const cuts = [
+    /\s[-–—]\s*(?=\$|free\b)/i,
+    /\s(?=\$\s*\d)/,
+    /\s[-–—]?\s*(?=\d[\d,]*\.\d{2}\b)/,
+    /\s[-–—]\s*(?=\d[\d,]*\s*(?:$|\(|[-–—]))/,
+    new RegExp(`\\s[-–—]?\\s*(?=\\d[\\d,]*\\s*\\(?\\s*${PAY}\\b)`, "i"),
+    new RegExp(`\\s[-–—]?\\s*(?=\\(\\s*${PAY}?\\s*\\))`, "i"),
+    new RegExp(`\\s[-–—]\\s*(?=${PAY}\\b)`, "i"),
+    new RegExp(`\\s(?=${PAY}\\s*[-–—:]?\\s*\\$?\\d)`, "i"),
+    /\s(?=(?:zelle|venmo|paypal|cash\s?app|paid|unpaid)\s*$)/i, // "Check"/"Cash" alone can be part of a name
+
+  ]
+    .map((re) => s.match(re)?.index)
+    .filter((i): i is number => i !== undefined);
+  if (cuts.length) {
+    const at = Math.min(...cuts);
+    tail = s.slice(at);
+    s = s.slice(0, at);
   }
   const isFree = /\bfree\b/i.test(tail) || /\s[-–—]\s*free\s*$/i.test(s);
   const name = s
@@ -94,8 +127,21 @@ function splitBusiness(rest: string): { name: string; isFree: boolean } {
 const ITEM = /^(?:\d+\s*[.)]\s*)?(\d{1,2})\s*\/\s*(\d{1,2}|x{1,2}|\?{1,2})(?:\s*\/\s*(\d{2}|\d{4}))?\s*(?:\||[-–—:]|\s)\s*(.*)$/i;
 
 /**
- * `today` is "YYYY-MM-DD" in the app timezone. A month without a year is this year (or `year`), unless it's
- * more than 2 months after today's month — then it's last year (a December list read in February).
+ * Year for a month typed without one. Up to 3 months ahead counts as upcoming (January read in November →
+ * next year); anything else is now or the past (December read in February → last year; April read in
+ * November → this April).
+ */
+export function inferYear(mm: number, opts: { today: string; year?: number }): number {
+  const thisYear = opts.year ?? Number(opts.today.slice(0, 4));
+  const todayMonth = Number(opts.today.slice(5, 7));
+  const ahead = (mm - todayMonth + 12) % 12;
+  if (ahead >= 1 && ahead <= 3) return mm < todayMonth ? thisYear + 1 : thisYear;
+  return mm > todayMonth ? thisYear - 1 : thisYear;
+}
+
+/**
+ * `today` is "YYYY-MM-DD" in the app timezone. A month without a year is placed by inferYear (or `year`).
+ * A business name that still looks like money after cutting is skipped, never stored.
  */
 export function parseSchedule(text: string, opts: { today: string; year?: number }): ParsedSchedule {
   const byMonth = new Map<string, ParsedScheduleItem[]>();
@@ -125,7 +171,7 @@ export function parseSchedule(text: string, opts: { today: string; year?: number
     let year: number;
     if (m[3]) year = m[3].length === 2 ? 2000 + Number(m[3]) : Number(m[3]);
     else if (header?.year && header.month === mm) year = header.year;
-    else year = (opts.year ?? Number(opts.today.slice(0, 4))) - (mm > Number(opts.today.slice(5, 7)) + 2 ? 1 : 0);
+    else year = inferYear(mm, opts);
 
     let date: string | null = null;
     if (/^\d+$/.test(m[2])) {
@@ -141,6 +187,10 @@ export function parseSchedule(text: string, opts: { today: string; year?: number
     const nameKey = scheduleNameKey(name);
     if (!nameKey) {
       skipped.push({ line: scrubMoney(line), reason: "No business name after the date." });
+      continue;
+    }
+    if (looksLikeMoney(name)) {
+      skipped.push({ line: scrubMoney(line), reason: "Couldn't separate the business name from the amount — add it on its own line as \"MM/DD | Business\"." });
       continue;
     }
     if (name.length > 200) {

@@ -67,7 +67,7 @@ export function registerScheduleTools(server: McpServer) {
     description:
       "Add or update jobs on Nora's schedule. Pass either raw_text (her list as she writes it, e.g. \"11/04 | Antonelli’s - FREE 📸\", " +
       "\"11/XX | Bloom\" for no set day; amounts and 🚩 are ignored) or items[]. Re-adding is safe: items match by month + business name, " +
-      "a newly known date fills in \"no set day\", 📸 is only ever added, Free follows the latest. Set dry_run to preview first. " +
+      "a newly known date fills in \"no set day\", 📸 is only ever added, Free follows the latest paste (in items[], leaving free out keeps it as it is). Set dry_run to preview first. " +
       "You can't remove items or mark reels posted — Nora or Cameron do that in the app. Never include money.",
     inputSchema: {
       raw_text: z.string().max(50_000).optional().describe("Nora's list pasted as-is. One job per line: MM/DD | Business [- FREE] [📸]."),
@@ -77,7 +77,7 @@ export function registerScheduleTools(server: McpServer) {
             business: z.string().min(1).max(200),
             date: z.string().optional().describe("YYYY-MM-DD. Leave out when there's no set day (then give month)."),
             month: z.string().optional().describe("YYYY-MM — needed only without a date."),
-            free: z.boolean().optional(),
+            free: z.boolean().optional().describe("Leave out to keep an existing item's Free as it is (new items: not free)."),
             reel: z.boolean().optional().describe("true = Nora owes a reel (📸)."),
           }),
         )

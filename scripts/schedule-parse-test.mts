@@ -2,7 +2,7 @@
  * Checks the schedule paste parser against Nora's real list. Run: npx tsx scripts/schedule-parse-test.mts
  */
 import assert from "node:assert/strict";
-import { matchBusiness, parseSchedule, scheduleNameKey } from "../src/lib/schedule-parse.ts";
+import { inferYear, looksLikeMoney, matchBusiness, parseSchedule, scheduleNameKey } from "../src/lib/schedule-parse.ts";
 
 const SAMPLE = `December
 1. 12/01 | Yummy Red Bowl - $1000.00 ()
@@ -123,6 +123,33 @@ const dup = parseSchedule("11/XX | Bloom - FREE\n11/05 | Bloom 📸", { today: "
 assert.equal(dup.months[0].items.length, 1);
 assert.equal(dup.months[0].items[0].date, "2026-11-05");
 assert.equal(dup.months[0].items[0].needsReel, true);
+
+// Amounts without "$" and payment words never end up in a business name.
+const bare = parseSchedule(
+  "11/04 | Bloom 600.00 (Zelle)\n11/05 | Antonelli’s - 450 (Check)\n11/07 | Doi Moi – 350.00 Zelle 📸\n11/06 | Poke Bros - paid $500\n" +
+    "11/08 | Route 66\n11/09 | Johnny Cash\n11/10 | Sushi 500 zelle\n11/11 | Taco Bar paid",
+  { today: "2026-11-13" },
+);
+assert.deepEqual(bare.skipped, []);
+assert.deepEqual(
+  bare.months[0].items.map((i) => i.businessName),
+  ["Bloom", "Antonelli’s", "Doi Moi", "Poke Bros", "Route 66", "Johnny Cash", "Sushi", "Taco Bar"],
+);
+assert.equal(bare.months[0].items[2].needsReel, true);
+assert.ok(!/\d+\.\d\d|450|500|\$/.test(JSON.stringify(bare)), `no amounts: ${JSON.stringify(bare)}`);
+assert.ok(looksLikeMoney("Bloom 600.00") && looksLikeMoney("Antonelli’s - 450 (Check)") && looksLikeMoney("paid $500") && looksLikeMoney("Sushi 500 zelle"));
+assert.ok(!looksLikeMoney("Route 66") && !looksLikeMoney("Johnny Cash") && !looksLikeMoney("Yummy Red Bowl (Midlo)"));
+
+// Year inference: up to 3 months ahead is upcoming (rolls into next year), otherwise now or past.
+const decJan = parseSchedule("January\n1. 01/05 | Bloom - FREE\n2. 01/XX | Ayat", { today: "2026-12-15" });
+assert.equal(decJan.months[0].month, "2027-01", "January pasted in December is next year");
+assert.equal(decJan.months[0].items[0].date, "2027-01-05");
+assert.equal(parseSchedule("02/03 | Bloom", { today: "2026-11-13" }).months[0].items[0].date, "2027-02-03", "February pasted in November is next year");
+assert.equal(inferYear(4, { today: "2026-11-13" }), 2026, "April read in November is this April");
+assert.equal(inferYear(3, { today: "2026-11-13" }), 2026);
+assert.equal(inferYear(12, { today: "2027-02-10" }), 2026, "December read in February is last year");
+assert.equal(inferYear(5, { today: "2027-02-10" }), 2027, "May read in February is upcoming");
+assert.equal(inferYear(11, { today: "2026-11-13" }), 2026);
 
 // Business matching.
 const clients = [

@@ -79,6 +79,7 @@ export function registerBusinessTools(server: McpServer, ctx: Ctx) {
       "Adds a business we now manage: a starting monthly plan for the services, a Getting started checklist for Nora/Cameron, and a research ask for you. " +
       "If a business with a similar name (same location) already exists, nothing is created and you get its id back — then use update_business. " +
       "Two locations of one brand are two businesses: include location. Handles can be @handles or profile links. " +
+      "The owner email for reports is set by Nora or Cameron in Settings — if you were given one, mention it in the ask thread. " +
       "After it's created, offer to get the onboarding form link with send_onboarding_form. " +
       NO_PASSWORDS,
     inputSchema: {
@@ -88,15 +89,15 @@ export function registerBusinessTools(server: McpServer, ctx: Ctx) {
       instagram: z.string().max(300).optional(),
       tiktok: z.string().max(300).optional(),
       website: z.string().max(500).optional(),
-      owner_email: z.string().max(200).optional().describe("Where approved monthly reports go. Only a publicly listed or person-given email."),
       outreach_areas: areas.optional(),
       notes: z.string().max(5000).optional().describe("What the person told you about them (contacts, preferences). No passwords."),
+      confirm_different: z.boolean().optional().describe("Only after create_business said a business \"may be the same\" and a person confirmed it's a different one (e.g. another location)."),
     },
     annotations: WRITE,
   }, async (a) => run(async () => {
     const r = await createBusiness({
       name: a.name, location: a.location, services: a.services, instagramHandle: a.instagram, tiktokHandle: a.tiktok,
-      website: a.website, ownerEmail: a.owner_email, outreachAreas: a.outreach_areas, notes: a.notes,
+      website: a.website, outreachAreas: a.outreach_areas, notes: a.notes, confirmDifferent: a.confirm_different,
     }, ACTOR);
     return { ...r, page: absUrl(ctx, `/clients/${r.id}`) };
   }));
@@ -107,7 +108,7 @@ export function registerBusinessTools(server: McpServer, ctx: Ctx) {
       ONLY_WHEN_ASKED +
       "Changes only the fields you pass; an empty string clears a field (not name). notes are ADDED as a new dated paragraph — you can't replace or delete notes. " +
       "brand_voice replaces the whole brand voice: read the current one first (list_clients) and send the full new text. " +
-      "You can't change the Google location (a person links it in Settings). Returns each change as before → after. " +
+      "You can't change the Google location or the owner email that receives reports (a person sets those in Settings). Returns each change as before → after. " +
       NO_PASSWORDS,
     inputSchema: {
       client_id: clientId,
@@ -117,7 +118,6 @@ export function registerBusinessTools(server: McpServer, ctx: Ctx) {
       instagram: z.string().max(300).optional(),
       tiktok: z.string().max(300).optional(),
       website: z.string().max(500).optional(),
-      owner_email: z.string().max(200).optional(),
       outreach_areas: areas.optional(),
       brand_voice: z.string().max(8000).optional(),
       add_note: z.string().max(5000).optional().describe("Appended to the business notes."),
@@ -127,7 +127,7 @@ export function registerBusinessTools(server: McpServer, ctx: Ctx) {
     const c = await businessLabel(a.client_id);
     const r = await updateBusinessDetails(a.client_id, {
       name: a.name, location: a.location, brand: a.brand, instagramHandle: a.instagram, tiktokHandle: a.tiktok, website: a.website,
-      ownerEmail: a.owner_email, outreachAreas: a.outreach_areas, brandVoice: a.brand_voice,
+      outreachAreas: a.outreach_areas, brandVoice: a.brand_voice,
       ...(a.add_note !== undefined ? { notes: a.add_note, notesMode: "append" as const } : {}),
     }, ACTOR);
     return { business: c.name, client_id: c.id, changed: r.changed.length ? r.changed : undefined, note: r.changed.length ? undefined : "Nothing changed — the values were already the same." };
