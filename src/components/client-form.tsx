@@ -39,7 +39,8 @@ export function ActionForm({
 function FormMessage({ state }: { state: ActionFormState }) {
   if (!state.error && !state.message) return <p className="sr-only" role="status" aria-live="polite" />;
   return (
-    <p role="status" aria-live="polite" className={cx("mt-2 text-xs", state.error ? "text-danger" : "text-ok")}>
+    // A dot and plain words: the colour (saved / not saved) lives in the dot.
+    <p role="status" aria-live="polite" className={cx("status is-small mt-2 flex whitespace-normal", state.error ? "is-danger" : "is-ok")}>
       {state.error ?? state.message}
     </p>
   );

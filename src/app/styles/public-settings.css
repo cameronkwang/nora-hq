@@ -1,0 +1,5 @@
+/* Public and account pages: /login, the /start onboarding form and its preview, /collab, /drop, /kit, Settings,
+   Activity, error and empty states. Rules here sit in the "pages" layer: above the shared classes in globals.css,
+   below Tailwind utilities. */
+@layer pages {
+}

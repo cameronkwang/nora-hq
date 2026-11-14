@@ -1,0 +1,34 @@
+/* Business pages: /clients/[id] and everything under it, plus the month picker. Rules here sit in the "pages"
+   layer: above the shared classes in globals.css, below Tailwind utilities. The classes below are the mockup's
+   Business screen, as a starting point. */
+@layer pages {
+  .biz-meta { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 20px; }
+  .biz-meta a { text-decoration: none; color: var(--text); min-width: 0; white-space: normal; overflow-wrap: anywhere; }
+  .biz-meta a:hover { text-decoration: underline; text-underline-offset: 3px; }
+  .biz-controls { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 24px; margin-top: 18px; }
+
+  .plan-row { display: grid; grid-template-columns: minmax(0, 1fr) 15rem 5.5rem; column-gap: 24px; }
+  .plan-row .n { text-align: right; white-space: nowrap; }
+  .plan-row .n b { font-weight: 600; }
+  .plan-row .n span { color: var(--muted); }
+
+  .creator-row { display: grid; grid-template-columns: minmax(0, 1fr) 11rem 5rem 8.5rem; column-gap: 24px; }
+  .creator-row .f { text-align: right; }
+  .creator-head { min-height: 0; padding: 4px 0 8px; }
+  .creator-head > * { font: inherit; letter-spacing: inherit; }
+  .side-status { padding: 4px 0 0; }
+  .side-status p { margin: 6px 0 14px; font-size: var(--text-sm); color: var(--muted); }
+
+  @media (max-width: 1023px) {
+    .plan-row { grid-template-columns: minmax(0, 1fr) auto; row-gap: 10px; padding: 12px 0 14px; }
+    .plan-row .meter { grid-column: 1 / -1; grid-row: 2; }
+    .plan-row .n { grid-column: 2; grid-row: 1; }
+    .creator-head, .creator-row .is-empty { display: none; }
+    .title-stack .meta { display: block; margin: 0; line-height: 1.25rem; }
+    .creator-row { grid-template-columns: minmax(0, 1fr) auto; row-gap: 0; padding: 10px 0; }
+    .creator-row .row-title { grid-column: 1; grid-row: 1; }
+    .creator-row .status { grid-column: 2; grid-row: 1; font-size: var(--text-sm); }
+    .creator-row .h { grid-column: 1; grid-row: 2; }
+    .creator-row .f { grid-column: 2; grid-row: 2; }
+  }
+}

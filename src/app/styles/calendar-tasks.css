@@ -1,0 +1,59 @@
+/* Calendar (month grid, tabs), Nora's Schedule, Tasks. Rules here sit in the "pages" layer: above the shared
+   classes in globals.css, below Tailwind utilities. The classes below are the mockup's task rows (drawn on Home)
+   and its Schedule screen, as a starting point. Nora's Schedule never shows money. */
+@layer pages {
+  /* ---- Task rows (Home shows them too). Same right-hand columns as .approve-row in home-inbox.css: keep them equal. */
+  .task-link, .group-row { display: grid; grid-template-columns: minmax(0, 1fr) 10.5rem 4.75rem 14px; column-gap: 16px; align-items: baseline; }
+  .task-link .row-meta { display: contents; }
+  .task-link .when { text-align: right; }
+
+  .task-row { column-gap: 16px; padding: 0; }      /* the link carries the row padding, so the whole row height is the target */
+  .task-link { flex: 1; min-width: 0; padding: calc((var(--row-h) - var(--leading-base)) / 2) 0; text-decoration: none; border-radius: var(--radius-xs); }
+  .task-link:hover .row-title { text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 3px; }
+  .due { font-size: var(--text-sm); font-weight: 500; white-space: nowrap; }
+  .due.is-today { color: var(--warn); }
+  .due.is-over { color: var(--danger); }
+  /* A plan group: a collapsed row with a segment meter and "0 of 8". */
+  .group-row { grid-template-columns: var(--tick-w) minmax(0, 1fr) 10.5rem 4.75rem 14px; cursor: pointer; list-style: none; }
+  .group-row::-webkit-details-marker { display: none; }
+  .group-row .disc { align-self: center; width: 18px; height: 18px; margin-left: -3px; color: var(--faint); stroke-width: 2; }
+  .group-row .meter { width: 4.5rem; }
+  .group-row .n { text-align: right; }
+
+  @media (max-width: 1023px) {
+    .task-link .row-meta { display: flex; flex-wrap: wrap; align-items: baseline; line-height: 1.375rem; }
+    .task-link .when { text-align: left; }
+    .task-row .tick { align-self: flex-start; margin-top: var(--tick-top); margin-bottom: 0; }
+    .task-link { display: block; padding: 10px 0; }
+    .task-link .row-title { display: block; }
+    .group-row { grid-template-columns: var(--tick-w) minmax(0, 1fr) auto auto; }
+  }
+
+  /* ---- Schedule */
+  .sched-head .head-actions { gap: 4px; margin-right: -6px; }
+  .sched-bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px 24px; margin: 8px 0 4px; }
+  .sched-bar .monthpick { margin-left: -8px; }
+  .sched-list { max-width: 45rem; }
+  .group-label { display: flex; align-items: baseline; justify-content: space-between; margin-top: 22px; padding-bottom: 8px; border-bottom: var(--rule); }
+  .group-label b { font-weight: inherit; color: var(--accent); }
+  .group-label.is-today { color: var(--text); }
+  /* One line per visit: name, the reel checkbox, Edit. Every control is the same height, so every row is. */
+  .sched-row { column-gap: 8px; padding: 6px 0; }
+  .reel-check { display: inline-flex; align-items: baseline; gap: 8px; padding: 5px 6px; font-size: var(--text-sm); line-height: 1.375rem; white-space: nowrap; cursor: pointer; border-radius: var(--radius-sm); }
+  .reel-check .check { align-self: center; }
+  .reel-check.is-done { color: var(--muted); }
+  .sched-row .btn-ghost { --h: 2rem; margin-right: -6px; font-size: var(--text-sm); }
+  @media (max-width: 767px), (pointer: coarse) {     /* touch: every control in the row is 44px */
+    .sched-head .head-actions { margin-right: -10px; }
+    .sched-bar .monthpick { margin-left: -13px; }
+    .sched-row { padding: 4px 0; }
+    .reel-check { padding: 11px 4px; }
+    .sched-row .btn-ghost { --h: 2.75rem; margin-right: -10px; }
+  }
+  @media (max-width: 767px) {
+    .sched-head .head-row { gap: 0 12px; }
+    .sched-head .head-actions { flex-wrap: nowrap; }
+    .sched-bar { margin: 4px 0 0; }
+    .group-label { margin-top: 18px; }
+  }
+}

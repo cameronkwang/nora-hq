@@ -1,0 +1,4 @@
+/* Creators, Outreach, Deals, Leads, Collab requests (team side), Reports, Numbers / Insights, Saved replies.
+   Rules here sit in the "pages" layer: above the shared classes in globals.css, below Tailwind utilities. */
+@layer pages {
+}

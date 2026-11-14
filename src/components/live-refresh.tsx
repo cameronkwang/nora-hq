@@ -64,12 +64,12 @@ export function LiveRefresh() {
   if (!toast) return null;
   return (
     <div role="status" className="fixed inset-x-0 top-3 z-50 flex justify-center px-4 md:top-4">
-      <div className="flex max-w-md items-center gap-3 rounded-xl border border-border bg-surface px-4 py-3 text-sm shadow-lg">
+      <div className="pop flex max-w-md items-center gap-3 px-4 py-2 text-sm">
         <span className="min-w-0 flex-1">
           <span className="font-semibold">New ask from {toast.from}</span>
           <span className="block truncate text-muted">{toast.preview}</span>
         </span>
-        <Link href={`/asks/${toast.id}`} onClick={() => setToast(null)} className="inline-flex min-h-11 items-center font-medium text-accent">Open</Link>
+        <Link href={`/asks/${toast.id}`} onClick={() => setToast(null)} className="link inline-flex min-h-11 items-center font-medium">Open</Link>
         <button onClick={() => setToast(null)} aria-label="Dismiss" className="inline-flex min-h-11 min-w-11 items-center justify-center text-muted">✕</button>
       </div>
     </div>

@@ -1,0 +1,41 @@
+/* Home, Inbox, Review, Asks. Rules here sit in the "pages" layer: above the shared classes in globals.css,
+   below Tailwind utilities. The classes below are the mockup's Home screen, as a starting point. */
+@layer pages {
+  /* Health strip: one row per business, a dot and words. */
+  .health-row { display: grid; grid-template-columns: 16rem minmax(0, 1fr) 14px; column-gap: 16px; }
+
+  /* To approve shares its right-hand columns (business, when) with the task rows (.task-link in calendar-tasks.css),
+     so the two lists line up. Keep the two column templates equal. */
+  .approve-row { display: grid; grid-template-columns: minmax(0, 1fr) 10.5rem 4.75rem 14px; column-gap: 16px; align-items: baseline; }
+  .approve-row .row-meta { display: contents; }
+  .approve-row .when { text-align: right; }
+
+  /* Nora's week: an agenda. Day in the margin, visits beside it. Never an amount. */
+  .agenda > li { display: grid; grid-template-columns: 4.75rem minmax(0, 1fr); align-items: baseline; }
+  .agenda > li + li { border-top: var(--rule); }
+  .day-date { display: flex; align-items: baseline; gap: 4px; }
+  .day-date .dow { width: 2.125rem; }                        /* fixed, so the day numerals form a column */
+  .day-date .dom { font-family: var(--font-display); font-size: 1.5rem; line-height: 1; font-weight: 450; font-variant-numeric: lining-nums; letter-spacing: -0.01em; }
+  .is-today .day-date .dow { color: var(--text); }
+  .is-today .day-date .dom { color: var(--accent); }        /* a red-letter day */
+  .agenda .row { column-gap: 12px; }
+  .reel { font-size: var(--text-sm); white-space: nowrap; }
+  .reel.is-later { color: var(--muted); }
+
+  /* Narrow (phones, tablets, small windows): rows become two lines, title then one quiet line of meta. */
+  @media (max-width: 1023px) {
+    .health-row { display: flex; justify-content: space-between; column-gap: 12px; }
+    .health-row .chev { display: none; }
+    .health-row .status { font-size: var(--text-sm); }
+
+    .approve-row { grid-template-columns: minmax(0, 1fr) 14px; column-gap: 12px; padding: 10px 0; }
+    .approve-row .row-title { grid-column: 1; }
+    .approve-row .row-meta { display: flex; flex-wrap: wrap; align-items: baseline; line-height: 1.375rem; grid-column: 1; grid-row: 2; }
+    .approve-row .when { text-align: left; }
+    .approve-row .chev { grid-column: 2; grid-row: 1 / span 2; }
+  }
+  @media (max-width: 767px) {
+    .agenda > li { grid-template-columns: 5.5rem minmax(0, 1fr); }
+    .day-date .dow { width: 2.375rem; }
+  }
+}

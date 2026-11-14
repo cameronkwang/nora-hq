@@ -1,4 +1,7 @@
 import type { Metadata, Viewport } from "next";
+// The display serif (page and section titles), self-hosted: Next serves the woff2 from this app, nothing is fetched
+// from a third party at runtime. The sans is the device's own UI font.
+import "@fontsource-variable/newsreader/opsz.css";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -19,8 +22,8 @@ export const viewport: Viewport = {
   // Lets the app draw edge to edge on notched phones; the shell pads with env(safe-area-inset-*).
   viewportFit: "cover",
   themeColor: [
-    { media: "(prefers-color-scheme: light)", color: "#f7f6f3" },
-    { media: "(prefers-color-scheme: dark)", color: "#141311" },
+    { media: "(prefers-color-scheme: light)", color: "#fbfaf7" },
+    { media: "(prefers-color-scheme: dark)", color: "#131311" },
   ],
 };
 
