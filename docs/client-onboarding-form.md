@@ -87,9 +87,10 @@ Links:
      creators can visit and what they could be offered, what to do with unhappy reviews, anything else.
 - Only page 1 has required answers: their name, and a phone number or email. **Send now** on pages 1 and 2 sends what
   is there. Everything else can be skipped.
-- A password typed into the form ("our ig password: …", "密码：…", "login: name / …") is refused with a gentle message,
-  so it is never saved. Talking about a password ("I forgot my Facebook password", "我忘了密码怎么办") and deal text
-  ("Buy1Get1!") go through like any other answer.
+- A password typed into the form ("our ig password: …", "ig password is …", "密码：…", "login: name / …") is refused
+  with a gentle message, so it is never saved. Talking about a password ("I forgot my Facebook password", "the
+  password is wrong", "我忘了密码怎么办") and deal text ("Buy1Get1!", "Loyalty account: buy10get1!") go through like any
+  other answer.
 - The form's check is calm so nobody is stopped from sending. As a second net, what Claude reads (`get_client_intake`)
   goes through the stricter check used for notes: anything password-like shows as `[password removed: …]`. That can
   also hide a deal written as one word ("Buy1Get1!") from Claude. The answers page shows everything as typed, and

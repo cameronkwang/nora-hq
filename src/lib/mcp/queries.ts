@@ -10,9 +10,9 @@ import { findCredentialNotes } from "@/lib/ops-business";
 import { reelsToPostCount } from "@/lib/ops-schedule";
 import { businessFacts, readPublicInfo } from "@/lib/business-facts";
 import { findConnection } from "@/lib/integrations/connections";
-import { googleSyncInfo, googleSyncSentence, type GoogleSyncOpts } from "@/lib/google-status";
+import { googleSyncInfo, googleSyncSentence, type GoogleSyncInfo, type GoogleSyncOpts } from "@/lib/google-status";
 import { googleWorkClientIds } from "@/lib/data";
-import { redactSecrets } from "@/lib/credential-guard";
+import { publicAskText } from "@/lib/credential-guard";
 import { STATS_STALE_DAYS, alreadyPosted, outreachProfileOf, statsCheck } from "@/lib/outreach-profile";
 import { launchField, launchInfo } from "@/lib/launch";
 import { launchBrief } from "@/lib/ops-launch";
@@ -85,7 +85,17 @@ const publicFlag = (a: { createdBy: string; dropLinkId?: string | null }) =>
  * typed there is masked before it reaches Claude. Asks the team typed in the app come back as written.
  */
 export function askBodyForClaude(a: Pick<schema.Ask, "body" | "createdBy" | "dropLinkId">): string {
-  return a.createdBy === "public" || a.dropLinkId ? (redactSecrets(a.body) ?? "") : a.body;
+  return publicAskText(a);
+}
+/** Said on an ask only when something in it was masked, so a masked promo code is asked about instead of guessed. */
+const ASK_MASKED_NOTE =
+  "Something in this text looked like a password and was masked ([password removed: …]). On an owner drop it is usually the deal's " +
+  "promo code, or a deal written as one word (like Buy1Get1!). Never guess it or put the mask in a draft: read it off the attached " +
+  "flyer, or ask Nora in this thread for the exact wording (she sees the text as typed).";
+/** The ask's text as Claude reads it, plus the note above when something was masked. */
+function askTextForClaude(a: Pick<schema.Ask, "body" | "createdBy" | "dropLinkId">, max?: number) {
+  const body = askBodyForClaude(a);
+  return { body: max ? clip(body, max) : body, ...(body !== a.body ? { passwordsMasked: ASK_MASKED_NOTE } : {}) };
 }
 const clip = (s: string, max: number) => (s.length > max ? `${s.slice(0, max)}…` : s);
 
@@ -99,7 +109,7 @@ export function shapeAsk(a: schema.Ask, names: Map<string, string>, ctx: Ctx, th
     ...(isUntriaged(a) ? { untriaged: true } : {}),
     businessId: a.clientId,
     business: a.clientId ? names.get(a.clientId) ?? a.clientId : null,
-    body: askBodyForClaude(a),
+    ...askTextForClaude(a),
     attachments: a.attachments.map((x) => ({ name: x.name, url: absUrl(ctx, x.url), contentType: x.contentType })),
     from: a.createdBy,
     claudeNote: a.claudeNote,
@@ -383,7 +393,8 @@ export async function getBriefingData(ctx: Ctx) {
       overduePlanSlots: cm.openTasks.filter((t) => !!t.deliverableId && late(t)).length,
       pendingDrafts: cm.pendingDrafts,
       // unrepliedReviews is only trustworthy when googleReviewSync is "ok" (see googleReviewSync at the top level).
-      ...(c.kind === "business" ? { googleReviewSync: googleSyncInfo(c, googleConnected, now, googleOpts(c)).state } : {}),
+      // "not_in_plan": not linked / not synced on a business with no Google item in its plan — nothing to raise.
+      ...(c.kind === "business" ? { googleReviewSync: googleBriefState(googleSyncInfo(c, googleConnected, now, googleOpts(c))) } : {}),
       unrepliedReviews: cm.unrepliedReviews,
       creatorsContactedThisMonth: cm.contactedThisMonth,
       metricsRecordedThisMonth: !!(metricsThisMonth?.instagram || metricsThisMonth?.tiktok || metricsThisMonth?.google),
@@ -400,11 +411,11 @@ export async function getBriefingData(ctx: Ctx) {
     asksRoutedToPeople: routedToPeople.map(({ a }) => ({
       ...publicFlag(a),
       id: a.id, kind: a.kind, forWho: a.forWho, business: a.clientId ? names.get(a.clientId) : null,
-      body: clip(askBodyForClaude(a), 200), createdAt: a.createdAt,
+      ...askTextForClaude(a, 200), createdAt: a.createdAt,
     })),
     asksWaitingOnNora: waitingAsks.map((a) => ({
       ...publicFlag(a),
-      id: a.id, kind: a.kind, forWho: a.forWho, business: a.clientId ? names.get(a.clientId) : null, body: clip(askBodyForClaude(a), 300),
+      id: a.id, kind: a.kind, forWho: a.forWho, business: a.clientId ? names.get(a.clientId) : null, ...askTextForClaude(a, 300),
       claudeNote: a.claudeNote, updatedAt: a.updatedAt, ...shapeThread(a, threads.get(a.id) ?? []),
     })),
     draftsSentBack: sentBack.map((d) => shapeDraft(d, names)),
@@ -563,6 +574,11 @@ export function shapeGoogleSync(
     ...(info.count != null ? { reviewsAtLastSync: info.count } : {}),
     ...(info.at ? { lastSyncAt: info.at } : {}),
   };
+}
+
+/** The briefing's one-word Google state for a business: "not_in_plan" for the quiet cases above (no Google item in its plan). */
+function googleBriefState(info: GoogleSyncInfo) {
+  return !info.needsAttention && info.state !== "ok" ? ("not_in_plan" as const) : info.state;
 }
 
 /**

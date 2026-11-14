@@ -14,12 +14,15 @@
  * `looksLikeTypedSecret` is the calmer check for text an owner types on the public forms, where a false alarm stops
  * a busy person from sending. It refuses:
  *  - a label followed by a value shaped like a password ("password: hunter2", "密码是Tanklin1991!!");
- *  - a password label, a colon (or 是) and ONE word that ends the line, whatever it looks like
- *    ("ig password: goldenwok", "密码：woaini") — but not someone talking ("password: can you help");
+ *  - a password label, a colon (or "is", 是) and ONE word that ends the line, whatever it looks like
+ *    ("ig password: goldenwok", "ig password is goldenwok", "密码：woaini") — but not someone talking
+ *    ("password: can you help", "the password is wrong", "Password: Google");
  *  - in the deal / anything-else boxes and the drop note (`tokens: false`, where a bare "Buy1Get1!" is fine): a
- *    password-shaped word right after an account ("login: name / Tanklin1991!!", "账号 name Tanklin1991!!",
- *    "pass Wok2020!", "name@mail.com Tanklin1991!!", "name / Wok2020!"), or anywhere after the word "password" on
- *    the same line ("the password to our IG is Tanklin1991!!").
+ *    password-shaped word right after a user name ("login: name / Tanklin1991!!", "账号 name Tanklin1991!!",
+ *    "name@mail.com Tanklin1991!!", "IG: name / Wok2020!"), right after "pass" or a platform's account ("pass
+ *    Wok2020!", "IG account: Wok2020!"), or anywhere after the word "password" on the same line ("the password to
+ *    our IG is Tanklin1991!!"). A deal that mentions an account or a slash is still a deal ("Loyalty account:
+ *    buy10get1!", "会员账户每周二 Buy1Get1!", "BOGO / Buy1Get1!").
  *
  * Full-width characters from a Chinese keyboard ("密码：１２３４５６") are read as their plain forms, and Chinese
  * right after a label is someone talking, never the password ("密码怎么办"); the password is the part before it.
@@ -43,7 +46,7 @@ const STRONG = "passwords|password|passwd|passcode|pwd|pw|密码|密碼|口令";
 /** Labels that only count with a separator ("pass=x", "login: x"). */
 const WEAK = "pass|login|log-in|signin|sign-in|账号密码|帳號密碼";
 
-const STRONG_RE = new RegExp(`(?:^|[^\\p{L}\\p{N}])(${STRONG})(\\s*[:=：]\\s*|\\s*-\\s+|\\s+(?:is\\s+|was\\s+)?)([^\\s,;]+)`, "giu");
+const STRONG_RE = new RegExp(`(?:^|[^\\p{L}\\p{N}])(${STRONG})(\\s*[:=：]\\s*|\\s*-\\s+|\\s+(?:(?:is|was)(?:\\s*[:=：]\\s*|\\s+))?)([^\\s,;]+)`, "giu");
 /** Chinese labels need no word boundary ("店的密码：…", "密码是…"). */
 const CJK_RE = /(账号密码|帳號密碼|密码|密碼|口令)(\s*(?:[:=：]|是|为|為)?\s*)([^\s,;，。、]+)/gu;
 const WEAK_RE = new RegExp(`(?:^|[^\\p{L}\\p{N}])(${WEAK})(\\s*[:=：]\\s*)([^\\s,;]+)`, "giu");
@@ -57,6 +60,11 @@ const CUE_RE = new RegExp(
 /** An email inside a line, and "name /": what follows may be the password. */
 const EMAIL_IN_LINE = /[^\s@/:=]+@[^\s@/]+\.[a-z]{2,}/gi;
 const NAME_SLASH = /(?:^|[\s:=])[A-Za-z0-9._@+-]{3,}\s*\/(?!\/)/g;
+/** "name /" only counts on a line about an account ("IG: goldenwok / …"), not in a deal ("BOGO / Buy1Get1!"). */
+const ACCOUNT_WORD =
+  /(?:^|[^\p{L}\p{N}])(?:ig|insta(?:gram)?|fb|facebook|tik\s?tok|tt|gmail|e-?mail|log\s?in|sign\s?in|user\s?name|user\s?id|account|acct|wechat)(?![\p{L}\p{N}])|账号|帐号|帳號|账户|帐户|帳戶|用户名|用戶名|登录|登錄|登入|微信/iu;
+/** A word that reads as a user name ("goldenwok", "是pokebros", "name@mail.com"): after an account word, the next word may be its password. */
+const USERNAME = /^(?:是|为|為)?[A-Za-z0-9._@+-]{3,}[,.;:]?$/;
 
 /** Words that follow "password" in ordinary sentences ("password manager", "password reset"). */
 const NOT_A_VALUE = new Set([
@@ -68,8 +76,16 @@ const NOT_A_VALUE = new Set([
   "forgot", "forgotten", "lost", "same", "idk", "unsure", "help",
   // How a sentence goes on after "password:" ("password: can you help"). All too short to be a real password.
   "can", "could", "how", "what", "why", "when", "where", "is", "are", "was", "do", "does", "did", "will", "would",
-  "i", "my", "our", "your", "if", "but", "so", "sorry", "thank",
+  "i", "my", "our", "your", "if", "but", "so", "sorry", "thank", "get",
+  // What "my password is …" says when it isn't the password ("the password is wrong", "… what my password is anymore").
+  "wrong", "incorrect", "expired", "required", "locked", "blocked", "hacked", "fine", "ok", "okay", "correct", "right",
+  "old", "new", "weak", "strong", "anymore", "now", "too", "again", "gone", "missing",
 ]);
+/**
+ * Single words that answer "password:" without being one ("Password: Google" = I sign in with Google, "password:
+ * thanks"). Only the calm form check skips them; what Claude reads still has them masked.
+ */
+const LONE_TALK = new Set(["thanks", "thx", "sure", "pending", "resetting", "dunno", "google", "gmail", "email", "wechat", "text", "call", "soon"]);
 
 const PASSWORD_SYMBOL = /[!@#$%^&*?~+=<>{}[\]|\\]/;
 const EMAIL = /^[^\s@]+@[^\s@]+\.[a-z]{2,}$/i;
@@ -149,12 +165,13 @@ function typedValueLooksSecret(value: string, separated: boolean, glued: boolean
 }
 
 /**
- * "ig password: goldenwok", "密码：woaini": after a password label and a colon (or 是), ONE word that ends the line
- * is the password, whatever it looks like. More words after it ("password: can you help", "password: same as
- * Facebook") is someone talking, and is left to the shape rule above. `end` is where the word ends in `src`.
+ * "ig password: goldenwok", "ig password is goldenwok", "密码：woaini": after a password label and a colon (or "is",
+ * 是), ONE word that ends the line is the password, whatever it looks like. More words after it ("password: can you
+ * help", "password: same as Facebook") is someone talking, and is left to the shape rule above; so is a word that
+ * says what the password is like ("the password is wrong"). `end` is where the word ends in `src`.
  */
 function loneWordAfterPasswordLabel(src: string, end: number, label: string, gap: string, value: string): boolean {
-  if (!PASSWORD_LABEL.test(label) || !/[:=是为為]/.test(gap) || LINE_BREAK.test(gap)) return false;
+  if (!PASSWORD_LABEL.test(label) || !(/[:=是为為]/.test(gap) || /^\s+(?:is|was)\s+$/i.test(gap)) || LINE_BREAK.test(gap)) return false;
   if (!/^[\s)"'”’\]>,.;:!?。、…]*$/u.test(src.slice(end).split(LINE_BREAK, 1)[0])) return false;
   const core = value.replace(SENTENCE_END, "");
   return [...core].length >= 3 && !NOT_A_VALUE.has(core.toLowerCase()) && !plainlyNotSecret(value);
@@ -174,6 +191,8 @@ function scan(text: string | null | undefined, mode: { typed: boolean; tokens: b
   };
   /** Every password-shaped stretch of one word (a word of Chinese text can hold several stretches). */
   const pushTokens = (word: string, at: number) => {
+    // A link, email, @handle or #hashtag stays one word, Chinese inside or not ("…/照片?rlkey=x7Yz1&dl=0", "#金龙Wok2020!").
+    if (plainlyNotSecret(trimToken(word))) return;
     for (const r of word.matchAll(LATIN_RUN)) {
       const t = trimToken(r[0]);
       if (isSecretToken(t)) push("token", at + r.index + r[0].indexOf(t), t.length);
@@ -198,9 +217,10 @@ function scan(text: string | null | undefined, mode: { typed: boolean; tokens: b
       const value = trimToken(run);
       if (!value) continue;
       const sep = /[:=：是为為-]/.test(gap);
+      const lone = cjkAt < 0 && loneWordAfterPasswordLabel(src, end, label, gap, value);
       const hit = mode.typed
-        ? typedValueLooksSecret(value, sep, cjkAt >= 0) || (cjkAt < 0 && loneWordAfterPasswordLabel(src, end, label, gap, value))
-        : valueLooksSecret(label, value, sep || re === CJK_RE);
+        ? typedValueLooksSecret(value, sep, cjkAt >= 0) || (lone && !LONE_TALK.has(value.replace(SENTENCE_END, "").toLowerCase()))
+        : valueLooksSecret(label, value, sep || re === CJK_RE) || lone;
       if (hit) push("labelled", end - raw.length + run.indexOf(value), value.length, label);
     }
   }
@@ -220,23 +240,39 @@ function scan(text: string | null | undefined, mode: { typed: boolean; tokens: b
     const line = l[0];
     const next = /[\s:=/|,;\-–—]*([^\s/]+)/y;
     /** Checks the next `count` words after `from` ("/", ":", "-" between them don't count as words). */
-    const after = (from: number, count: number, talk = false) => {
+    const after = (from: number, count: number) => {
       next.lastIndex = from;
       for (let i = 0; i < count; i++) {
         const w = next.exec(line);
         if (!w) return;
-        // "log in to get…", "an account and…": someone talking about an account, not giving one.
-        if (talk && i === 0 && NOT_A_VALUE.has(trimToken(w[1]).toLowerCase())) return;
         pushTokens(w[1], l.index + next.lastIndex - w[1].length);
       }
     };
+    /**
+     * After an account word: the word right after "pass" or after a platform's account ("pass Wok2020!", "IG account:
+     * Wok2020!"), and the word after a user name ("login goldenwok Wok2020!"). A deal is left alone: "Loyalty account:
+     * buy10get1!" and "会员账户每周二 Buy1Get1!" name no platform and no user name.
+     */
+    const afterAccount = (from: number, cue: "pass" | "platform" | "account") => {
+      next.lastIndex = from;
+      const w1 = next.exec(line);
+      // "log in to get…", "an account and…": someone talking about an account, not giving one.
+      if (!w1 || NOT_A_VALUE.has(trimToken(w1[1]).toLowerCase())) return;
+      if (cue !== "account") pushTokens(w1[1], l.index + next.lastIndex - w1[1].length);
+      if (cue === "pass" || !USERNAME.test(w1[1])) return;
+      const w2 = next.exec(line);
+      if (w2) pushTokens(w2[1], l.index + next.lastIndex - w2[1].length);
+    };
     for (const c of line.matchAll(CUE_RE)) {
+      const cue = c[1] ?? c[2];
       // After the word "password" itself, anywhere further on the line ("the password to our IG is Tanklin1991!!").
-      if (PASSWORD_LABEL.test(c[1] ?? c[2])) after(c.index + c[0].length, Infinity);
-      else after(c.index + c[0].length, 2, true);
+      if (PASSWORD_LABEL.test(cue)) after(c.index + c[0].length, Infinity);
+      else afterAccount(c.index + c[0].length, /^pass$/i.test(cue) ? "pass" : ACCOUNT_WORD.test(line.slice(0, c.index)) ? "platform" : "account");
     }
     for (const e of line.matchAll(EMAIL_IN_LINE)) after(e.index + e[0].length, 1);
-    for (const n of line.matchAll(NAME_SLASH)) after(n.index + n[0].length, 1);
+    for (const n of line.matchAll(NAME_SLASH)) {
+      if (ACCOUNT_WORD.test(line.slice(0, n.index + n[0].length))) after(n.index + n[0].length, 1);
+    }
   }
   return out;
 }
@@ -276,4 +312,13 @@ export function redactSecrets(text: string | null | undefined): string | null {
   let out = text;
   for (const m of looksLikeSecret(text)) out = out.split(m.text).join(`[password removed: ${maskSecret(m.text)}]`);
   return out;
+}
+
+/**
+ * An ask's text for everywhere but its own page: Claude, a push, the task it becomes. Text that came in through a
+ * public form (createdBy "public": the collab form, the onboarding form's asks, an owner drop) goes through
+ * redactSecrets; the team's own asks come back as written.
+ */
+export function publicAskText(a: { body: string; createdBy?: string | null; dropLinkId?: string | null }): string {
+  return a.createdBy === "public" || a.dropLinkId ? (redactSecrets(a.body) ?? "") : a.body;
 }

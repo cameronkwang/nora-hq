@@ -61,6 +61,9 @@ const CLEAN = [
   "Password: forgot",
   "I forgot my password: can you help",
   "我们有WiFi和2楼包厢！欢迎光临～",
+  // A link or #hashtag with Chinese inside stays one word.
+  "https://www.dropbox.com/scl/fo/abc/照片?rlkey=x7Yz1&dl=0",
+  "#金龙Wok2020!",
 ];
 
 // The public onboarding form (looksLikeTypedSecret): an owner who only talks about a password must get through.
@@ -102,6 +105,25 @@ const TYPED_CLEAN = [
   "IG: goldenwok / FB: Golden Wok RVA",
   "关注我们的账号 @goldenwok 有优惠",
   "Email us at deals@goldenwok.com for catering",
+  // "password is …" that says what the password is like, not what it is.
+  "my password is wrong",
+  "password is required",
+  "my password was hacked",
+  "the password is expired.",
+  "password is: can you help",
+  // One word after "password:" that is someone talking ("Password: Google" = they sign in with Google).
+  "Password: Google",
+  "Password: email",
+  "Password: Gmail",
+  "Password: thanks",
+  "password: okay",
+  "password: sure",
+  "password: pending",
+  "password: dunno",
+  "Password: resetting",
+  // A link or #hashtag with Chinese inside stays one word.
+  "https://www.dropbox.com/scl/fo/abc/照片?rlkey=x7Yz1&dl=0",
+  "#金龙Wok2020!",
 ];
 // The same form's deal / anything-else boxes (and the drop note) also skip the bare-word rule.
 const TYPED_CLEAN_PROSE = [
@@ -116,6 +138,18 @@ const TYPED_CLEAN_PROSE = [
   "Create an account and get SAVE20NOW!",
   "Log in to our app for Buy1Get1!",
   "Order online, no account needed: Buy1Get1!",
+  // An account word, a login or a slash in deal text (Chinese has no spaces, so the deal is often the second "word").
+  "会员账户每周二 Buy1Get1!",
+  "會員帳號：每週二 Buy1Get1!",
+  "登录APP下单 Buy1Get1!",
+  "关注账号送饮料 Buy1Get1!",
+  "用微信账号登录下单 2for$10!",
+  "Loyalty account: buy10get1!",
+  "Rewards account: Free1Drink! after 10 visits",
+  "Pass holders: 2for$10!",
+  "Happy hour 3-6pm / 2for$10! drinks",
+  "BOGO / Buy1Get1! all week",
+  "App login: get Free1Drink!",
 ];
 // A real password is still refused, in every box.
 const TYPED_SECRET = [
@@ -140,6 +174,12 @@ const TYPED_SECRET = [
   "passcode: sesame",
   "Facebook\nusername: goldenwok\npassword: woaini",
   "Instagram账号是pokebros，密码是woaini",
+  // The same with "is" in place of the colon.
+  "our ig password is goldenwok",
+  "IG password is woaini",
+  "the password is goldenwok",
+  "password was goldenwok",
+  "password is: goldenwok",
   // Full-width characters, and a password with Chinese straight after it.
   "密码：１２３４５６",
   "ｐａｓｓｗｏｒｄ：ｇｏｌｄｅｎｗｏｋ",
@@ -164,6 +204,11 @@ const TYPED_SECRET = [
   "the password to our IG is Tanklin1991!!",
   "password for the wifi: Wok2020!",
   "密码：我们店的是 Tanklin1991!!",
+  "login goldenwok Wok2020!",
+  "账号：goldenwok Wok2020!",
+  "微信号 goldenwok88 / Wok2020!",
+  "IG account: Tanklin1991!!",
+  "account: goldenwok Wok2020!",
 ];
 // Outside the prose boxes a bare password-shaped word is refused too.
 const TYPED_SECRET_TOKEN = ["Tanklin1991!!", "use 5006688@Fff for both"];
@@ -211,6 +256,8 @@ const READ_MASKED: [string, string][] = [
   ["pass: goldenwok", "goldenwok"],
   ["IG: pokebros Tanklin1991!!", "Tanklin1991"],
   ["use Tanklin1991!! for both", "Tanklin1991"],
+  ["Password: Google", "Google"],
+  ["password is gmail", "gmail"],
 ];
 for (const [t, secret] of READ_MASKED) {
   const r = redactSecrets(t) ?? "";
@@ -237,6 +284,8 @@ const READ_AS_TYPED = [
   "我忘了Facebook的密码怎么办", "Instagram密码忘记了，需要帮忙", "Google 的密码是我儿子管的", "不用给密码就可以吗？", "臉書的密碼我不記得了",
   "what is the password for?", "I forgot my password: can you help", "My Instagram password: same as Facebook", "Lunch pass: $50 a month", "我们有WiFi和2楼包厢！欢迎光临～",
   "小籠包、牛肉麵；周一到周五午餐特价", "BOGO boba this week, ends Sunday", "微信号 wok8888，电话 804-555-0100",
+  "my password is wrong", "password is required", "I don't know what my password is anymore",
+  "https://www.dropbox.com/scl/fo/abc/照片?rlkey=x7Yz1&dl=0", "#金龙Wok2020!",
 ];
 for (const t of READ_AS_TYPED) {
   const r = redactSecrets(t);
