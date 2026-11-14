@@ -38,7 +38,7 @@ export default async function ClientIntakePage({ params }: { params: Promise<{ i
         <PageHeader title="Onboarding form" subtitle="Nothing sent back yet." />
         <div className="grid gap-6">
           <ClientIntakeCard clientId={id} clientName={client.name} />
-          <EmptyState title="No answers yet">When {client.name} sends the form, their answers show up here and Claude gets an ask to draft their brand voice.</EmptyState>
+          <EmptyState title="No answers yet">When {client.name} sends the form, their answers show up here and Claude gets an ask to turn them into a brand voice and first-month plan.</EmptyState>
         </div>
       </>
     );

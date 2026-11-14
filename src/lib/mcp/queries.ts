@@ -8,6 +8,7 @@ import { listAskMessagesFor } from "@/lib/ops";
 import { taskScopeWhere, type TaskScope } from "@/lib/ops-tasks";
 import { findCredentialNotes } from "@/lib/ops-business";
 import { reelsToPostCount } from "@/lib/ops-schedule";
+import { businessFacts, readPublicInfo } from "@/lib/business-facts";
 
 /**
  * Read-side queries for the Claude connector. Everything here returns plain, compact objects
@@ -21,6 +22,21 @@ export const FOLLOW_UP_STAGES: schema.OutreachStage[] = ["contacted", "followed_
 
 export function businessName(c: Pick<schema.Client, "name" | "location">): string {
   return c.location ? `${c.name} (${c.location})` : c.name;
+}
+
+/**
+ * The public facts held for a business beyond its handles and website (address, phone, hours, Facebook Page, Google
+ * listing, what they sell, price range), plus what was looked for and not found. Undefined when there are none.
+ */
+export function shapePublicFacts(c: Pick<schema.Client, "kind" | "website" | "instagramHandle" | "tiktokHandle" | "notes" | "publicInfo">) {
+  if (c.kind === "creator") return undefined;
+  const facts = businessFacts(c);
+  const info = readPublicInfo(c.publicInfo);
+  const { website: _w, instagram: _i, tiktok: _t, ...rest } = facts;
+  const known = Object.fromEntries(Object.entries(rest).filter(([, v]) => !!v));
+  if (!Object.keys(known).length && !info.notFound?.length && !info.checkedAt) return undefined;
+  const notFound = (info.notFound ?? []).filter((k) => !facts[k]);
+  return { ...known, lookedForNotFound: notFound.length ? notFound : undefined, checkedOn: info.checkedAt?.slice(0, 10), checkedBy: info.checkedBy };
 }
 
 export function absUrl(ctx: Ctx, url: string): string {
@@ -385,7 +401,7 @@ async function briefingHousekeeping(activeClients: schema.Client[]) {
             ...(unprocessed.length
               ? {
                   formsToProcess: unprocessed,
-                  formsToProcessInstruction: "The owner sent the form back. Read it with get_client_intake and work its ask (brand voice draft, first-month plan, what's missing).",
+                  formsToProcessInstruction: "The owner sent the form back. Read it with get_client_intake and work its ask (their answers → brand voice draft, first-month plan, what's missing). If they said something we showed them is off, do the \"Business details to fix\" ask first.",
                 }
               : {}),
           },

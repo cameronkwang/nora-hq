@@ -1,14 +1,12 @@
 import type { Metadata } from "next";
 import { cookies, headers } from "next/headers";
 import { IntakeForm } from "@/components/intake-form";
-import { IntakeLangSwitch } from "@/components/intake-lang";
+import { IntakeShell } from "@/components/intake-shell";
 import { IntakeAlready, IntakeExpired } from "@/components/intake-screens";
-import { and, eq } from "drizzle-orm";
-import { getDb, schema } from "@/lib/db";
 import {
-  INTAKE_LANG_COOKIE, intakeCopy, isIntakeLang, langFromAcceptLanguage, parseIntakeLang, welcomeIntro, welcomeServicesFromPlan, type IntakeLangCode,
+  INTAKE_LANG_COOKIE, intakeCopy, isIntakeLang, langFromAcceptLanguage, parseIntakeLang, type IntakeLangCode,
 } from "@/lib/intake-copy";
-import { getIntakeByToken, intakeAccessEmail, markIntakeOpened } from "@/lib/ops-intake";
+import { getIntakeByToken, intakeAccessEmail, intakeFormSetup, markIntakeOpened } from "@/lib/ops-intake";
 import { blobEnabled } from "@/lib/uploads";
 
 /**
@@ -42,28 +40,6 @@ export async function generateMetadata({ searchParams }: Props): Promise<Metadat
   };
 }
 
-// Without JavaScript the steps can't switch, so show every step as one long form and keep only "Send".
-const NO_JS_CSS = `
-.intake-step[data-off="true"] { display: block; }
-.intake-submit[data-off="true"] { display: inline-flex; margin-left: auto; }
-.intake-js { display: none !important; }
-.intake-nojs { display: inline; }
-.intake-step + .intake-step { margin-top: 2.5rem; padding-top: 2rem; border-top: 1px solid var(--border); }
-`;
-
-/** "We'll take care of your Instagram and TikTok…" — from this business's active plan and creator search areas. */
-async function tailoredIntro(client: schema.Client, lang: IntakeLangCode): Promise<string> {
-  try {
-    const db = await getDb();
-    const plan = await db.select({ title: schema.deliverables.title, platform: schema.deliverables.platform, active: schema.deliverables.active })
-      .from(schema.deliverables).where(and(eq(schema.deliverables.clientId, client.id), eq(schema.deliverables.active, true)));
-    return welcomeIntro(lang, { services: welcomeServicesFromPlan(plan), areas: client.outreachAreas });
-  } catch (e) {
-    console.error("[intake] welcome intro failed", e);
-    return welcomeIntro(lang, { services: [] });
-  }
-}
-
 export default async function StartPage({ params, searchParams }: Props) {
   const [{ token }, sp] = await Promise.all([params, searchParams]);
   const { lang, explicit } = await pickLang(sp);
@@ -78,26 +54,20 @@ export default async function StartPage({ params, searchParams }: Props) {
   let body: React.ReactNode;
   if (link.state === "open") {
     const c = link.client;
-    // Start from what we already know, so they only fix or add.
-    const initial: Record<string, string> = {
-      businessName: c.name,
-      ...(c.instagramHandle ? { instagram: `@${c.instagramHandle}` } : {}),
-      ...(c.tiktokHandle ? { tiktok: `@${c.tiktokHandle}` } : {}),
-      ...(c.website ? { website: c.website } : {}),
-      ...(c.ownerEmail ? { contactEmail: c.ownerEmail } : {}),
-    };
-    // Tailored welcome sentence built from the business's active plan + outreach areas.
-    const intro = await tailoredIntro(c, lang);
+    // What we looked up before sending: the owner only checks it ("Is this right?").
+    const setup = intakeFormSetup(c, lang);
     body = (
       <IntakeForm
         token={token}
         intakeId={link.intake.id}
         lang={lang}
         businessName={c.name}
-        initial={initial}
+        initial={setup.initial}
+        facts={setup.facts}
+        factsKey={setup.factsKey}
+        askHandles={setup.askHandles}
         accessEmail={intakeAccessEmail()}
         uploadsEnabled={blobEnabled()}
-        intro={intro}
       />
     );
   } else if (link.state === "submitted") {
@@ -107,35 +77,8 @@ export default async function StartPage({ params, searchParams }: Props) {
   }
 
   return (
-    <main
-      lang={C.htmlLang}
-      className="min-h-dvh px-[max(1rem,env(safe-area-inset-left))] pb-[max(2rem,env(safe-area-inset-bottom))] pt-[max(1.25rem,env(safe-area-inset-top))] text-[16px] sm:pt-10"
-      // No tab bar here: sticky actions sit on the bottom edge (above the home indicator).
-      style={{ ["--tabbar-h" as string]: "env(safe-area-inset-bottom)" }}
-    >
-      <noscript>
-        <style>{NO_JS_CSS}</style>
-      </noscript>
-      <div className="mx-auto w-full max-w-xl">
-        <header className="mb-6 text-center sm:mb-8">
-          <IntakeLangSwitch lang={lang} remember={explicit} />
-          <span
-            aria-hidden
-            className="mx-auto mb-3 mt-6 flex size-14 items-center justify-center rounded-full bg-accent text-xl font-semibold text-accent-fg shadow-sm"
-          >
-            N
-          </span>
-          <p className="text-[15px] font-medium text-accent">{C.brand}</p>
-        </header>
-
-        <div className="rounded-3xl border border-border bg-surface p-4 shadow-sm sm:p-8">{body}</div>
-
-        {link.state === "open" && (
-          <p className="mx-auto mt-6 max-w-sm text-center text-sm leading-relaxed text-muted [main:has([data-intake-done])_&]:hidden">
-            {C.common.autosave} {C.common.neverPasswords}
-          </p>
-        )}
-      </div>
-    </main>
+    <IntakeShell lang={lang} rememberLang={explicit} footnote={link.state === "open"}>
+      {body}
+    </IntakeShell>
   );
 }

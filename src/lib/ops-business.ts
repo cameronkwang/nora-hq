@@ -1,5 +1,5 @@
 import "server-only";
-import { and, asc, eq, sql } from "drizzle-orm";
+import { and, asc, desc, eq, sql } from "drizzle-orm";
 import { z } from "zod";
 import { getDb, schema } from "./db";
 import { newId } from "./ids";
@@ -8,6 +8,11 @@ import { OpsError } from "./ops";
 import { getOnboardingTasks, onboardClient } from "./ops-onboarding";
 import { joinOutreachAreas, normalizeServices, ACCEPTED_SERVICES, SERVICE_LABELS } from "./onboard-services";
 import { looksLikeSecret, secretRefusal } from "./credential-guard";
+import { cleanBlock, cleanLine } from "./ops-collab";
+import {
+  FACT_KEYS, FACT_LABEL, FACT_MAX, FB_LINK, INFO_FACT_KEYS, OWNER_SOURCE, PRICE_RANGES, SOURCE_MAX, businessFacts, forgetFactProvenance, sourceLabel, factsChecklist, isGoogleListingUrl, readPublicInfo,
+  type FactKey, type FactsChecklist, type InfoFactKey, type PublicInfo,
+} from "./business-facts";
 
 /**
  * Business details, monthly plan and Active/Inactive — for people (Settings) and for Claude (tools-business),
@@ -162,6 +167,10 @@ export async function updateBusinessDetails(clientId: string, patch: BusinessDet
   }
 
   if (!changed.length) return { changed };
+  // A website or handle changed here no longer has the source (or "not found" mark) that was saved with the old one.
+  const moved: FactKey[] = [...("website" in set ? ["website" as const] : []), ...("instagramHandle" in set ? ["instagram" as const] : []), ...("tiktokHandle" in set ? ["tiktok" as const] : [])];
+  const info = moved.length ? forgetFactProvenance(cur.publicInfo, moved) : null;
+  if (info) set.publicInfo = info;
   const db = await getDb();
   await db.update(schema.clients).set(set).where(eq(schema.clients.id, clientId));
   await logActivity({
@@ -169,6 +178,190 @@ export async function updateBusinessDetails(clientId: string, patch: BusinessDet
     summary: `${claude ? "Claude updated" : "Updated"} ${cur.name}: ${changed.join("; ")}`.slice(0, 1000),
   });
   return { changed };
+}
+
+/* ───────────────────────── Public facts ───────────────────────── */
+
+export const FactInput = z.object({
+  fact: z.enum(FACT_KEYS),
+  /** The fact as found. People may pass "" to clear it. */
+  value: z.string().max(2000).nullish(),
+  /** Public URL where it was found. Required for Claude. */
+  source: z.string().max(SOURCE_MAX).nullish(),
+  /** Looked for it in public sources and couldn't find it. */
+  notFound: z.boolean().optional(),
+});
+export const SetFactsInput = z.array(FactInput).min(1, "Give at least one fact.").max(40);
+
+/** A public web address (http/https, no logins in it). Throws in plain words otherwise. */
+function normalizeSource(v: string): string {
+  const s = cleanLine(v);
+  let u: URL;
+  try {
+    u = new URL(s);
+  } catch {
+    throw new OpsError("A source must be the full web address where you found the fact (https://…).");
+  }
+  if (!/^https?:$/.test(u.protocol) || !u.hostname.includes(".") || u.username || u.password) {
+    throw new OpsError("A source must be a public web address (https://…) with no login in it.");
+  }
+  return s;
+}
+
+/** Did the owner correct our details on their newest submitted onboarding form ("Something's off")? */
+async function ownerCorrected(clientId: string): Promise<boolean> {
+  const db = await getDb();
+  const [row] = await db.select({ answers: schema.clientIntakes.answers }).from(schema.clientIntakes)
+    .where(and(eq(schema.clientIntakes.clientId, clientId), eq(schema.clientIntakes.status, "submitted")))
+    .orderBy(desc(schema.clientIntakes.submittedAt)).limit(1);
+  return (row?.answers as Record<string, unknown> | null | undefined)?.factsOk === "no";
+}
+
+/** One fact, tidied the way we store it. Throws a plain-words OpsError when it doesn't look like that kind of fact. */
+function normalizeFact(key: FactKey, raw: string): string {
+  const tooLong = (v: string) => {
+    if (v.length > FACT_MAX[key]) throw new OpsError(`${FACT_LABEL[key]} is too long (keep it under ${FACT_MAX[key]} characters).`);
+    return v;
+  };
+  switch (key) {
+    case "hours":
+      return tooLong(cleanBlock(raw));
+    case "phone": {
+      const v = tooLong(cleanLine(raw));
+      const digits = v.replace(/\D/g, "").length;
+      if (!/^\+?[\d\s().-]+(\s*(x|ext\.?)\s*\d{1,6})?$/i.test(v) || digits < 7 || digits > 21) throw new OpsError("That doesn't look like a phone number.");
+      return v;
+    }
+    case "website":
+      return normalizeWebsite(raw) ?? "";
+    case "instagram":
+    case "tiktok":
+      return normalizeHandle(raw, key) ?? "";
+    case "facebook": {
+      const v = tooLong(cleanLine(raw));
+      if (!FB_LINK.test(v)) throw new OpsError("Give the Facebook Page as a link (facebook.com/their-page).");
+      return v;
+    }
+    case "googleListing": {
+      const typed = cleanLine(raw);
+      const v = tooLong(/^https?:\/\//i.test(typed) ? typed : `https://${typed}`);
+      if (!isGoogleListingUrl(v)) throw new OpsError("Give the Google listing as its Google Maps link (https://maps.app.goo.gl/… or https://www.google.com/maps/…).");
+      return v;
+    }
+    case "priceRange": {
+      const v = cleanLine(raw);
+      const byNumber = PRICE_RANGES[Number(v) - 1];
+      const hit = (PRICE_RANGES as readonly string[]).includes(v) ? v : /^[1-4]$/.test(v) ? byNumber : null;
+      if (!hit) throw new OpsError(`Price range is one of ${PRICE_RANGES.join(", ")}.`);
+      return hit;
+    }
+    default:
+      return tooLong(cleanLine(raw));
+  }
+}
+
+const isInfoFact = (k: FactKey): k is InfoFactKey => (INFO_FACT_KEYS as readonly string[]).includes(k);
+
+/**
+ * Save public facts about a business (what anyone can find on Google Maps, its website or its social profiles).
+ * - Claude: every value needs the public URL it came from; a fact it looked for and couldn't find is marked
+ *   notFound instead (which never removes a value that's already saved). Claude can't clear a fact.
+ * - People (Settings): no source needed; an empty value clears the fact.
+ * Likely passwords are refused. Every change is logged before → after. Each call stamps "checked now, by <actor>".
+ */
+export async function setBusinessFacts(
+  clientId: string,
+  items: z.input<typeof SetFactsInput>,
+  actor: string,
+): Promise<{ changed: string[]; kept: string[]; checklist: FactsChecklist }> {
+  if (!isPerson(actor) && !isClaude(actor)) throw new OpsError("Only Nora, Cameron or Claude can save business facts.");
+  const list = SetFactsInput.parse(items);
+  const claude = isClaude(actor);
+  for (const i of list) assertNoSecrets({ [FACT_LABEL[i.fact]]: i.value, [`the ${FACT_LABEL[i.fact]} source`]: i.source });
+
+  const cur = await getBusiness(clientId);
+  if (cur.kind === "creator") throw new OpsError("Public facts are for businesses we manage.");
+  const before = businessFacts(cur);
+  const info: PublicInfo = readPublicInfo(cur.publicInfo);
+  const sources: Partial<Record<FactKey, string>> = { ...(info.sources ?? {}) };
+  const notFound = new Set<FactKey>(info.notFound ?? []);
+  const set: Partial<typeof schema.clients.$inferInsert> = {};
+  const changed: string[] = [];
+  const kept: string[] = [];
+  const after = { ...before };
+  let ownerSaid: boolean | undefined;
+
+  const store = (key: FactKey, value: string | null) => {
+    after[key] = value ? (key === "instagram" || key === "tiktok" ? `@${value}` : value) : null;
+    if (key === "website") set.website = value;
+    else if (key === "instagram") set.instagramHandle = value;
+    else if (key === "tiktok") set.tiktokHandle = value;
+    else if (isInfoFact(key)) {
+      if (value) info[key] = value;
+      else delete info[key];
+    }
+  };
+
+  for (const it of list) {
+    const key = it.fact;
+    const label = FACT_LABEL[key];
+    const raw = typeof it.value === "string" ? it.value.trim() : "";
+    if (it.notFound && !raw) {
+      // "Not found" never removes something a person or earlier research saved.
+      if (after[key]) kept.push(`${label}: kept ${show(after[key])} (already saved)`);
+      else if (!notFound.has(key)) {
+        notFound.add(key);
+        changed.push(`${label}: marked not found`);
+      }
+      continue;
+    }
+    if (!raw) {
+      if (claude) throw new OpsError(`${label}: give the value and its source, or mark it not_found. Claude can't clear a fact — ask Nora or Cameron.`);
+      if (it.value === undefined || it.value === null) continue;
+      if (after[key]) {
+        changed.push(`${label}: ${show(after[key])} → —`);
+        store(key, null);
+      }
+      delete sources[key];
+      continue;
+    }
+    const fromOwner = it.source?.trim().toLowerCase() === OWNER_SOURCE;
+    if (fromOwner && claude && !(ownerSaid ??= await ownerCorrected(clientId))) {
+      throw new OpsError(`${label}: source "${OWNER_SOURCE}" is only for a correction the owner made on their onboarding form ("Something's off"). Give the public web address where you found it.`);
+    }
+    const src = fromOwner ? OWNER_SOURCE : it.source?.trim() ? normalizeSource(it.source) : null;
+    if (claude && !src) throw new OpsError(`${label}: add the source — the public web address where you found it (https://…).`);
+    const value = normalizeFact(key, raw);
+    const shown = key === "instagram" || key === "tiktok" ? `@${value}` : value;
+    const was = after[key];
+    notFound.delete(key);
+    if (was !== shown) {
+      store(key, value);
+      if (src) sources[key] = src;
+      else delete sources[key]; // the old source vouched for the old value
+      changed.push(`${label}: ${show(was)} → ${show(shown)}${src ? ` (source: ${sourceLabel(src)})` : ""}`);
+    } else if (src && sources[key] !== src) {
+      sources[key] = src;
+      changed.push(`${label}: source → ${sourceLabel(src)}`);
+    }
+  }
+
+  const next: PublicInfo = { ...info, checkedAt: new Date().toISOString(), checkedBy: actor };
+  if (Object.keys(sources).length) next.sources = sources;
+  else delete next.sources;
+  if (notFound.size) next.notFound = [...notFound];
+  else delete next.notFound;
+  set.publicInfo = next;
+
+  const db = await getDb();
+  await db.update(schema.clients).set(set).where(eq(schema.clients.id, clientId));
+  if (changed.length) {
+    await logActivity({
+      actor, action: "client.updated", entityType: "client", entityId: clientId, clientId,
+      summary: `${claude ? "Claude saved" : "Saved"} public facts for ${cur.name}: ${changed.join("; ")}`.slice(0, 1000),
+    });
+  }
+  return { changed, kept, checklist: factsChecklist({ ...cur, ...set, publicInfo: next } as schema.Client) };
 }
 
 /* ───────────────────────── Monthly plan ───────────────────────── */
@@ -391,6 +584,6 @@ export async function createBusiness(input: z.input<typeof CreateBusinessInput>,
   return {
     created: true, id, name: v.name.trim(), services,
     checklist: steps.map((t) => ({ title: t.title, for: t.assignee })),
-    message: `Set up ${v.name.trim()} with a starting monthly plan (${services.join(", ")}) and a Getting started checklist, plus a research ask for you. Next: send_onboarding_form so a person can text the owner the welcome form.`,
+    message: `Set up ${v.name.trim()} with a starting monthly plan (${services.join(", ")}) and a Getting started checklist, plus a research ask for you. Next, work that ask: look up their public facts and save them with set_business_facts, then send_onboarding_form gets the welcome form link for a person to text the owner.`,
   };
 }

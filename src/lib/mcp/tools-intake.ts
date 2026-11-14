@@ -46,9 +46,11 @@ export function registerIntakeTools(server: McpServer) {
   server.registerTool("get_client_intake", {
     title: "Get a client's onboarding form",
     description:
-      "The answers a business sent through its private onboarding form (/start/<token>): business basics, customers & goals, look & voice, " +
-      "accounts and which access steps they finished (Meta Business Suite, Google Business Profile, TikTok), review-reply and creator preferences, " +
-      "contact & approvals. Labels are English; answers are the client's own words in the language they used (lang: en · zh-Hans · zh-Hant). " +
+      "The answers a business sent through its private 3-page onboarding form (/start/<token>): \"Is this right? · About you\" (whether the owner confirmed the public details we showed them or said something's off — with what we showed and their words — plus contact, how and in what language to reach them), " +
+      "Accounts & photos (accounts we couldn't find, which access steps they finished for Meta Business Suite and Google Business Profile, photo links), " +
+      "and How we'll work together (what to show off, post language, creators, unhappy-review handling). Only the first page is required, so later sections may be empty. Forms sent on the earlier, longer form also have " +
+      "\"Earlier answers · …\" sections (business basics, customers & goals, look & voice…). Labels are English; answers are the client's own words in the language they used (lang: en · zh-Hans · zh-Hant). " +
+      "The form never asks public facts (address, hours, phone, website…): those are looked up before it goes out and saved with set_business_facts. " +
       "Use it to draft their brand voice (in the languages they post in), a first-month plan per platform, review-reply guidelines, and a list of anything missing. " +
       UNTRUSTED_SOURCE,
     inputSchema: { client_id: z.string().describe("Business id (slug) — from list_clients or the ask that sent you here.") },
