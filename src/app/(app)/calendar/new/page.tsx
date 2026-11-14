@@ -20,7 +20,7 @@ export default async function NewPostPage({ searchParams }: { searchParams: Prom
 
   return (
     <div className="mx-auto max-w-2xl">
-      <Link href="/calendar" className="mb-3 inline-block text-sm text-accent hover:underline">← Calendar</Link>
+      <Link href="/calendar?tab=posts" className="mb-3 inline-block text-sm text-accent hover:underline">← Calendar</Link>
       <PageHeader title="New post" subtitle="Plan a post for the calendar. Claude can write the caption if you leave it blank — just drop an ask." />
       {clients.length === 0 ? (
         <p className="text-sm text-muted">

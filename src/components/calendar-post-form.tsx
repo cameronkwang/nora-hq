@@ -293,7 +293,7 @@ export function CalendarPostForm({
                 ? "Save changes"
                 : "Add to calendar"}
         </button>
-        {!editing && <Link href="/calendar" className={buttonClass("ghost")}>Cancel</Link>}
+        {!editing && <Link href="/calendar?tab=posts" className={buttonClass("ghost")}>Cancel</Link>}
       </div>
     </form>
   );

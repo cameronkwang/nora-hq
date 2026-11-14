@@ -64,6 +64,13 @@
       "when": 1794595708351,
       "tag": "0008_client_intake_facebook_areas",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1794605523850,
+      "tag": "0009_schedule_items",
+      "breakpoints": true
     }
   ]
 }

@@ -7,28 +7,30 @@ import { clientSummaries } from "./queries";
 
 export const dynamic = "force-dynamic";
 
-export default async function ClientsPage({ searchParams }: { searchParams: Promise<{ archived?: string }> }) {
+export default async function ClientsPage({ searchParams }: { searchParams: Promise<{ inactive?: string; archived?: string }> }) {
   const sp = await searchParams;
-  const showArchived = sp.archived === "1";
+  // ?inactive=1 (old links used ?archived=1). "Inactive" is the UI word for clients.archived.
+  const showInactive = sp.inactive === "1" || sp.archived === "1";
   const month = currentMonth();
   const everyone = await listClients({ includeArchived: true });
   // Nora's own workspace isn't a business: it gets a pinned link above the grid instead of a card.
-  const creator = everyone.find((c) => isCreatorClient(c)) ?? null; // pinned even if archived
+  const creator = everyone.find((c) => isCreatorClient(c)) ?? null; // pinned even if inactive
   const all = everyone.filter((c) => !isCreatorClient(c));
-  const archivedCount = all.filter((c) => c.archived).length;
-  const clients = showArchived ? all : all.filter((c) => !c.archived);
+  const inactiveCount = all.filter((c) => c.archived).length;
+  // Showing inactive: active ones first, then the inactive ones.
+  const clients = showInactive ? [...all.filter((c) => !c.archived), ...all.filter((c) => c.archived)] : all.filter((c) => !c.archived);
   const summaries = await clientSummaries(clients.map((c) => c.id), month);
 
   return (
     <>
       <PageHeader
         title="Businesses"
-        subtitle={`${clients.filter((c) => !c.archived).length} active · progress for ${monthLabel(month)}`}
+        subtitle={`${all.length - inactiveCount} active${showInactive ? ` · ${inactiveCount} inactive` : ""} · progress for ${monthLabel(month)}`}
         actions={
           <div className="flex items-center gap-3">
-            {archivedCount > 0 && (
-              <Link href={showArchived ? "/clients" : "/clients?archived=1"} className="text-sm text-muted underline-offset-2 hover:text-text hover:underline">
-                {showArchived ? "Hide archived" : `Show archived (${archivedCount})`}
+            {inactiveCount > 0 && (
+              <Link href={showInactive ? "/clients" : "/clients?inactive=1"} className="inline-flex min-h-11 items-center text-sm text-muted underline-offset-2 hover:text-text hover:underline">
+                {showInactive ? "Hide inactive" : `Show inactive (${inactiveCount})`}
               </Link>
             )}
             <NewClientLink />
@@ -70,7 +72,7 @@ export default async function ClientsPage({ searchParams }: { searchParams: Prom
                           <p className="truncate font-semibold">{c.name}</p>
                           <p className="truncate text-sm text-muted">{c.location ?? "No location set"}</p>
                         </div>
-                        {c.archived && <Badge>Archived</Badge>}
+                        {c.archived && <Badge>Inactive</Badge>}
                       </div>
                       <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs">
                         {c.instagramHandle ? <span className="text-ig">IG @{c.instagramHandle}</span> : <span className="text-muted">No IG handle</span>}

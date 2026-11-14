@@ -827,3 +827,91 @@ export function intakeOptionLabel<F extends ChoiceField>(field: F, value: string
   const labels = en.options[field] as Record<string, string>;
   return labels[value] ?? value;
 }
+
+/* ───────────────────────── Welcome sentence, tailored ───────────────────────── */
+
+/** What we do for this business, as the welcome step words it. Mirrors onboard-services' service names. */
+export type WelcomeService = "instagram" | "facebook" | "tiktok" | "google" | "creators" | "collab";
+
+/**
+ * The client's active monthly plan → which services to mention. Platform items name themselves; creator outreach
+ * and collabs are recognised by title (the plan has no service column).
+ */
+export function welcomeServicesFromPlan(items: ReadonlyArray<{ title: string; platform: string; active: boolean }>): WelcomeService[] {
+  const out = new Set<WelcomeService>();
+  for (const d of items) {
+    if (!d.active) continue;
+    const t = d.title.toLowerCase();
+    if (/collab/.test(t)) out.add("collab");
+    else if (/creator|influencer|outreach/.test(t)) out.add("creators");
+    else if (d.platform === "instagram" || d.platform === "facebook" || d.platform === "tiktok" || d.platform === "google") out.add(d.platform);
+  }
+  return (["instagram", "facebook", "tiktok", "google", "creators", "collab"] as const).filter((s) => out.has(s));
+}
+
+const SOCIAL = { instagram: "Instagram", facebook: "Facebook", tiktok: "TikTok" } as const;
+
+/** "a", "a and b", "a, b and c" — or the Chinese "a、b和c". */
+function listJoin(items: string[], lang: IntakeLangCode): string {
+  if (items.length <= 1) return items[0] ?? "";
+  const last = items[items.length - 1];
+  const head = items.slice(0, -1);
+  if (lang === "en") return `${head.join(", ")} and ${last}`;
+  return `${head.join("、")} 和 ${last}`;
+}
+
+/**
+ * The welcome step's "what we'll do" sentence, built from the client's plan and creator search areas
+ * (clients.outreachAreas), in natural English / 简体 / 繁體. With no plan, falls back to a general sentence.
+ */
+export function welcomeIntro(lang: IntakeLangCode, opts: { services: readonly WelcomeService[]; areas?: string | null }): string {
+  const has = (s: WelcomeService) => opts.services.includes(s);
+  const social = (["instagram", "facebook", "tiktok"] as const).filter(has).map((s) => SOCIAL[s]);
+  const areas = (opts.areas ?? "").split(/[,;\n]+/).map((a) => a.trim()).filter(Boolean).slice(0, 4);
+  const google = has("google");
+  const creators = has("creators");
+  const collab = has("collab");
+
+  if (!social.length && !google && !creators && !collab) {
+    return {
+      en: "We're Nora & Cameron. We'll help with your social media and online reviews, so more people find your restaurant.",
+      "zh-Hans": "我们是 Nora 和 Cameron，会帮您打理社交媒体和网上评论，让更多人认识您的餐厅。",
+      "zh-Hant": "我們是 Nora 和 Cameron，會幫您經營社群媒體和網路評論，讓更多人認識您的餐廳。",
+    }[lang];
+  }
+
+  if (lang === "en") {
+    const jobs = [
+      social.length ? `take care of your ${listJoin(social, "en")}` : null,
+      google ? "reply to your Google reviews" : null,
+    ].filter((x): x is string => !!x);
+    const parts = ["We're Nora & Cameron."];
+    if (jobs.length) parts.push(`We'll ${jobs.join(social.length > 1 ? ", and " : " and ")}.`);
+    if (creators) {
+      const where = areas.length ? ` from ${listJoin(areas, "en")}` : "";
+      parts.push(`We'll ${jobs.length ? "also " : ""}invite local food creators${where} to visit.`);
+    }
+    if (collab) parts.push(`Nora will ${jobs.length || creators ? "also " : ""}come by to film and post about your food herself.`);
+    return parts.join(" ");
+  }
+
+  const hans = lang === "zh-Hans";
+  const jobs = [
+    social.length ? `${hans ? "帮您打理" : "幫您經營"} ${social.join("、")}` : null,
+    google ? (social.length ? (hans ? "回复 Google 评论" : "回覆 Google 評論") : hans ? "帮您回复 Google 评论" : "幫您回覆 Google 評論") : null,
+  ].filter((x): x is string => !!x);
+  const where = areas.length ? ` ${listJoin(areas, lang)} ${hans ? "地区的" : "地區的"}` : "";
+  const creatorClause = hans ? `邀请${where || ""}本地美食博主来探店` : `邀請${where || ""}在地美食網紅來店裡試吃分享`;
+  let text = hans ? "我们是 Nora 和 Cameron。" : "我們是 Nora 和 Cameron。";
+  if (jobs.length) {
+    text += `${hans ? "接下来由我们" : "接下來由我們"}${jobs.join("，")}`;
+    text += creators ? `，${hans ? "还会" : "也會"}${creatorClause}。` : "。";
+  } else if (creators) {
+    text += `${hans ? "接下来我们会" : "接下來我們會"}${creatorClause}。`;
+  }
+  if (collab) {
+    const also = jobs.length || creators;
+    text += hans ? `Nora ${also ? "也会" : "会"}亲自到店拍摄，分享您的美食。` : `Nora ${also ? "也會" : "會"}親自到店拍攝，分享您的美食。`;
+  }
+  return text.replace(/\s+([，。])/g, "$1").replace(/邀请\s+/g, "邀请 ").replace(/邀請\s+/g, "邀請 ");
+}

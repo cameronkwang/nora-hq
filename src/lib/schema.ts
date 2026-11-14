@@ -722,3 +722,34 @@ export const clientIntakes = pgTable(
 );
 
 export type ClientIntake = typeof clientIntakes.$inferSelect;
+
+/* ───────────────────────── Nora's schedule ───────────────────────── */
+
+/**
+ * Nora's jobs: monthly client work and collab visits. Money is deliberately NOT stored (pasted lists may
+ * contain amounts, payment methods and 🚩 owed flags — the importer reads and drops them).
+ * date = "YYYY-MM-DD" when the day is known; month = "YYYY-MM" always (day "XX" → date null).
+ */
+export const scheduleItems = pgTable(
+  "schedule_items",
+  {
+    id: text("id").primaryKey(),
+    month: text("month").notNull(),
+    date: text("date"),
+    businessName: text("business_name").notNull(),
+    nameKey: text("name_key").notNull(), // normalized name for de-duping re-imports
+    clientId: text("client_id").references(() => clients.id, { onDelete: "set null" }),
+    dealId: text("deal_id").references(() => deals.id, { onDelete: "set null" }),
+    isFree: boolean("is_free").notNull().default(false),
+    needsReel: boolean("needs_reel").notNull().default(false), // 📸 in Nora's list = a reel to post
+    reelPostedAt: timestamp("reel_posted_at", { withTimezone: true }),
+    notes: text("notes"),
+    source: text("source").$type<"paste" | "manual" | "claude">().notNull().default("manual"),
+    createdBy: text("created_by").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("schedule_items_month_name_uq").on(t.month, t.nameKey), index("schedule_items_date_idx").on(t.date)],
+);
+
+export type ScheduleItem = typeof scheduleItems.$inferSelect;

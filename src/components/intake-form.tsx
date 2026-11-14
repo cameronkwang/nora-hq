@@ -90,7 +90,7 @@ function applyValues(form: HTMLFormElement, values: Values) {
 }
 
 export function IntakeForm({
-  token, intakeId, lang, businessName, initial, accessEmail, uploadsEnabled,
+  token, intakeId, lang, businessName, initial, accessEmail, uploadsEnabled, intro,
 }: {
   token: string;
   intakeId: string;
@@ -99,6 +99,8 @@ export function IntakeForm({
   initial: Values;
   accessEmail: string | null;
   uploadsEnabled: boolean;
+  /** Tailored welcome sentence (from the business's plan); falls back to the generic one. */
+  intro?: string;
 }) {
   const C = intakeCopy(lang);
   const [state, formAction, pending] = useActionState<IntakeFormState, FormData>(submitIntakeAction, {});
@@ -280,7 +282,7 @@ export function IntakeForm({
         <Step C={C} index={0} current={step} refs={stepRefs}>
           <div className="space-y-4 text-[17px] leading-relaxed">
             <p className="text-2xl font-semibold tracking-tight">{C.welcome.hi(businessName)}</p>
-            <p>{C.welcome.intro}</p>
+            <p>{intro ?? C.welcome.intro}</p>
             <p className="text-muted">{C.welcome.purpose}</p>
             <ul className="space-y-2.5 rounded-2xl bg-surface-2 p-4">
               {C.welcome.points.map((pt) => (

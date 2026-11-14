@@ -1,82 +1,61 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { Suspense, useEffect, useRef, useState, type ReactNode } from "react";
 import { cx } from "./ui";
 import { NewClientLink } from "./onboard-link";
+import { sectionOf, type SectionKey } from "./section-tabs";
 
 type NavClient = { id: string; name: string; location: string | null; kind?: string | null };
+type User = { name: string; email: string };
+type Counts = { newAsks: number; needsReview: number; tasksDue: number };
+type NavProps = { user: User; creator: NavClient | null; businesses: NavClient[]; inactiveCount: number; counts: Counts };
 
-/** Nora's own workspace (clients.kind "creator", seeded as "noraeatsgood"). Pinned above the businesses. */
-const CREATOR_ID = "noraeatsgood";
-const isCreator = (c: NavClient) => c.kind === "creator" || c.id === CREATOR_ID;
+/** Nora's own workspace handle (clients.kind "creator", seeded as "noraeatsgood"). */
+const CREATOR_HANDLE = "noraeatsgood";
 
-/** Splits the nav list into Nora's pinned entry and the businesses. */
-function splitClients(clients: NavClient[]) {
-  return { creator: clients.find(isCreator) ?? null, businesses: clients.filter((c) => !isCreator(c)) };
-}
-type Counts = { newAsks: number; needsReview: number };
-type CountKey = keyof Counts;
-type Item = { href: string; label: string; icon: IconName; count?: CountKey };
+type Item = { href: string; label: string; icon: IconName; section?: SectionKey; badge?: (c: Counts) => number };
 
-/** Everyday places. Shown in the desktop sidebar; on phones the first ones live in the bottom tab bar. */
-const MAIN: Item[] = [
-  { href: "/", label: "Home", icon: "home" },
-  { href: "/asks", label: "Asks", icon: "inbox", count: "newAsks" },
-  { href: "/review", label: "Review", icon: "check", count: "needsReview" },
-  { href: "/tasks", label: "Tasks", icon: "list" },
-  { href: "/calendar", label: "Calendar", icon: "calendar" },
-  { href: "/creators", label: "Creators", icon: "users" },
-  { href: "/leads", label: "Leads", icon: "target" },
-  { href: "/numbers", label: "Numbers", icon: "chart" },
-];
+/** Everyday places. Inbox, Outreach and Insights are sections: their tabs live at the top of each member page. */
+const HOME: Item = { href: "/", label: "Home", icon: "home" };
+const INBOX: Item = { href: "/asks", label: "Inbox", icon: "inbox", section: "inbox", badge: (c) => c.newAsks + c.needsReview };
+const TASKS: Item = { href: "/tasks", label: "Tasks", icon: "list", badge: (c) => c.tasksDue };
+const CALENDAR: Item = { href: "/calendar", label: "Calendar", icon: "calendar" };
+const OUTREACH: Item = { href: "/creators", label: "Outreach", icon: "users", section: "outreach" };
+const INSIGHTS: Item = { href: "/numbers", label: "Insights", icon: "chart", section: "insights" };
+const SETTINGS: Item = { href: "/settings", label: "Settings", icon: "gear" };
+const ACTIVITY: Item = { href: "/activity", label: "Activity", icon: "clock" };
 
-/** Less frequent places, tucked behind "More". */
-const MORE: Item[] = [
-  { href: "/reviews", label: "Google reviews", icon: "star" },
-  { href: "/activity", label: "Activity", icon: "clock" },
-  { href: "/settings", label: "Settings", icon: "gear" },
-];
-
-/** Phone tab bar: Home, Asks, [+], Review, Tasks. Everything else is in the More sheet. */
-const TABS_LEFT = MAIN.slice(0, 2);
-const TABS_RIGHT = MAIN.slice(2, 4);
-const SHEET_MAIN = MAIN.slice(4);
+const MAIN = [HOME, INBOX, TASKS, CALENDAR];
+const GROW = [OUTREACH, INSIGHTS];
+const INACTIVE_HREF = "/clients?inactive=1";
 
 function useIsActive() {
   const path = usePathname() ?? "/";
-  return (href: string) => (href === "/" ? path === "/" : path === href || path.startsWith(`${href}/`));
+  const section = sectionOf(path);
+  return (item: Item | string) => {
+    if (typeof item !== "string" && item.section) return section === item.section;
+    const href = typeof item === "string" ? item : item.href;
+    return href === "/" ? path === "/" : path === href || path.startsWith(`${href}/`);
+  };
 }
 
-/** Nora's section covers her workspace page plus My stats and collab requests. */
-function useCreatorActive(id: string | undefined) {
-  const active = useIsActive();
-  return !!id && (active(`/clients/${id}`) || active("/stats") || active("/collabs"));
-}
-
-export function Sidebar({ user, clients, counts }: { user: { name: string; email: string }; clients: NavClient[]; counts: Counts }) {
+export function Sidebar(props: NavProps) {
   useNewAskShortcut();
   return (
     <>
-      <DesktopSidebar user={user} clients={clients} counts={counts} />
-      <MobileNav user={user} clients={clients} counts={counts} />
+      <DesktopSidebar {...props} />
+      <MobileNav {...props} />
     </>
   );
 }
 
 /* ------------------------------------------------------------------ desktop */
 
-function DesktopSidebar({ user, clients, counts }: { user: { name: string; email: string }; clients: NavClient[]; counts: Counts }) {
+function DesktopSidebar({ user, creator, businesses, inactiveCount, counts }: NavProps) {
   const active = useIsActive();
-  const path = usePathname();
-  const { creator, businesses } = splitClients(clients);
-  const creatorActive = useCreatorActive(creator?.id);
-  const inMore = MORE.some((m) => active(m.href));
-  const [moreOpen, setMoreOpen] = useState(inMore);
-  useEffect(() => {
-    if (inMore) setMoreOpen(true);
-  }, [inMore, path]);
+  const path = usePathname() ?? "/";
 
   return (
     <aside className="sticky top-0 hidden h-dvh w-60 shrink-0 flex-col overflow-y-auto border-r border-border bg-surface px-3 py-5 md:flex">
@@ -93,72 +72,75 @@ function DesktopSidebar({ user, clients, counts }: { user: { name: string; email
         <kbd className="ml-1 rounded border border-current/30 px-1 font-sans text-[10px] font-medium opacity-70">N</kbd>
       </Link>
 
-      <nav aria-label="Main" className="flex flex-col gap-6 text-sm">
+      <nav aria-label="Main" className="flex flex-col gap-5 text-sm">
         <div className="flex flex-col gap-0.5">
           {MAIN.map((item) => (
-            <SideLink key={item.href} item={item} active={active(item.href)} count={item.count ? counts[item.count] : 0} />
+            <SideLink key={item.href} item={item} active={active(item) && path !== "/asks/new"} count={item.badge?.(counts) ?? 0} />
           ))}
         </div>
 
-        {creator && (
-          <Link
-            href={`/clients/${creator.id}`}
-            aria-current={creatorActive ? "page" : undefined}
-            className={cx(
-              "flex items-center gap-2.5 rounded-lg border px-3 py-2",
-              creatorActive ? "border-accent bg-accent-soft text-accent" : "border-border hover:bg-surface-2",
-            )}
-          >
-            <Icon name="spark" className={cx("size-4 shrink-0", !creatorActive && "text-accent")} />
-            <span className="min-w-0 flex-1">
-              <span className="block truncate font-semibold">{creator.name}</span>
-              <span className="block truncate text-xs font-normal text-muted">@{CREATOR_ID}</span>
-            </span>
-          </Link>
-        )}
+        <div>
+          <SideHeading>Grow</SideHeading>
+          <div className="flex flex-col gap-0.5">
+            {GROW.map((item) => (
+              <SideLink key={item.href} item={item} active={active(item)} />
+            ))}
+          </div>
+        </div>
 
         <div>
           <div className="flex items-center justify-between pr-2">
-            <p className="px-3 pb-1 text-xs font-semibold uppercase tracking-wide text-muted">Businesses</p>
+            <Link href="/clients" className="rounded-md hover:text-text">
+              <SideHeading>My businesses</SideHeading>
+            </Link>
             <NewClientLink variant="plus" />
           </div>
           <div className="flex flex-col gap-0.5">
-            {businesses.map((c) => (
-              <Link
-                key={c.id}
-                href={`/clients/${c.id}`}
-                aria-current={active(`/clients/${c.id}`) ? "page" : undefined}
-                className={cx("rounded-lg px-3 py-1.5", active(`/clients/${c.id}`) ? "bg-accent-soft font-semibold text-accent" : "hover:bg-surface-2")}
-              >
-                <span className="block truncate">{c.name}</span>
-                {c.location && <span className="block truncate text-xs font-normal text-muted">{c.location}</span>}
-              </Link>
-            ))}
-            <Link
-              href="/clients"
-              aria-current={path === "/clients" ? "page" : undefined}
-              className={cx("rounded-lg px-3 py-1.5 text-xs", path === "/clients" ? "bg-accent-soft font-semibold text-accent" : "text-muted hover:bg-surface-2")}
-            >
-              All businesses
-            </Link>
+            {businesses.map((c) => {
+              const on = active(`/clients/${c.id}`);
+              return (
+                <Link
+                  key={c.id}
+                  href={`/clients/${c.id}`}
+                  aria-current={on ? "page" : undefined}
+                  className={cx("rounded-lg px-3 py-1.5", on ? "bg-accent-soft font-semibold text-accent" : "hover:bg-surface-2")}
+                >
+                  <span className="block truncate">{c.name}</span>
+                  {c.location && <span className="block truncate text-xs font-normal text-muted">{c.location}</span>}
+                </Link>
+              );
+            })}
+            {businesses.length === 0 && <p className="px-3 py-1.5 text-xs text-muted">No active businesses.</p>}
+            {inactiveCount > 0 && (
+              <Suspense fallback={<InactiveLink count={inactiveCount} active={false} />}>
+                <InactiveLinkWithParams count={inactiveCount} />
+              </Suspense>
+            )}
           </div>
         </div>
+
+        {creator && <CreatorCard creator={creator} active={active(`/clients/${creator.id}`)} />}
       </nav>
 
       <div className="mt-auto pt-6 text-sm">
-        <details open={moreOpen} onToggle={(e) => setMoreOpen(e.currentTarget.open)} className="group">
-          <summary className="no-marker flex items-center justify-between rounded-lg px-3 py-2 text-muted hover:bg-surface-2 hover:text-text">
-            More
-            <Icon name="chevron" className="size-4 transition group-open:rotate-180" />
-          </summary>
-          <div className="mt-0.5 flex flex-col gap-0.5">
-            {MORE.map((item) => (
-              <SideLink key={item.href} item={item} active={active(item.href)} />
-            ))}
-          </div>
-        </details>
+        <div className="flex gap-1 px-1">
+          {[SETTINGS, ACTIVITY].map((item) => {
+            const on = active(item);
+            return (
+              <Link
+                key={item.href}
+                href={item.href}
+                aria-current={on ? "page" : undefined}
+                className={cx("flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-xs", on ? "bg-accent-soft font-semibold text-accent" : "text-muted hover:bg-surface-2 hover:text-text")}
+              >
+                <Icon name={item.icon} className="size-3.5" />
+                {item.label}
+              </Link>
+            );
+          })}
+        </div>
 
-        <div className="mt-3 border-t border-border px-3 pt-4 text-xs text-muted">
+        <div className="mt-2 border-t border-border px-3 pt-4 text-xs text-muted">
           <p className="font-medium text-text">{user.name}</p>
           <p className="truncate">{user.email}</p>
           <form action="/login/logout" method="post" className="mt-2">
@@ -167,6 +149,50 @@ function DesktopSidebar({ user, clients, counts }: { user: { name: string; email
         </div>
       </div>
     </aside>
+  );
+}
+
+function SideHeading({ children }: { children: ReactNode }) {
+  return <p className="px-3 pb-1 text-xs font-semibold uppercase tracking-wide text-muted">{children}</p>;
+}
+
+function CreatorCard({ creator, active }: { creator: NavClient; active: boolean }) {
+  return (
+    <Link
+      href={`/clients/${creator.id}`}
+      aria-current={active ? "page" : undefined}
+      className={cx(
+        "flex items-center gap-2.5 rounded-lg border px-3 py-2",
+        active ? "border-accent bg-accent-soft text-accent" : "border-border hover:bg-surface-2",
+      )}
+    >
+      <Icon name="spark" className={cx("size-4 shrink-0", !active && "text-accent")} />
+      <span className="min-w-0 flex-1">
+        <span className="block truncate font-semibold">{creator.name}</span>
+        <span className="block truncate text-xs font-normal text-muted">@{CREATOR_HANDLE}</span>
+      </span>
+    </Link>
+  );
+}
+
+/** "Inactive (N)" — highlighted on /clients?inactive=1 (the query string needs useSearchParams, hence the Suspense wrapper). */
+function InactiveLinkWithParams({ count }: { count: number }) {
+  const path = usePathname();
+  const params = useSearchParams();
+  const on = path === "/clients" && (params?.get("inactive") === "1" || params?.get("archived") === "1");
+  return <InactiveLink count={count} active={on} />;
+}
+
+function InactiveLink({ count, active }: { count: number; active: boolean }) {
+  return (
+    <Link
+      href={INACTIVE_HREF}
+      aria-current={active ? "page" : undefined}
+      className={cx("flex items-center gap-1 rounded-lg px-3 py-1.5 text-xs", active ? "bg-accent-soft font-semibold text-accent" : "text-muted hover:bg-surface-2 hover:text-text")}
+    >
+      Inactive ({count})
+      <Icon name="chevron" className="size-3 rotate-90" />
+    </Link>
   );
 }
 
@@ -189,9 +215,9 @@ function SideLink({ item, active, count = 0 }: { item: Item; active: boolean; co
 
 /* ------------------------------------------------------------------- phones */
 
-function MobileNav({ user, clients, counts }: { user: { name: string; email: string }; clients: NavClient[]; counts: Counts }) {
+function MobileNav({ user, creator, businesses, inactiveCount, counts }: NavProps) {
   const active = useIsActive();
-  const path = usePathname();
+  const path = usePathname() ?? "/";
   const sheet = useRef<HTMLDialogElement>(null);
   const [open, setOpen] = useState(false);
 
@@ -217,43 +243,28 @@ function MobileNav({ user, clients, counts }: { user: { name: string; email: str
     };
   }, [open]);
 
-  const { creator, businesses } = splitClients(clients);
-  const creatorActive = useCreatorActive(creator?.id);
-  const sheetActive = [...SHEET_MAIN, ...MORE].some((i) => active(i.href)) || path.startsWith("/clients") || creatorActive;
+  const onTab = [HOME, INBOX, TASKS].some((i) => active(i)) || path === "/asks/new";
+  const sheetActive = open || !onTab;
 
   return (
     <>
-      {/* Slim top bar: name + More. Primary navigation lives at the bottom, under the thumb. */}
+      {/* Slim top bar: just the name. Navigation lives at the bottom, under the thumb. */}
       <header className="sticky top-0 z-20 border-b border-border bg-bg/90 pt-[env(safe-area-inset-top)] backdrop-blur md:hidden">
-        <div className="flex h-12 items-center justify-between pl-[max(1rem,env(safe-area-inset-left))] pr-[max(0.25rem,env(safe-area-inset-right))]">
+        <div className="flex h-12 items-center pl-[max(1rem,env(safe-area-inset-left))] pr-[max(1rem,env(safe-area-inset-right))]">
           <Link href="/" className="font-semibold tracking-tight">
             Nora HQ
           </Link>
-          <button
-            type="button"
-            onClick={show}
-            aria-haspopup="dialog"
-            aria-expanded={open}
-            className={cx(
-              "flex h-11 items-center gap-1.5 rounded-lg px-3 text-sm font-medium",
-              sheetActive ? "text-accent" : "text-text",
-            )}
-          >
-            <Icon name="menu" className="size-5" />
-            More
-          </button>
         </div>
       </header>
 
-      {/* Bottom tab bar. */}
+      {/* Bottom tab bar: Home · Inbox · (+) · Tasks · More. */}
       <nav
         aria-label="Main"
         className="fixed inset-x-0 bottom-0 z-30 border-t border-border bg-surface/95 pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)] backdrop-blur md:hidden"
       >
         <div className="mx-auto grid h-16 max-w-md grid-cols-5">
-          {TABS_LEFT.map((item) => (
-            <Tab key={item.href} item={item} active={active(item.href) && path !== "/asks/new"} count={item.count ? counts[item.count] : 0} />
-          ))}
+          <Tab item={HOME} active={active(HOME)} count={0} />
+          <Tab item={INBOX} active={active(INBOX) && path !== "/asks/new"} count={INBOX.badge!(counts)} />
           <Link
             href="/asks/new"
             aria-label="New ask"
@@ -269,9 +280,17 @@ function MobileNav({ user, clients, counts }: { user: { name: string; email: str
               <Icon name="plus" className="size-6" strokeWidth={2.4} />
             </span>
           </Link>
-          {TABS_RIGHT.map((item) => (
-            <Tab key={item.href} item={item} active={active(item.href)} count={item.count ? counts[item.count] : 0} />
-          ))}
+          <Tab item={TASKS} active={active(TASKS)} count={TASKS.badge!(counts)} />
+          <button
+            type="button"
+            onClick={show}
+            aria-haspopup="dialog"
+            aria-expanded={open}
+            className={cx("flex flex-col items-center justify-center gap-0.5 text-[11px] font-medium", sheetActive ? "text-accent" : "text-muted")}
+          >
+            <Icon name="menu" className="size-6" strokeWidth={sheetActive ? 2.2 : 1.8} />
+            More
+          </button>
         </div>
       </nav>
 
@@ -296,35 +315,40 @@ function MobileNav({ user, clients, counts }: { user: { name: string; email: str
 
           <div className="flex flex-col gap-5 px-2 pt-1">
             <SheetGroup>
-              {SHEET_MAIN.map((item) => (
-                <SheetLink key={item.href} href={item.href} icon={item.icon} active={active(item.href)} onClick={close}>
+              {[CALENDAR, ...GROW].map((item) => (
+                <SheetLink key={item.href} href={item.href} icon={item.icon} active={active(item)} onClick={close}>
                   {item.label}
                 </SheetLink>
               ))}
             </SheetGroup>
 
-            <SheetGroup title="Businesses">
-              {creator && (
-                <SheetLink href={`/clients/${creator.id}`} icon="spark" active={creatorActive} onClick={close}>
-                  <span className="block truncate">{creator.name}</span>
-                  <span className="block truncate text-xs font-normal text-muted">@{CREATOR_ID}</span>
-                </SheetLink>
-              )}
+            <SheetGroup title="My businesses">
               {businesses.map((c) => (
                 <SheetLink key={c.id} href={`/clients/${c.id}`} icon="store" active={active(`/clients/${c.id}`)} onClick={close}>
                   <span className="block truncate">{c.name}</span>
                   {c.location && <span className="block truncate text-xs font-normal text-muted">{c.location}</span>}
                 </SheetLink>
               ))}
-              <SheetLink href="/clients" icon="grid" active={path === "/clients"} onClick={close}>
-                All businesses
-              </SheetLink>
+              {inactiveCount > 0 && (
+                <SheetLink href={INACTIVE_HREF} icon="box" active={false} onClick={close}>
+                  <span className="text-muted">Inactive ({inactiveCount})</span>
+                </SheetLink>
+              )}
               <NewClientLink variant="row" onClick={close} />
             </SheetGroup>
 
+            {creator && (
+              <SheetGroup>
+                <SheetLink href={`/clients/${creator.id}`} icon="spark" active={active(`/clients/${creator.id}`)} onClick={close}>
+                  <span className="block truncate">{creator.name}</span>
+                  <span className="block truncate text-xs font-normal text-muted">@{CREATOR_HANDLE}</span>
+                </SheetLink>
+              </SheetGroup>
+            )}
+
             <SheetGroup>
-              {MORE.map((item) => (
-                <SheetLink key={item.href} href={item.href} icon={item.icon} active={active(item.href)} onClick={close}>
+              {[SETTINGS, ACTIVITY].map((item) => (
+                <SheetLink key={item.href} href={item.href} icon={item.icon} active={active(item)} onClick={close}>
                   {item.label}
                 </SheetLink>
               ))}
@@ -426,7 +450,7 @@ function useNewAskShortcut() {
 
 type IconName =
   | "home" | "inbox" | "check" | "list" | "calendar" | "users" | "chart" | "star" | "clock" | "gear"
-  | "plus" | "menu" | "chevron" | "store" | "grid" | "logout" | "target" | "trend" | "spark";
+  | "plus" | "menu" | "chevron" | "store" | "grid" | "logout" | "target" | "trend" | "spark" | "box";
 
 const PATHS: Record<IconName, ReactNode> = {
   home: <path d="M3 10.5 12 3l9 7.5M5 9v11h5v-6h4v6h5V9" />,
@@ -478,6 +502,7 @@ const PATHS: Record<IconName, ReactNode> = {
       <rect x="13" y="13" width="7" height="7" rx="1.5" />
     </>
   ),
+  box: <path d="M3.5 7.5h17v3h-17zM5 10.5V20h14v-9.5M10 14h4" />,
   logout: <path d="M15 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3M10 16l-4-4 4-4M6 12h10" />,
   target: (
     <>

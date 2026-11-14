@@ -212,5 +212,8 @@ export async function deletePostAction(formData: FormData) {
   const back = str(formData.get("returnTo"));
   if (id) await deletePost(id, user.email);
   refresh();
-  redirect(withFlash(back.startsWith("/calendar") ? back : "/calendar", "Post deleted."));
+  // /calendar opens on the Schedule tab now; a deleted post returns to the Posts tab.
+  const to = new URL(back.startsWith("/calendar") ? back : "/calendar", "http://x");
+  if (to.pathname === "/calendar" && !to.searchParams.has("tab")) to.searchParams.set("tab", "posts");
+  redirect(withFlash(`${to.pathname}${to.search}`, "Post deleted."));
 }

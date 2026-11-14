@@ -22,6 +22,9 @@ import { CollabLeadsCard, CollabRequestsCard, CreatorHeader, CreatorRow, Creator
 import { SavedRepliesCard } from "@/components/reply-links";
 import { dealsCardData } from "@/lib/ops-deals";
 import { ClientIntakeCard } from "@/components/client-intake-card";
+import { PASSWORD_WARNING, hasSecret } from "@/lib/credential-guard";
+import { ActiveToggle } from "./settings/active-toggle";
+import { setBusinessActiveAction } from "./settings/actions";
 
 export const dynamic = "force-dynamic";
 
@@ -93,7 +96,7 @@ export default async function ClientPage({
             </p>
             <h1 className="text-2xl font-semibold tracking-tight">
               {client.name}
-              {client.archived && <Badge className="ml-2 align-middle">Archived</Badge>}
+              {client.archived && <Badge className="ml-2 align-middle">Inactive</Badge>}
             </h1>
             <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
               {client.location && <span className="text-muted">{client.location}</span>}
@@ -124,8 +127,21 @@ export default async function ClientPage({
             </LinkButton>
           </div>
         </div>
+        <ActiveToggle active={!client.archived} action={setBusinessActiveAction.bind(null, client.id, client.archived)} className="-my-1" />
         <MonthPicker month={month} current={now} />
       </div>
+
+      {hasSecret(client.notes) && (
+        <div role="alert" className="mb-6 flex flex-col gap-2 rounded-xl border border-warn/40 bg-warn-soft px-4 py-3 text-sm text-warn sm:flex-row sm:items-center sm:justify-between">
+          <p>
+            <span aria-hidden>⚠️ </span>
+            {PASSWORD_WARNING}
+          </p>
+          <Link href={`/clients/${client.id}/settings`} className="inline-flex min-h-11 shrink-0 items-center font-medium underline underline-offset-2">
+            Open Settings
+          </Link>
+        </div>
+      )}
 
       {sp.welcome === "1" && <OnboardWelcome name={client.name} fromLead={sp.lead === "1"} />}
 

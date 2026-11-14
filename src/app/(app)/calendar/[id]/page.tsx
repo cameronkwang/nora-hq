@@ -48,7 +48,7 @@ export default async function PostPage({ params, searchParams }: { params: Promi
     !post.scheduledFor && "pick a date and time",
     post.mediaUrls.length === 0 && "add a photo or video",
   ].filter(Boolean) as string[];
-  const back = new URLSearchParams();
+  const back = new URLSearchParams({ tab: "posts" });
   if (zoned) back.set("month", zoned.date.slice(0, 7));
   const backHref = back.size ? `/calendar?${back}` : "/calendar";
   const pastDue = post.scheduledFor && post.scheduledFor < new Date() && !["published", "publishing"].includes(post.status);
@@ -221,7 +221,7 @@ export default async function PostPage({ params, searchParams }: { params: Promi
             <summary className="cursor-pointer select-none px-4 py-3 text-sm font-medium text-danger">Delete this post…</summary>
             <form action={deletePostAction} className="flex flex-col gap-2 border-t border-border p-4 text-sm">
               <input type="hidden" name="id" value={post.id} />
-              <input type="hidden" name="returnTo" value={`/calendar${zoned ? `?month=${zoned.date.slice(0, 7)}` : ""}`} />
+              <input type="hidden" name="returnTo" value={`/calendar?tab=posts${zoned ? `&month=${zoned.date.slice(0, 7)}` : ""}`} />
               <p className="text-muted">This removes it from the calendar. It doesn&apos;t delete anything already posted on {post.platform === "tiktok" ? "TikTok" : "Instagram"}.</p>
               <Button type="submit" variant="danger" className="self-start">Delete post</Button>
             </form>

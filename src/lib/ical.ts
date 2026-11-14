@@ -69,6 +69,35 @@ function nextDay(ymd: string): string {
 /** "UID", "SUMMARY" … → folded "NAME:value" line. */
 const prop = (name: string, value: string) => foldLine(`${name}:${value}`);
 
+function eventLines(e: IcalEvent, stamp: string): string[] {
+  if (!e.start && !e.date) return [];
+  const lines = ["BEGIN:VEVENT", prop("UID", escapeText(e.uid)), `DTSTAMP:${stamp}`];
+  if (e.date) {
+    lines.push(`DTSTART;VALUE=DATE:${dateValue(e.date)}`, `DTEND;VALUE=DATE:${dateValue(nextDay(e.date))}`, "TRANSP:TRANSPARENT");
+  } else if (e.start) {
+    const end = new Date(e.start.getTime() + (e.minutes ?? 60) * 60_000);
+    lines.push(`DTSTART:${utcStamp(e.start)}`, `DTEND:${utcStamp(end)}`);
+  }
+  lines.push(prop("SUMMARY", escapeText(e.summary)));
+  if (e.location) lines.push(prop("LOCATION", escapeText(e.location)));
+  if (e.description) lines.push(prop("DESCRIPTION", escapeText(e.description)));
+  if (e.url) lines.push(prop("URL;VALUE=URI", e.url.replace(/[\r\n]/g, "")));
+  if (e.categories?.length) lines.push(prop("CATEGORIES", e.categories.map(escapeText).join(",")));
+  if (e.lastModified) lines.push(`LAST-MODIFIED:${utcStamp(e.lastModified)}`);
+  lines.push("END:VEVENT");
+  return lines;
+}
+
+/** Adds events to a calendar built by buildCalendar (inserted before END:VCALENDAR). */
+export function appendEvents(ics: string, events: IcalEvent[], now = new Date()): string {
+  if (!events.length) return ics;
+  const end = ics.lastIndexOf("END:VCALENDAR");
+  if (end < 0) return ics;
+  const stamp = utcStamp(now);
+  const add = events.flatMap((e) => eventLines(e, stamp));
+  return `${ics.slice(0, end)}${add.join("\r\n")}\r\n${ics.slice(end)}`;
+}
+
 export function buildCalendar(opts: { name: string; description?: string; events: IcalEvent[]; now?: Date }): string {
   const now = opts.now ?? new Date();
   const stamp = utcStamp(now);
@@ -84,23 +113,7 @@ export function buildCalendar(opts: { name: string; description?: string; events
     "REFRESH-INTERVAL;VALUE=DURATION:PT1H",
     "X-PUBLISHED-TTL:PT1H",
   ];
-  for (const e of opts.events) {
-    if (!e.start && !e.date) continue;
-    lines.push("BEGIN:VEVENT", prop("UID", escapeText(e.uid)), `DTSTAMP:${stamp}`);
-    if (e.date) {
-      lines.push(`DTSTART;VALUE=DATE:${dateValue(e.date)}`, `DTEND;VALUE=DATE:${dateValue(nextDay(e.date))}`, "TRANSP:TRANSPARENT");
-    } else if (e.start) {
-      const end = new Date(e.start.getTime() + (e.minutes ?? 60) * 60_000);
-      lines.push(`DTSTART:${utcStamp(e.start)}`, `DTEND:${utcStamp(end)}`);
-    }
-    lines.push(prop("SUMMARY", escapeText(e.summary)));
-    if (e.location) lines.push(prop("LOCATION", escapeText(e.location)));
-    if (e.description) lines.push(prop("DESCRIPTION", escapeText(e.description)));
-    if (e.url) lines.push(prop("URL;VALUE=URI", e.url.replace(/[\r\n]/g, "")));
-    if (e.categories?.length) lines.push(prop("CATEGORIES", e.categories.map(escapeText).join(",")));
-    if (e.lastModified) lines.push(`LAST-MODIFIED:${utcStamp(e.lastModified)}`);
-    lines.push("END:VEVENT");
-  }
+  for (const e of opts.events) lines.push(...eventLines(e, stamp));
   lines.push("END:VCALENDAR");
   return `${lines.join("\r\n")}\r\n`;
 }
