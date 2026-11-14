@@ -35,14 +35,14 @@ export async function getOutreachProfile(clientId: string | null | undefined): P
 }
 
 /**
- * What approving an outreach email for this business does: `auto` = the connected Gmail inbox sends it (only when that
- * inbox is the business's saved sender, or no sender is saved); otherwise a person sends it by hand, and `sendFrom`
- * says from where ("hello@example.com", or "Crab O Clock's own email" when the saved sender is a social account).
+ * What approving an outreach email for this business does: `auto` = the connected Gmail inbox sends it (only when a
+ * sender is saved and that inbox is it); otherwise a person sends it by hand, and `sendFrom` says from where
+ * ("hello@example.com", or "Crab O Clock's own email" when no sender is saved or the saved one is a social account).
  */
 export async function outreachEmailPlan(clientId: string | null | undefined): Promise<{ auto: boolean; from: string | null; sendFrom: string | null }> {
   const [profile, inbox] = await Promise.all([getOutreachProfile(clientId), outreachInboxAddress()]);
   const plan = emailSendPlan(profile, inbox);
-  return { ...plan, sendFrom: profile && !plan.auto && plan.from ? sendFromText(profile, "email") : null };
+  return { ...plan, sendFrom: profile && !plan.auto ? sendFromText(profile, "email") : null };
 }
 
 /**

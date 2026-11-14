@@ -7,6 +7,9 @@ import { notConfigured, type IntegrationResult } from "./types";
 import { fetchJson } from "./http";
 import { findConnection, ops } from "./connections";
 import { friendlyGoogleError, googleAccessToken, googleOAuthConfigured } from "./google-auth";
+import { googleWorkClientIds } from "../data";
+import { isNewListing } from "../google-status";
+import { launchInfo } from "../launch";
 
 /**
  * Google Business Profile: one shared connection (clientId null) for the Google account that manages all
@@ -130,7 +133,10 @@ const str = (v: unknown): string | null => {
 
 /**
  * `empty` = businesses whose linked listing answered with 0 reviews (worth checking it's the right listing);
- * `unlinked` = active businesses with no listing picked, which the sync can't reach at all. Both are labels for people.
+ * `unlinked` = active businesses with no listing picked, which the sync can't reach at all. Both are labels for people,
+ * and follow the same quiet rules as the status lines (lib/google-status): a business that isn't open yet, or has no
+ * Google item in its plan, isn't named as unlinked; 0 reviews isn't named for one that isn't open yet, opened in the
+ * last 30 days, or has no Google item in its plan.
  */
 export type ReviewSyncResult = { ok: boolean; synced: number; locations: number; errors: string[]; notConfigured?: boolean; empty?: string[]; unlinked?: string[] };
 
@@ -147,8 +153,11 @@ async function noteSync(clientId: string, outcome: GoogleSyncOutcome) {
 export async function syncGoogleReviews(): Promise<ReviewSyncResult> {
   const a = await auth();
   const db = await getDb();
-  const businesses = await db.select({ id: schema.clients.id, name: schema.clients.name, location: schema.clients.location, googleLocation: schema.clients.googleLocation, prelaunch: schema.clients.prelaunch })
+  const businesses = await db.select({ id: schema.clients.id, name: schema.clients.name, location: schema.clients.location, googleLocation: schema.clients.googleLocation, prelaunch: schema.clients.prelaunch, openingDate: schema.clients.openingDate })
     .from(schema.clients).where(and(eq(schema.clients.archived, false), eq(schema.clients.kind, "business")));
+  // Which businesses have Google work in their plan. Unknown on a lookup problem: then every business is named as before.
+  const googleWork = await googleWorkClientIds().catch(() => null);
+  const hasGoogleWork = (id: string) => !googleWork || googleWork.has(id);
   const labelOf = (c: { name: string; location: string | null }) => (c.location ? `${c.name} (${c.location})` : c.name);
   const clients = businesses.filter((c) => !!c.googleLocation?.trim());
   if (!isAuth(a)) {
@@ -156,8 +165,9 @@ export async function syncGoogleReviews(): Promise<ReviewSyncResult> {
     if (!a.notConfigured) for (const c of clients) await noteSync(c.id, { status: "error", error: a.error });
     return { ok: false, synced: 0, locations: 0, errors: [a.error], notConfigured: a.notConfigured };
   }
-  // A business that isn't open yet has no listing to link; the others are silently skipped by the sync, so name them.
-  const unlinked = businesses.filter((c) => !c.googleLocation?.trim() && !c.prelaunch).map(labelOf);
+  // A business that isn't open yet has no listing to link, and one with no Google work in its plan needs none; the
+  // others are silently skipped by the sync, so name them.
+  const unlinked = businesses.filter((c) => !c.googleLocation?.trim() && !launchInfo(c).planOnHold && hasGoogleWork(c.id)).map(labelOf);
   const out: ReviewSyncResult = { ok: true, synced: 0, locations: 0, errors: [], empty: [], unlinked };
   if (clients.length === 0) {
     out.errors.push("No business is mapped to a Google location yet — pick one for each business in Settings.");
@@ -197,7 +207,8 @@ export async function syncGoogleReviews(): Promise<ReviewSyncResult> {
       out.locations++;
       // Google's own total when it gives one (we only keep the newest 500), else what came back.
       const count = Math.max(byId.size, total ?? 0);
-      if (count === 0) out.empty!.push(labelOf(c));
+      // 0 reviews is only worth a look on an open, established business with Google work (still recorded as "empty").
+      if (count === 0 && hasGoogleWork(c.id) && !isNewListing(c)) out.empty!.push(labelOf(c));
       await noteSync(c.id, { status: count > 0 ? "ok" : "empty", count });
     } catch (e) {
       const msg = friendlyGoogleError(e, "Business Profile");

@@ -773,6 +773,10 @@ export const clientIntakes = pgTable(
     openedAt: timestamp("opened_at", { withTimezone: true }),
     submittedAt: timestamp("submitted_at", { withTimezone: true }),
     expiresAt: timestamp("expires_at", { withTimezone: true }),
+    // Upload tokens handed out today (UTC), claimed with one conditional UPDATE (lib/ops-intake claimIntakeUpload),
+    // so a forwarded link can't be used to fill the Blob store.
+    uploadDay: text("upload_day"), // "YYYY-MM-DD" (UTC) the upload count is for
+    uploadCount: integer("upload_count").notNull().default(0),
   },
   (t) => [index("client_intakes_client_idx").on(t.clientId)],
 );

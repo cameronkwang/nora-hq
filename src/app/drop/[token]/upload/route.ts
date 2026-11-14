@@ -4,13 +4,15 @@ import { MAX_UPLOAD_BYTES, blobEnabled } from "@/lib/uploads";
 
 export const dynamic = "force-dynamic";
 
-const day = (d: Date) => d.toISOString().slice(0, 10);
+/** A file straight in the link's folder; a page opened before the day was dropped from the path still sends "<YYYY-MM-DD>/<file>". */
+const FILE_IN_FOLDER = /^(?:\d{4}-\d{2}-\d{2}\/)?[^/]+$/;
 
 /**
  * POST /drop/<token>/upload — PUBLIC (the private link token is the key). Vercel Blob client-upload token exchange
  * for the owner drop page, so a flyer photo goes straight from the phone to Blob (same pipeline as the onboarding
  * form's /start/<token>/upload). Only exists when BLOB_READ_WRITE_TOKEN is set and only for a link that still works.
- * Files must go under drop/<link id>/<today>/.
+ * Files must go straight under drop/<link id>/. The path carries no day, so a page left open on the owner's phone
+ * for days still uploads; the per-day cap is the counter below.
  *
  * So a leaked link can't be used to fill the store: one token makes ONE file (no random suffix and no overwrite, so
  * a second upload to the same name is refused; the page puts its own random prefix on each name), it works for
@@ -24,9 +26,6 @@ export async function POST(req: Request, { params }: { params: Promise<{ token: 
   if (found.state === "unknown") return NextResponse.json({ error: "Not found." }, { status: 404 });
   if (found.state !== "open") return NextResponse.json({ error: "This link is turned off." }, { status: 403 });
   const base = dropFolder(found.link.id);
-  // The page may have been opened just before midnight (UTC): yesterday's folder is still fine.
-  const now = new Date();
-  const folders = [`${base}${day(now)}/`, `${base}${day(new Date(now.getTime() - 86_400_000))}/`];
 
   try {
     const { handleUpload } = await import("@vercel/blob/client");
@@ -35,8 +34,8 @@ export async function POST(req: Request, { params }: { params: Promise<{ token: 
       request: req,
       body,
       onBeforeGenerateToken: async (pathname) => {
-        const folder = folders.find((f) => pathname.startsWith(f));
-        if (!folder || pathname.includes("..") || pathname.length > 200 || pathname.slice(folder.length).includes("/")) throw new Error("Bad file name.");
+        const name = pathname.startsWith(base) ? pathname.slice(base.length) : "";
+        if (!FILE_IN_FOLDER.test(name) || pathname.includes("..") || pathname.length > 200) throw new Error("Bad file name.");
         if (dropRateLimited(found.link)) throw new Error("Too many uploads. Try again later.");
         if (!(await claimDropUpload(found.link.id))) throw new Error("Too many uploads today. Try again tomorrow.");
         return {

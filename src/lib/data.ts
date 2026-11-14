@@ -117,6 +117,22 @@ export async function noraUnfiledTasks(month: string) {
     .limit(50);
 }
 
+/* ───────────────────────── Google work ───────────────────────── */
+
+/**
+ * The businesses whose monthly plan has an active Google item (e.g. "Reply to Google reviews"). Only these are
+ * expected to have a Google listing: for the rest, "not linked", "not synced yet" and "0 reviews" are nothing to
+ * raise (see `googleWork` in lib/google-status).
+ */
+export async function googleWorkClientIds(): Promise<Set<string>> {
+  const db = await getDb();
+  const rows = await db
+    .selectDistinct({ clientId: schema.deliverables.clientId })
+    .from(schema.deliverables)
+    .where(and(eq(schema.deliverables.platform, "google"), eq(schema.deliverables.active, true)));
+  return new Set(rows.map((r) => r.clientId));
+}
+
 /* ───────────────────────── Client health (Home strip) ───────────────────────── */
 
 export type HealthTone = "danger" | "warn" | "info" | "ok";
@@ -149,6 +165,9 @@ const count = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : 
  * A business that isn't open yet (pre-launch, opening day still ahead: the same rule as lib/launch) skips the
  * Google-listing and report checks; with no Google account connected at all, the Google checks are skipped for
  * everyone (that's one setup step in Settings, not a per-client problem).
+ * Two more quiet cases, both decided in lib/google-status: 0 reviews is fine for a business that isn't open yet or
+ * opened in the last 30 days, and a business with no Google item in its plan gets no "not linked / not synced /
+ * 0 reviews" issue at all (a failing or stalled sync is still shown).
  */
 export async function clientHealth(now = new Date()): Promise<ClientHealthRow[]> {
   const businesses = await listBusinesses();
@@ -161,8 +180,10 @@ export async function clientHealth(now = new Date()): Promise<ClientHealthRow[]>
   const reportDue = Number(day.slice(8, 10)) >= REPORT_DUE_DAY;
   const n = sql<number>`count(*)::int`;
 
-  const [googleConnected, unreplied, overdue, sentReports, intakes] = await Promise.all([
+  const [googleConnected, googleWork, unreplied, overdue, sentReports, intakes] = await Promise.all([
     findConnection("google", null).then((c) => !!c, () => false),
+    // Unknown on a lookup problem: then nothing is kept quiet (and the strip still shows).
+    googleWorkClientIds().catch(() => null),
     db.select({ clientId: schema.reviews.clientId, n }).from(schema.reviews)
       .where(and(inArray(schema.reviews.clientId, ids), isNull(schema.reviews.replyText))).groupBy(schema.reviews.clientId),
     db.select({ clientId: schema.tasks.clientId, n }).from(schema.tasks)
@@ -188,7 +209,7 @@ export async function clientHealth(now = new Date()): Promise<ClientHealthRow[]>
     type Issue = { tone: HealthTone; issue: string; href: string };
     const issues: Issue[] = [];
     const page = `/clients/${c.id}`;
-    const google = googleSyncInfo(c, googleConnected, now);
+    const google = googleSyncInfo(c, googleConnected, now, googleWork ? { googleWork: googleWork.has(c.id) } : {});
     const launch = launchInfo(c, day);
     const googleIssue = (tone: HealthTone, href: string): Issue => ({ tone, issue: googleSyncSentence(google), href });
 
@@ -196,7 +217,8 @@ export async function clientHealth(now = new Date()): Promise<ClientHealthRow[]>
     // Google is per business only once the account is connected; with no account it's one setup step, not every client's problem.
     if (googleConnected) {
       if (google.state === "error") issues.push(googleIssue("danger", "/settings#google"));
-      if (google.state === "unlinked" && !launch.planOnHold) issues.push(googleIssue("warn", "/settings#google-locations"));
+      if (google.state === "unlinked" && google.needsAttention && !launch.planOnHold) issues.push(googleIssue("warn", "/settings#google-locations"));
+      // "empty" is only reported when 0 reviews is worth a look (not for a new or not-yet-open business).
       if (google.state === "empty") issues.push(googleIssue("warn", "/settings#google-locations"));
     }
 
@@ -215,7 +237,7 @@ export async function clientHealth(now = new Date()): Promise<ClientHealthRow[]>
       issues.push({ tone: "warn", issue: "Owner form not returned", href: page });
     }
 
-    if (googleConnected && (google.state === "never" || (google.state === "ok" && google.stale))) issues.push(googleIssue("warn", "/settings#google"));
+    if (googleConnected && ((google.state === "never" && google.needsAttention) || (google.state === "ok" && google.stale))) issues.push(googleIssue("warn", "/settings#google"));
 
     if (launch.prelaunch) {
       const days = launch.daysToOpening;

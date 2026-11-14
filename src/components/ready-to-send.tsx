@@ -82,7 +82,7 @@ export function ReadyToSend({ groups, backHref }: { groups: SendGroup[]; backHre
       <div className="flex flex-col gap-4">
         {sentCount > 0 && (
           <p role="status" className="rounded-lg bg-ok-soft px-4 py-3 text-sm text-ok">
-            {sentCount} marked sent. Each creator moved to Contacted with a follow-up in 5 days.
+            {sentCount} marked sent. First messages and nudges get a follow-up in 5 days.
           </p>
         )}
         {group && skippedHere > 0 && (
@@ -170,7 +170,7 @@ export function ReadyToSend({ groups, backHref }: { groups: SendGroup[]; backHre
           <p className="text-sm text-muted">
             {current.channelLabel}
             {current.followers ? ` · ${current.followers}` : ""} · <span className={cx(current.check.warn && "font-medium text-warn")}>{current.check.label}</span> ·{" "}
-            {current.posted ? <span className="font-medium text-danger">already posted about {group.business}</span> : "no prior posts"}
+            {current.posted ? <span className="font-medium text-danger">already posted about {group.business}</span> : "no prior post recorded"}
           </p>
           {current.mailto && <p className="break-words text-sm"><span className="text-muted">Subject:</span> {current.mailto.subject || "(no subject)"}</p>}
         </header>

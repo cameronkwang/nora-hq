@@ -68,7 +68,7 @@ export function IntakeShell({
 
         {footnote && (
           <p className="mx-auto mt-6 max-w-sm text-center text-sm leading-relaxed text-muted [main:has([data-intake-done])_&]:hidden">
-            {C.common.autosave} {C.common.neverPasswords}
+            {C.common.autosave}
           </p>
         )}
       </div>

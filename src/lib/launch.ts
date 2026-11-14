@@ -74,6 +74,6 @@ export function launchField(c: Pick<Client, "prelaunch" | "openingDate">, day = 
 export function planHoldLine(name: string, info: LaunchInfo): string {
   if (!info.planOnHold) return "";
   return info.openingDate
-    ? `${name} isn't open yet (opens ${formatDate(info.openingDate)}): the monthly plan starts on opening day. Until then, work the launch checklist.`
-    : `${name} isn't open yet and has no opening date: the monthly plan starts on opening day. Until then, work the launch checklist.`;
+    ? `${name} isn't open yet (opens ${formatDate(info.openingDate)}): no monthly checklist tasks are created before opening day. Until then, work the launch checklist.`
+    : `${name} isn't open yet and has no opening date: no monthly checklist tasks are created before opening day. Until then, work the launch checklist.`;
 }

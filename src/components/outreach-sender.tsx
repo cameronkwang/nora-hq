@@ -6,7 +6,7 @@ import { cx, formatNumber } from "./ui";
 /**
  * Review-queue pieces for creator outreach. Server-component safe (no hooks).
  *  - SenderChip: "Send from @x (not Nora) · Offer: …" — which account the message goes out from, and the standing offer.
- *  - CreatorCheckLine: "10.5K TikTok · checked 3d ago · no prior posts".
+ *  - CreatorCheckLine: "10.5K TikTok · checked 3d ago · no prior post recorded".
  */
 
 export function SenderChip({
@@ -52,12 +52,11 @@ export function SenderChip({
           {profile.creatorOffer ? <> · Offer: {profile.creatorOffer}</> : <> · No standing offer saved.</>}
         </p>
       )}
+      {/* An email is only sent on approval when the connected Gmail IS the saved sender; with no sender saved it never is. */}
       {plan && pending && plan.auto && (
-        <p className={cx("text-xs", profile.sendFrom ? "text-muted" : "font-medium text-warn")}>
-          Approving emails this right away from {plan.from} (the connected Gmail).
-        </p>
+        <p className="text-xs text-muted">Approving emails this right away from {plan.from} (the connected Gmail).</p>
       )}
-      {plan && pending && !plan.auto && plan.from && (
+      {plan && pending && !plan.auto && (
         <p className="text-xs text-muted">Approving doesn&apos;t email it: you send it from {sendFromText(profile, channel)}, then mark it sent.</p>
       )}
       {mismatch && <p className="rounded-lg bg-warn-soft px-3 py-2 text-sm text-warn">{mismatch}</p>}
@@ -104,7 +103,8 @@ export function CreatorCheckLine({
           )}
         </span>
       ) : (
-        <span className="text-muted">no prior posts</span>
+        // Nothing records that someone looked, so this only says none is on file (never "none exists").
+        <span className="text-muted">no prior post recorded</span>
       )}
     </p>
   );

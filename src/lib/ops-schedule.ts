@@ -1,5 +1,5 @@
 import "server-only";
-import { and, asc, eq, gte, inArray, isNotNull, isNull, lte, ne, sql } from "drizzle-orm";
+import { and, asc, eq, gte, inArray, isNotNull, isNull, lt, lte, ne, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import { getDb, schema } from "./db";
 import { newId } from "./ids";
@@ -12,7 +12,7 @@ import type { IcalEvent } from "./ical";
 
 /**
  * Nora's schedule: which businesses she's working with each month, on which day (or "sometime in
- * November"), whether it's free, and whether she still owes a reel (📸). No money is stored or shown.
+ * November"), whether it's free, and whether she still owes a reel (📸). No amount or payment method is stored or shown.
  * Same conventions as lib/ops: zod input, `actor` is a user email or "claude", every write is logged.
  * Claude may add and update items (import a pasted list, fix a date); deleting items and ticking a
  * reel as posted are for people.
@@ -74,15 +74,22 @@ export async function listSchedule(month: string): Promise<ScheduleRow[]> {
   return rows.map((r) => ({ ...r.s, clientName: r.clientName, payment: paymentOf(r.s.dealId, r.paymentStatus, r.dealStatus) }));
 }
 
-/** Every reel still owed (📸 and not ticked), oldest first. */
-export async function reelsToPost(): Promise<ScheduleRow[]> {
+/**
+ * Every reel still to post (📸 and not ticked), oldest first: the schedule's "Reels to post" list, upcoming jobs included.
+ * With `upTo` (a day, "YYYY-MM-DD") only the ones whose job has happened: dated that day or earlier, or with no set
+ * day in an earlier month. That is what the Monday reminder and the calendar feed's weekly line count.
+ */
+export async function reelsToPost(upTo?: string): Promise<ScheduleRow[]> {
   const db = await getDb();
+  const happened = upTo
+    ? or(lte(schema.scheduleItems.date, upTo), and(isNull(schema.scheduleItems.date), lt(schema.scheduleItems.month, upTo.slice(0, 7))))
+    : undefined;
   const rows = await db
     .select({ s: schema.scheduleItems, clientName: schema.clients.name, paymentStatus: schema.deals.paymentStatus, dealStatus: schema.deals.status })
     .from(schema.scheduleItems)
     .leftJoin(schema.clients, eq(schema.clients.id, schema.scheduleItems.clientId))
     .leftJoin(schema.deals, eq(schema.deals.id, schema.scheduleItems.dealId))
-    .where(and(eq(schema.scheduleItems.needsReel, true), isNull(schema.scheduleItems.reelPostedAt)))
+    .where(and(eq(schema.scheduleItems.needsReel, true), isNull(schema.scheduleItems.reelPostedAt), happened))
     .orderBy(asc(schema.scheduleItems.month), sql`${schema.scheduleItems.date} asc nulls last`, asc(schema.scheduleItems.businessName))
     .limit(500);
   return rows.map((r) => ({ ...r.s, clientName: r.clientName, payment: paymentOf(r.s.dealId, r.paymentStatus, r.dealStatus) }));
@@ -493,6 +500,20 @@ export async function scheduleOn(date: string): Promise<ScheduleDayItem[]> {
   return rows.map((r) => ({ ...r.s, dealVisitAt: r.dealVisitAt, dealStatus: r.dealStatus }));
 }
 
+/**
+ * Of these deals, the ones made from a job on the schedule ("Make it a deal"). Such a deal's visit sits at a noon
+ * placeholder until someone sets the real time, so the reminder and the calendar feed leave that time out.
+ */
+export async function dealsMadeFromSchedule(dealIds: string[]): Promise<Set<string>> {
+  if (!dealIds.length) return new Set();
+  const db = await getDb();
+  const rows = await db
+    .select({ dealId: schema.scheduleItems.dealId })
+    .from(schema.scheduleItems)
+    .where(inArray(schema.scheduleItems.dealId, dealIds));
+  return new Set(rows.flatMap((r) => (r.dealId ? [r.dealId] : [])));
+}
+
 /** The Monday on or after `ymd` — where the weekly "reels to post" line sits in the calendar. */
 export function mondayOnOrAfter(ymd: string): string {
   const d = new Date(`${ymd}T12:00:00Z`);
@@ -501,20 +522,22 @@ export function mondayOnOrAfter(ymd: string): string {
 }
 
 /**
- * Nora's schedule for the calendar feed. Never money.
+ * Nora's schedule for the calendar feed. Never an amount or whether a job was paid.
  *  - Dated jobs between two days (inclusive) as all-day events; undated jobs aren't in the feed. A job whose
  *    linked deal already has a visit that day is left out (the "Visit: …" event covers it) unless a reel is owed.
- *  - One weekly line, "📸 N reels to post", on the coming Monday (today if it is Monday) while any are owed.
+ *  - One weekly line, "📸 N reels to post", on the coming Monday (today if it is Monday) while any are owed. It
+ *    counts jobs that have happened (see reelsToPost), not ones still ahead.
  */
 export async function scheduleIcalEvents(fromDate: string, toDate: string, link: (path: string) => string | null, opts: { today?: string } = {}): Promise<IcalEvent[]> {
   const db = await getDb();
+  const day = opts.today ?? todayYmd();
   const [rows, owed] = await Promise.all([
     db
       .select({ s: schema.scheduleItems, dealVisitAt: schema.deals.visitAt, dealStatus: schema.deals.status })
       .from(schema.scheduleItems)
       .leftJoin(schema.deals, eq(schema.deals.id, schema.scheduleItems.dealId))
       .where(and(isNotNull(schema.scheduleItems.date), gte(schema.scheduleItems.date, fromDate), lte(schema.scheduleItems.date, toDate))),
-    reelsToPost(),
+    reelsToPost(day),
   ]);
   const events: IcalEvent[] = [];
   for (const { s: r, dealVisitAt, dealStatus } of rows) {
@@ -534,7 +557,7 @@ export async function scheduleIcalEvents(fromDate: string, toDate: string, link:
     });
   }
   if (owed.length) {
-    const monday = mondayOnOrAfter(opts.today ?? todayYmd());
+    const monday = mondayOnOrAfter(day);
     const url = link("/calendar?show=reels");
     const names = owed.slice(0, 15).map((r) => `• ${r.businessName}`);
     if (owed.length > names.length) names.push(`+ ${owed.length - names.length} more`);

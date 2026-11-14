@@ -93,6 +93,8 @@ export function buildPaymentRequest(input: PaymentRequestInput): PaymentRequest 
   const lines = input.deliverables.map(deliverableLine);
   const posted = input.deliverables.filter(isPosted);
   const allPosted = input.deliverables.length > 0 && posted.length === input.deliverables.length;
+  // Only thank them for the visit once it has happened (billing up front, or a deal with no visit, skips the thanks).
+  const visited = !!input.visitDate && input.visitDate <= input.today;
 
   const missing: string[] = [];
   if (!amount) missing.push("the fee");
@@ -101,7 +103,7 @@ export function buildPaymentRequest(input: PaymentRequestInput): PaymentRequest 
   const invoiceBody = [
     hi,
     "",
-    `Thank you for having me at ${business}! Here is my invoice for our collab.`,
+    visited ? `Thank you for having me at ${business}! Here is my invoice for our collab.` : `Here is my invoice for our collab with ${business}.`,
     "",
     "INVOICE",
     `From: ${fromFull}`,

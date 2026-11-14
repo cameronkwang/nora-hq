@@ -1,5 +1,6 @@
 /**
- * Spots likely passwords / logins in free text (business notes, brand voice, anything Claude is asked to save).
+ * Spots likely passwords / logins in free text (business notes, brand voice, anything Claude is asked to save, and
+ * what an owner types on the public onboarding form or drop page).
  * Nora HQ never stores credentials — they belong in a password manager. Pure and dependency-free, so it runs
  * on the server (ops refuse to save) and in the browser (the Settings notes field warns as you type).
  *
@@ -9,8 +10,19 @@
  *    email, URL, @handle, #hashtag, phone number, price, date or opening hours ("Tanklin1991!!", "5006688@Fff").
  *
  * `looksLikeSecret` is deliberately jumpy: it guards notes the team (or Claude) saves, where a false alarm costs a
- * reword. `looksLikeTypedSecret` is the calmer check for text an owner types on the public onboarding form, where a
- * false alarm stops a busy person from sending: a label alone is not enough, the value has to look like a password.
+ * reword, and `redactSecrets` uses it to mask what Claude and phones read (owner-typed answers included).
+ * `looksLikeTypedSecret` is the calmer check for text an owner types on the public forms, where a false alarm stops
+ * a busy person from sending. It refuses:
+ *  - a label followed by a value shaped like a password ("password: hunter2", "密码是Tanklin1991!!");
+ *  - a password label, a colon (or 是) and ONE word that ends the line, whatever it looks like
+ *    ("ig password: goldenwok", "密码：woaini") — but not someone talking ("password: can you help");
+ *  - in the deal / anything-else boxes and the drop note (`tokens: false`, where a bare "Buy1Get1!" is fine): a
+ *    password-shaped word right after an account ("login: name / Tanklin1991!!", "账号 name Tanklin1991!!",
+ *    "pass Wok2020!", "name@mail.com Tanklin1991!!", "name / Wok2020!"), or anywhere after the word "password" on
+ *    the same line ("the password to our IG is Tanklin1991!!").
+ *
+ * Full-width characters from a Chinese keyboard ("密码：１２３４５６") are read as their plain forms, and Chinese
+ * right after a label is someone talking, never the password ("密码怎么办"); the password is the part before it.
  *
  * Callers must never echo `text` back to people or Claude — show `hint` (masked) instead.
  */
@@ -35,6 +47,16 @@ const STRONG_RE = new RegExp(`(?:^|[^\\p{L}\\p{N}])(${STRONG})(\\s*[:=：]\\s*|\
 /** Chinese labels need no word boundary ("店的密码：…", "密码是…"). */
 const CJK_RE = /(账号密码|帳號密碼|密码|密碼|口令)(\s*(?:[:=：]|是|为|為)?\s*)([^\s,;，。、]+)/gu;
 const WEAK_RE = new RegExp(`(?:^|[^\\p{L}\\p{N}])(${WEAK})(\\s*[:=：]\\s*)([^\\s,;]+)`, "giu");
+/** Labels that can only mean a password ("pass" may be a lunch pass, "login" a username). */
+const PASSWORD_LABEL = new RegExp(`^(?:${STRONG}|账号密码|帳號密碼)$`, "i");
+/** Words that say an account follows: the next word or two may be its password ("login: name / Tanklin1991!!"). */
+const CUE_RE = new RegExp(
+  `(?:^|[^\\p{L}\\p{N}])(${STRONG}|${WEAK}|log\\s?in|sign\\s?in|user\\s?name|user\\s?id|account|acct)(?![\\p{L}\\p{N}])|(账号|帐号|帳號|账户|帐户|帳戶|用户名|用戶名|登录|登錄|登入|密码|密碼|口令)`,
+  "giu",
+);
+/** An email inside a line, and "name /": what follows may be the password. */
+const EMAIL_IN_LINE = /[^\s@/:=]+@[^\s@/]+\.[a-z]{2,}/gi;
+const NAME_SLASH = /(?:^|[\s:=])[A-Za-z0-9._@+-]{3,}\s*\/(?!\/)/g;
 
 /** Words that follow "password" in ordinary sentences ("password manager", "password reset"). */
 const NOT_A_VALUE = new Set([
@@ -43,6 +65,10 @@ const NOT_A_VALUE = new Set([
   "none", "n/a", "na", "tbd", "tba", "unknown", "?", "-", "—", "ask", "see", "here", "there", "it", "them", "this", "that",
   "please", "never", "not", "no", "yes", "sent", "shared", "saved", "stored", "1password", "lastpass", "bitwarden", "keychain",
   "owner", "client", "nora", "cameron", "we", "they", "you", "he", "she", "manager.", "managers.", "hint", "hints",
+  "forgot", "forgotten", "lost", "same", "idk", "unsure", "help",
+  // How a sentence goes on after "password:" ("password: can you help"). All too short to be a real password.
+  "can", "could", "how", "what", "why", "when", "where", "is", "are", "was", "do", "does", "did", "will", "would",
+  "i", "my", "our", "your", "if", "but", "so", "sorry", "thank",
 ]);
 
 const PASSWORD_SYMBOL = /[!@#$%^&*?~+=<>{}[\]|\\]/;
@@ -81,57 +107,136 @@ export function isSecretToken(raw: string): boolean {
   return true;
 }
 
+/** Sentence punctuation after a word ("what is the password for?"). */
+const SENTENCE_END = /[?!.…]+$/u;
+/** Anything that reads as a new line. */
+const LINE_BREAK = /\r\n|[\n\r\v\f\u0085\u2028\u2029]/;
+const LINE = /[^\n\r\v\f\u0085\u2028\u2029]+/g;
+
 function valueLooksSecret(label: string, value: string, separated: boolean): boolean {
   const v = trimToken(value);
-  if (!v || NOT_A_VALUE.has(v.toLowerCase())) return false;
+  const core = v.replace(SENTENCE_END, "");
+  if (!core || NOT_A_VALUE.has(core.toLowerCase()) || NOT_A_VALUE.has(v.toLowerCase())) return false;
+  if (/^[$€£¥]\d[\d,.]*$/.test(v)) return false; // a plain price: "Lunch pass: $50 a month"
   if (EMAIL.test(v) && /^(login|log-in|signin|sign-in)$/i.test(label)) return true; // "login: owner@x.com" — a login, still not for here
   if (separated) return [...v].length >= 3;
   // No colon ("pw hunter2", "password is Tanklin1991"): the value has to look like one.
   return [...v].length >= 4 && (/\d/.test(v) || PASSWORD_SYMBOL.test(v) || (/[a-z]/.test(v) && /[A-Z]/.test(v)));
 }
 
-const CJK_CHAR = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u;
+const CJK = "\\p{Script=Han}\\p{Script=Hiragana}\\p{Script=Katakana}\\p{Script=Hangul}";
+const CJK_CHAR = new RegExp(`[${CJK}]`, "u");
+/** A stretch with no Chinese in it. Chinese has no spaces ("密码是Tanklin1991!!谢谢" is one word): a password is such a stretch. */
+const LATIN_RUN = new RegExp(`[^${CJK}]+`, "gu");
 
 /**
- * The calmer rule for owner-typed text: after a label, only a value shaped like a password counts — no Chinese in
- * it, and a digit, a symbol or a capital inside the word ("Tanklin1991!!", "hunter2", "sunShine"). Ordinary words
- * ("password: can you help", "密码怎么办", "密碼我不記得了"), handles, emails, links and prices don't.
+ * Full-width letters, digits and punctuation from a Chinese keyboard ("密码：１２３４５６") in their plain forms (NFKC).
+ * One character for one, so a position in the result is the same position in the text as typed.
  */
-function typedValueLooksSecret(value: string, separated: boolean): boolean {
-  const v = trimToken(value);
-  const core = v.replace(/[?!.…？！]+$/u, ""); // sentence punctuation ("what is the password for?")
-  if (!core || NOT_A_VALUE.has(core.toLowerCase()) || CJK_CHAR.test(v) || plainlyNotSecret(v)) return false;
+const foldWidth = (s: string) => s.replace(/[\u3000\uFF01-\uFF5E]/g, (c) => c.normalize("NFKC"));
+
+/**
+ * The calmer rule for owner-typed text: after a label, only a value shaped like a password counts — a digit, a
+ * symbol or a capital inside the word ("Tanklin1991!!", "hunter2", "sunShine"). Ordinary words ("password: can you
+ * help"), handles, emails, links and prices don't. `glued` = Chinese follows straight on, where a capital inside
+ * the word is usually a brand ("密码是iPhone自动保存的").
+ */
+function typedValueLooksSecret(value: string, separated: boolean, glued: boolean): boolean {
+  const core = value.replace(SENTENCE_END, "");
+  if (!core || NOT_A_VALUE.has(core.toLowerCase()) || plainlyNotSecret(value)) return false;
   if ([...core].length < (separated ? 3 : 4)) return false;
-  return /\d/.test(core) || PASSWORD_SYMBOL.test(core) || (/[a-z]/.test(core) && /[A-Z]/.test(core.slice(1)));
+  return /\d/.test(core) || PASSWORD_SYMBOL.test(core) || (!glued && /[a-z]/.test(core) && /[A-Z]/.test(core.slice(1)));
+}
+
+/**
+ * "ig password: goldenwok", "密码：woaini": after a password label and a colon (or 是), ONE word that ends the line
+ * is the password, whatever it looks like. More words after it ("password: can you help", "password: same as
+ * Facebook") is someone talking, and is left to the shape rule above. `end` is where the word ends in `src`.
+ */
+function loneWordAfterPasswordLabel(src: string, end: number, label: string, gap: string, value: string): boolean {
+  if (!PASSWORD_LABEL.test(label) || !/[:=是为為]/.test(gap) || LINE_BREAK.test(gap)) return false;
+  if (!/^[\s)"'”’\]>,.;:!?。、…]*$/u.test(src.slice(end).split(LINE_BREAK, 1)[0])) return false;
+  const core = value.replace(SENTENCE_END, "");
+  return [...core].length >= 3 && !NOT_A_VALUE.has(core.toLowerCase()) && !plainlyNotSecret(value);
 }
 
 function scan(text: string | null | undefined, mode: { typed: boolean; tokens: boolean }): SecretMatch[] {
   if (!text || !text.trim()) return [];
+  const src = foldWidth(text);
   const out: SecretMatch[] = [];
   const seen = new Set<string>();
-  const push = (m: SecretMatch) => {
-    if (seen.has(m.text)) return;
-    seen.add(m.text);
-    out.push(m);
+  /** `at` is a position in `src`, which lines up with `text`: a match always carries the words as typed. */
+  const push = (kind: SecretMatch["kind"], at: number, length: number, label?: string) => {
+    const value = text.slice(at, at + length);
+    if (seen.has(value)) return;
+    seen.add(value);
+    out.push({ kind, text: value, hint: label ? `${label.toLowerCase()}: ${maskSecret(value)}` : maskSecret(value) });
+  };
+  /** Every password-shaped stretch of one word (a word of Chinese text can hold several stretches). */
+  const pushTokens = (word: string, at: number) => {
+    for (const r of word.matchAll(LATIN_RUN)) {
+      const t = trimToken(r[0]);
+      if (isSecretToken(t)) push("token", at + r.index + r[0].indexOf(t), t.length);
+    }
   };
 
   for (const re of [STRONG_RE, WEAK_RE, CJK_RE]) {
     re.lastIndex = 0;
-    for (const m of text.matchAll(re)) {
-      const label = m[1];
-      const value = trimToken(m[3]);
-      const sep = /[:=：是为為-]/.test(m[2]);
-      const hit = mode.typed ? typedValueLooksSecret(value, sep) : valueLooksSecret(label, value, sep || re === CJK_RE);
-      if (hit) push({ kind: "labelled", text: value, hint: `${label.toLowerCase()}: ${maskSecret(value)}` });
+    for (const m of src.matchAll(re)) {
+      const [, label, gap, raw] = m;
+      const end = m.index + m[0].length;
+      // Chinese right after the label is someone talking ("密码怎么办"); a password is the part before any Chinese.
+      const cjkAt = raw.search(CJK_CHAR);
+      const run = cjkAt < 0 ? raw : raw.slice(0, cjkAt);
+      if (cjkAt >= 0 && !mode.typed) {
+        // The jumpy check also takes numbers further into the sentence ("密码是我的生日19880808").
+        for (const r of raw.slice(cjkAt).matchAll(LATIN_RUN)) {
+          const t = trimToken(r[0]);
+          if ([...t].length >= 4 && /\d/.test(t) && !plainlyNotSecret(t)) push("labelled", end - raw.length + cjkAt + r.index + r[0].indexOf(t), t.length, label);
+        }
+      }
+      const value = trimToken(run);
+      if (!value) continue;
+      const sep = /[:=：是为為-]/.test(gap);
+      const hit = mode.typed
+        ? typedValueLooksSecret(value, sep, cjkAt >= 0) || (cjkAt < 0 && loneWordAfterPasswordLabel(src, end, label, gap, value))
+        : valueLooksSecret(label, value, sep || re === CJK_RE);
+      if (hit) push("labelled", end - raw.length + run.indexOf(value), value.length, label);
     }
   }
 
-  if (!mode.tokens) return out;
-  for (const raw of text.split(/\s+/)) {
-    if (!raw) continue;
-    // "pw:Secret1!" glued together is caught above; strip a leading "label:" so the token check sees the value.
-    const t = trimToken(raw.replace(/^[^:=：]{1,12}[:=：]/, ""));
-    if (isSecretToken(t)) push({ kind: "token", text: t, hint: maskSecret(t) });
+  if (mode.tokens) {
+    for (const w of src.matchAll(/\S+/g)) {
+      // "pw:Secret1!" glued together is caught above; skip a leading "label:" so the token check sees the value.
+      const skip = /^[^:=]{1,12}[:=]/.exec(w[0])?.[0].length ?? 0;
+      pushTokens(w[0].slice(skip), w.index + skip);
+    }
+    return out;
+  }
+  if (!mode.typed) return out;
+
+  // The prose boxes: a bare "Buy1Get1!" is fine, but not a password-shaped word right after an account.
+  for (const l of src.matchAll(LINE)) {
+    const line = l[0];
+    const next = /[\s:=/|,;\-–—]*([^\s/]+)/y;
+    /** Checks the next `count` words after `from` ("/", ":", "-" between them don't count as words). */
+    const after = (from: number, count: number, talk = false) => {
+      next.lastIndex = from;
+      for (let i = 0; i < count; i++) {
+        const w = next.exec(line);
+        if (!w) return;
+        // "log in to get…", "an account and…": someone talking about an account, not giving one.
+        if (talk && i === 0 && NOT_A_VALUE.has(trimToken(w[1]).toLowerCase())) return;
+        pushTokens(w[1], l.index + next.lastIndex - w[1].length);
+      }
+    };
+    for (const c of line.matchAll(CUE_RE)) {
+      // After the word "password" itself, anywhere further on the line ("the password to our IG is Tanklin1991!!").
+      if (PASSWORD_LABEL.test(c[1] ?? c[2])) after(c.index + c[0].length, Infinity);
+      else after(c.index + c[0].length, 2, true);
+    }
+    for (const e of line.matchAll(EMAIL_IN_LINE)) after(e.index + e[0].length, 1);
+    for (const n of line.matchAll(NAME_SLASH)) after(n.index + n[0].length, 1);
   }
   return out;
 }
@@ -142,8 +247,9 @@ export function looksLikeSecret(text: string | null | undefined): SecretMatch[] 
 }
 
 /**
- * The same for text an owner typed on the public onboarding form (see file comment). `tokens: false` also skips
- * the bare-word rule, for boxes where deal text like "Buy1Get1!" or "2for$10!" is exactly what we ask for.
+ * The same for text an owner typed on a public form (see file comment). `tokens: false` also skips the bare-word
+ * rule, for boxes where deal text like "Buy1Get1!" or "2for$10!" is exactly what we ask for. Only for refusing a
+ * form: what Claude and phones read goes through `redactSecrets` (the jumpy check) as well.
  */
 export function looksLikeTypedSecret(text: string | null | undefined, opts: { tokens?: boolean } = {}): SecretMatch[] {
   return scan(text, { typed: true, tokens: opts.tokens ?? true });
@@ -160,7 +266,11 @@ export function secretRefusal(field: string, matches: SecretMatch[]): string {
   return `Not saved: ${field} looks like it contains a password or login (${where}). Nora HQ never stores credentials — keep them in a password manager (e.g. 1Password or Apple Passwords) and remove them from this text, then try again. If it isn't a password, reword that part.`;
 }
 
-/** `text` with every likely password swapped for its masked hint — for showing notes to Claude or in lists. */
+/**
+ * `text` with every likely password swapped for its masked hint — for what Claude and phones read: notes, and
+ * anything an owner typed on a public form. Jumpy on purpose, so it also masks a deal written as one word
+ * ("Buy1Get1!"): never use it to refuse a form, and keep the text as typed for the team's own pages.
+ */
 export function redactSecrets(text: string | null | undefined): string | null {
   if (!text) return text ?? null;
   let out = text;

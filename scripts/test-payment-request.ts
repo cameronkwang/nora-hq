@@ -61,6 +61,23 @@ assert.equal(longDate("soon"), "soon");
   );
 }
 
+/* ── invoice: the visit is only thanked once it has happened ── */
+{
+  const thanks = "Thank you for having me at Crab O Clock!";
+  const plain = "Hi Maria,\n\nHere is my invoice for our collab with Crab O Clock.\n\nINVOICE";
+  // Billing up front: the visit is two days away.
+  const ahead = buildPaymentRequest({ ...base, visitDate: "2026-11-16" });
+  assert.ok(ahead.invoice.body.startsWith(plain), ahead.invoice.body.slice(0, 120));
+  assert.ok(!ahead.invoice.body.includes(thanks));
+  assert.ok(ahead.invoice.body.includes("Visit: Nov 16, 2026"));
+  // A deal with no visit at all.
+  const none = buildPaymentRequest({ ...base, visitDate: null });
+  assert.ok(none.invoice.body.startsWith(plain));
+  assert.ok(!none.invoice.body.includes(thanks));
+  // Invoicing on the day of the visit still says thank you.
+  assert.ok(buildPaymentRequest({ ...base, visitDate: "2026-11-14" }).invoice.body.includes(thanks));
+}
+
 /* ── reminder: not due yet, some posted ── */
 {
   const r = buildPaymentRequest(base);

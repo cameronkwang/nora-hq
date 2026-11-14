@@ -130,8 +130,9 @@ function DropFormRound({
         {pending ? D.sending : D.send}
       </button>
 
+      {/* Two sentences: English needs a space between them, a Chinese full stop doesn't (a space there shows as a gap). */}
       <p className="text-center text-sm leading-relaxed text-muted">
-        {C.common.privacy} {C.common.neverPasswords}
+        {C.common.privacy}{lang === "en" ? " " : ""}{C.common.neverPasswords}
       </p>
     </form>
   );

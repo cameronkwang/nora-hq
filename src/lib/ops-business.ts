@@ -134,10 +134,15 @@ function normalizeSender(kind: schema.SendFromKind | null, raw: string | null | 
   return { kind: "other", sendFrom: s };
 }
 
+/** Claude may fill the outreach sender and the creator offer in while they're empty. Once saved, they are a person's to change. */
+const savedByAPerson = (what: string) =>
+  `The ${what} is already saved, and only Nora or Cameron can change or clear it (business Settings → Outreach profile). Say what you were given in the ask thread.`;
+
 /**
  * Edit a business's details. Only the fields given change; null/"" clears (except name).
- * Refuses: any value that looks like a password; Claude touching googleLocation or ownerEmail (who receives reports), or replacing notes.
- * Returns the list of changes (before → after), also written to the activity log.
+ * Refuses: any value that looks like a password; Claude touching googleLocation or ownerEmail (who receives reports), or replacing notes;
+ * Claude changing or clearing a saved outreach sender or creator offer (reviewers check a pitch against those, so Claude may only fill them in while empty).
+ * A refused call saves nothing. Returns the list of changes (before → after), also written to the activity log.
  */
 export async function updateBusinessDetails(clientId: string, patch: BusinessDetailsPatch, actor: string): Promise<{ changed: string[] }> {
   if (!isPerson(actor) && !isClaude(actor)) throw new OpsError("Only Nora, Cameron or Claude can edit a business.");
@@ -184,10 +189,16 @@ export async function updateBusinessDetails(clientId: string, patch: BusinessDet
       : normalizeSender(v.sendFromKind === undefined ? cur.sendFromKind : v.sendFromKind || null, v.sendFrom === undefined ? cur.sendFrom : v.sendFrom);
     if (cur.kind === "creator" && (offer || sender?.sendFrom)) throw new OpsError("Nora's own workspace has no outreach profile: creator outreach is sent as a business we manage.");
     if (sender) {
+      // The sender and its type are one thing: with an account saved, Claude can't swap, retype or clear it.
+      const moved = sender.sendFrom !== cur.sendFrom || (!!cur.sendFromKind && sender.kind !== cur.sendFromKind);
+      if (claude && blank(cur.sendFrom) && moved) throw new OpsError(savedByAPerson(LABEL.sendFrom));
       diff("sendFrom", sender.sendFrom);
       diff("sendFromKind", sender.kind);
     }
-    if (offer !== undefined) diff("creatorOffer", offer);
+    if (offer !== undefined) {
+      if (claude && blank(cur.creatorOffer) && offer !== cur.creatorOffer) throw new OpsError(savedByAPerson(LABEL.creatorOffer));
+      diff("creatorOffer", offer);
+    }
   }
   if (v.brandVoice !== undefined) diff("brandVoice", blank(v.brandVoice), true);
   if (v.googleLocation !== undefined) diff("googleLocation", blank(v.googleLocation));
@@ -303,12 +314,23 @@ function normalizeFact(key: FactKey, raw: string): string {
 
 const isInfoFact = (k: FactKey): k is InfoFactKey => (INFO_FACT_KEYS as readonly string[]).includes(k);
 
+/** The same fact written another way: capitals, spacing, "https://", "www." and a trailing slash don't count as a difference. */
+const sameFact = (a: string, b: string) => {
+  const tidy = (v: string) => v.trim().toLowerCase().replace(/^https?:\/\//, "").replace(/^www\./, "").replace(/\/+$/, "").replace(/\s+/g, " ");
+  return tidy(a) === tidy(b);
+};
+
 /**
  * Save public facts about a business (what anyone can find on Google Maps, its website or its social profiles).
  * - Claude: every value needs the public URL it came from; a fact it looked for and couldn't find is marked
- *   notFound instead (which never removes a value that's already saved). Claude can't clear a fact.
- * - People (Settings): no source needed; an empty value clears the fact (for the Facebook Page, also its old
- *   "Facebook Page: <link>" line in the notes, so it stays cleared).
+ *   notFound instead (which never removes a value that's already saved). Claude can't clear a fact, and it only
+ *   replaces its own research: a fact that is empty, or whose saved source is a web address. A fact a person typed
+ *   (no source) or the owner gave (source "owner") is kept and reported back in `kept`; the one exception is the
+ *   owner's own correction (source "owner" after "Something's off"). Claude never edits the notes.
+ * - People (Settings): no source needed; an empty value clears the fact. Saving or clearing the Facebook Page also
+ *   takes its old "Facebook Page: <link>" line out of the notes.
+ * Once the Facebook Page was saved or cleared here (by anyone), that notes line no longer counts as the fact, so a
+ * cleared Page stays cleared even if the line is written back into the notes.
  * Likely passwords are refused. Every change is logged before → after. Each call stamps "checked now, by <actor>".
  */
 export async function setBusinessFacts(
@@ -342,10 +364,13 @@ export async function setBusinessFacts(
       if (value) info[key] = value;
       else delete info[key];
     }
-    // The Page used to be kept as a "Facebook Page: <link>" line in the notes, and the facts still fall back to it.
-    // Once the fact is cleared or changed here, that line goes too, or the old link would come straight back.
+    // The Page used to be kept as a "Facebook Page: <link>" line in the notes, and the facts fall back to it until
+    // the fact is saved or cleared here. From then on only the saved fact counts (businessFacts), so the old link
+    // can't come back, even when a Settings tab that was already open writes the line into the notes again.
     if (key === "facebook") {
-      const notes = dropFacebookNote(cur.notes);
+      info.facebookDecided = true;
+      // A person's save also takes the line out of the notes. Claude never edits notes.
+      const notes = claude ? cur.notes : dropFacebookNote(cur.notes);
       if (notes !== cur.notes) set.notes = notes;
     }
   };
@@ -382,6 +407,14 @@ export async function setBusinessFacts(
     const value = normalizeFact(key, raw);
     const shown = key === "instagram" || key === "tiktok" ? `@${value}` : value;
     const was = after[key];
+    // Claude only replaces its own research: a saved fact whose source is a web address. What a person typed (no
+    // source) or the owner gave (source "owner") stays as it is, unless this is the owner's own correction. That
+    // also means Claude can't put its source on such a fact, which would make it look like research later.
+    const savedBy = !was ? null : sources[key] === OWNER_SOURCE ? "the owner gave it" : sources[key] ? null : "a person saved it";
+    if (claude && savedBy && !fromOwner) {
+      if (!sameFact(was!, shown)) kept.push(`${label}: kept ${show(was)} (${savedBy}). You found ${show(shown)}: only Nora or Cameron can change it, in the business's Settings. Tell them in the ask thread.`);
+      continue;
+    }
     notFound.delete(key);
     if (was !== shown) {
       store(key, value);

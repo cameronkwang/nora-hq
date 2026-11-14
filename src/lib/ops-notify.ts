@@ -11,7 +11,7 @@ import { OpsError } from "./ops";
 import { appUrl } from "./integrations/oauth";
 import { buildCalendar, type IcalEvent } from "./ical";
 import { personEmail, sendToUser, type PushPayload } from "./notify";
-import { reelsToPost, scheduleOn } from "./ops-schedule";
+import { dealsMadeFromSchedule, reelsToPost, scheduleOn } from "./ops-schedule";
 import { scheduleNameKey } from "./schedule-parse";
 import { NOTIFY_TOPICS, type NotifyTopic } from "./schema";
 
@@ -219,6 +219,15 @@ export async function calendarFor(userEmail: string, now = new Date(), origin?: 
     db.select().from(schema.tasks).where(and(eq(schema.tasks.assignee, person), isNotNull(schema.tasks.dueDate), gte(schema.tasks.dueDate, fromDate), lte(schema.tasks.dueDate, toDate), ne(schema.tasks.status, "done"))),
   ]);
 
+  // A deal made from the schedule sits at a noon placeholder until someone sets the real time: it goes in as an
+  // all-day entry, never as a made-up 12:00 appointment (the morning reminder leaves that time out the same way).
+  // (If the schedule can't be read, visits keep their time, as before.)
+  const noonVisits = visits.filter((d) => isNoonInTz(d.visitAt!)).map((d) => d.id);
+  const placeholder = await dealsMadeFromSchedule(noonVisits).catch((e) => {
+    console.error("[calendar feed] placeholder check skipped", e);
+    return new Set<string>();
+  });
+
   const events: IcalEvent[] = [];
   for (const d of visits) {
     const desc = [
@@ -231,7 +240,8 @@ export async function calendarFor(userEmail: string, now = new Date(), origin?: 
       d.notes ? `Notes: ${d.notes}` : null,
       link(dealHref(d.id)),
     ].filter(Boolean).join("\n");
-    events.push({ uid: `deal-visit-${d.id}@nora-hq`, summary: `Visit: ${d.businessName}`, start: d.visitAt!, minutes: 90, location: d.address, description: desc, url: link(dealHref(d.id)), lastModified: d.updatedAt, categories: ["Visit"] });
+    const when = placeholder.has(d.id) ? { date: today(d.visitAt!) } : { start: d.visitAt!, minutes: 90 };
+    events.push({ uid: `deal-visit-${d.id}@nora-hq`, summary: `Visit: ${d.businessName}`, ...when, location: d.address, description: desc, url: link(dealHref(d.id)), lastModified: d.updatedAt, categories: ["Visit"] });
   }
   for (const { p, clientName } of posts) {
     const done = p.status === "published";
@@ -280,7 +290,7 @@ function isNoonInTz(d: Date) {
 }
 const shortDate = (ymd: string) => new Date(`${ymd}T12:00:00Z`).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
 
-/** Mondays carry the weekly "N reels owed" line. */
+/** Mondays carry the weekly "N reels to post" line. */
 const isMonday = (ymd: string) => new Date(`${ymd}T12:00:00Z`).getUTCDay() === 1;
 const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? "" : "s"}`;
 
@@ -288,8 +298,9 @@ const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? "" : "s"}`;
  * Once a day (first sync run after 8am NY), all to Nora:
  *  - payments overdue (deals);
  *  - tomorrow's deal visits (with address);
- *  - tomorrow's jobs on her schedule that a deal visit doesn't already cover ("Tomorrow: S&F · 📸 reel owed");
- *  - on Mondays, how many reels she still owes.
+ *  - tomorrow's jobs on her schedule that a deal visit doesn't already cover ("Tomorrow: S&F · 📸 reel to post");
+ *  - on Mondays, how many reels are still to post from jobs that have happened (dated today or earlier, or with
+ *    no set day in an earlier month): never the ones still ahead.
  * The schedule lines never carry money. Safe to call hourly: an app_settings row ("notify.daily") records the
  * day it ran, claimed atomically. `force` (testing) sends everything now, the weekly line included.
  * `preview` (testing) sends nothing and claims nothing: it returns the messages that WOULD go out for `now`
@@ -359,7 +370,7 @@ export async function runDailyReminders(now = new Date(), opts: { force?: boolea
     const placeholder = job?.dealId === d.id && isNoonInTz(d.visitAt!);
     const r = await push("visit_reminder", {
       title: placeholder ? `Tomorrow: ${d.businessName}` : `Tomorrow ${timeInTz(d.visitAt!)}: ${d.businessName}`,
-      body: [d.address, job && owesReel(job) ? "📸 reel owed" : null, d.dietaryNotes ? `Dietary: ${d.dietaryNotes}` : null].filter(Boolean).join(" · ") || "Visit tomorrow",
+      body: [d.address, job && owesReel(job) ? "📸 reel to post" : null, d.dietaryNotes ? `Dietary: ${d.dietaryNotes}` : null].filter(Boolean).join(" · ") || "Visit tomorrow",
       url: dealHref(d.id),
       tag: `visit-${d.id}`,
     });
@@ -373,7 +384,7 @@ export async function runDailyReminders(now = new Date(), opts: { force?: boolea
     const r = await push("visit_reminder", {
       title: one ? `Tomorrow: ${one.businessName}` : `Tomorrow: ${rest.length} on your schedule`,
       body: one
-        ? [owesReel(one) ? "📸 reel owed" : null, one.isFree ? "Free" : null].filter(Boolean).join(" · ") || "On your schedule tomorrow"
+        ? [owesReel(one) ? "📸 reel to post" : null, one.isFree ? "Free" : null].filter(Boolean).join(" · ") || "On your schedule tomorrow"
         : rest.map((j) => `${j.businessName}${owesReel(j) ? " 📸" : ""}`).join(" · "),
       url: `/calendar?month=${tomorrow.slice(0, 7)}`,
       tag: `schedule-${tomorrow}`,
@@ -384,7 +395,7 @@ export async function runDailyReminders(now = new Date(), opts: { force?: boolea
   let reelsOwed: number | undefined;
   let reelsSent = 0;
   if (force || isMonday(day)) {
-    const reels = await reelsToPost().catch((e) => {
+    const reels = await reelsToPost(day).catch((e) => {
       console.error("[notify] weekly reels line skipped", e);
       return [] as Awaited<ReturnType<typeof reelsToPost>>;
     }); // oldest first
@@ -392,7 +403,7 @@ export async function runDailyReminders(now = new Date(), opts: { force?: boolea
     if (reels.length) {
       const names = reels.slice(0, 5).map((r) => r.businessName).join(" · ");
       const r = await push("visit_reminder", {
-        title: `${plural(reels.length, "reel")} owed`,
+        title: `${plural(reels.length, "reel")} to post`,
         body: reels.length > 5 ? `${names} · +${reels.length - 5} more` : names,
         url: "/calendar?show=reels",
         tag: `reels-owed-${day}`,

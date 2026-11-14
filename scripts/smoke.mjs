@@ -1224,9 +1224,9 @@ const INTAKE_LANGS = {
   en: { next: "Next", thanks: /Thank you/, already: "Thanks — we got your answers", expired: "This link has expired", stepOf: "Step 1 of 3", minutes: "about a minute",
     right: "Is this right?", address: "Address", hours: "Hours", yes: "Yes, that's right", off: "Something's off", fix: "What should we fix?", sendNow: "Send now", more: "Got one more minute?", talk: "en" },
   "zh-Hans": { next: "下一步", thanks: /谢谢您/, already: "谢谢，我们已经收到您的资料", expired: "这个链接已经失效", stepOf: "第 1 步，共 3 步", minutes: "大约一分钟",
-    right: "这些信息对吗？", address: "地址", hours: "营业时间", yes: "对，没问题", off: "有地方不对", fix: "哪里需要改？", sendNow: "现在提交", more: "还有一分钟吗？", talk: "mandarin" },
+    right: "这些信息对吗？", address: "地址", hours: "营业时间", yes: "对，没问题", off: "有地方不对", fix: "哪里需要改？", sendNow: "现在提交", more: "还有一分钟时间吗？", talk: "mandarin" },
   "zh-Hant": { next: "下一步", thanks: /謝謝您/, already: "謝謝，我們已經收到您的資料", expired: "這個連結已經失效", stepOf: "第 1 步，共 3 步", minutes: "大約一分鐘",
-    right: "這些資訊對嗎？", address: "地址", hours: "營業時間", yes: "對，沒問題", off: "有地方不對", fix: "哪裡需要改？", sendNow: "現在送出", more: "還有一分鐘嗎？", talk: "mandarin" },
+    right: "這些資訊對嗎？", address: "地址", hours: "營業時間", yes: "對，沒問題", off: "有地方不對", fix: "哪裡需要改？", sendNow: "現在送出", more: "還有一分鐘時間嗎？", talk: "mandarin" },
 };
 
 async function intakeNext(page) {
@@ -1677,7 +1677,9 @@ async function v7Flows(browser) {
     for (const s of ["王小明", "untrusted", "What should we show off?", "Yes, that's right", "What we showed them", "100 Granby St", "Is this right? · About you", "Mandarin"]) if (!it.includes(s)) throw new Error(`get_client_intake misses ${s}: ${it.slice(0, 300)}`);
     if (it.includes("ipHash") || it.includes("_meta")) throw new Error("get_client_intake leaks _meta");
     if (/forged|attackerstore/.test(it)) throw new Error("forged upload URL kept");
-    for (const s of ["Buy1Get1! on Tuesdays", "2for$10! lunch", ...PW_TALK]) if (!it.includes(s)) throw new Error(`an ordinary answer was dropped or masked: ${s}`);
+    for (const s of PW_TALK) if (!it.includes(s)) throw new Error(`an ordinary answer was dropped or masked: ${s}`);
+    // Claude's copy goes through the strict password check, which also masks a deal written as one word. Claude is told so; the team page keeps it as typed.
+    for (const s of ["[password removed: B•••••••!] on Tuesdays", "[password removed: 2••••••!] lunch", "passwordsMasked"]) if (!it.includes(s)) throw new Error(`get_client_intake should mask password-shaped words for Claude: ${s}`);
     const st = await tool("get_onboarding_status", { client_id: id });
     if (!JSON.stringify(st.publicFacts?.alreadyKnown ?? []).includes(`TikTok: @smoke_tt_${stamp} (from the owner`)) throw new Error(`TikTok from the owner not recorded with its source: ${JSON.stringify(st.publicFacts).slice(0, 300)}`);
   });
@@ -1685,7 +1687,7 @@ async function v7Flows(browser) {
   await step("/clients/[id]/intake shows the 3 sections with the owner's confirmation (Answered in 简体); card says Answers in", async () => {
     await page.goto(`${BASE}/clients/${id}/intake`, { waitUntil: "networkidle" });
     const t = await page.locator("main").innerText();
-    for (const s of ["王小明", "简体", "Is this right? · About you", "Accounts & photos", "How we'll work together", "The details we showed them", "Yes, that's right", "What we showed them", "100 Granby St", "Set up on the kickoff call"]) if (!t.includes(s)) throw new Error(`answers page missing ${s}`);
+    for (const s of ["王小明", "简体", "Is this right? · About you", "Accounts & photos", "How we'll work together", "The details we showed them", "Yes, that's right", "What we showed them", "100 Granby St", "Set up on the kickoff call", "Buy1Get1! on Tuesdays, 2for$10! lunch"]) if (!t.includes(s)) throw new Error(`answers page missing ${s}`);
     if (/Earlier answers/.test(t)) throw new Error("new form shows an Earlier answers section");
     if (/ipHash|_meta/.test(t)) throw new Error("answers page leaks _meta");
     if (/forged/.test(t) || (await page.locator("a[href*='attackerstore']").count())) throw new Error("answers page shows a forged upload");
@@ -2484,7 +2486,7 @@ async function v10Flows(browser) {
     ids.c = (await tool("upsert_creator", { name: cC.name, instagram_handle: cC.ig, instagram_followers: 3200, stats_source: `https://www.instagram.com/${cC.ig}/` })).creator.id;
     ids.d = (await tool("upsert_creator", { name: cD.name, instagram_handle: cD.ig, email: cD.email, instagram_followers: 21000, stats_source: `https://www.instagram.com/${cD.ig}/` })).creator.id;
   });
-  await step("#2 + #6 outreach draft written as the business: no warnings when sender, offer and a fresh check are saved; the review card shows 'Send from @x (Instagram, not Nora) · Offer: …' and '10.5K IG · checked today · no prior posts'", async () => {
+  await step("#2 + #6 outreach draft written as the business: no warnings when sender, offer and a fresh check are saved; the review card shows 'Send from @x (Instagram, not Nora) · Offer: …' and '10.5K IG · checked today · no prior post recorded'", async () => {
     const o = await tool("upsert_outreach", { client_id: depotId, creator_id: ids.a, stage: "shortlisted", comp_type: "gifted" });
     out.a = o.outreachId;
     if (o.outreach.channel !== "instagram_dm") throw new Error(`channel not defaulted from the creator's handles: ${o.outreach.channel}`);
@@ -2494,7 +2496,7 @@ async function v10Flows(browser) {
     await page.goto(`${BASE}/review?draft=${drafts.a}`, { waitUntil: "networkidle" });
     const t = flat(await page.locator(`#d-${drafts.a}`).innerText());
     if (!t.includes(`Send from @${depotHandle}`) || !/\(Instagram, not Nora\)/.test(t) || !t.includes(`Offer: ${OFFER}`)) throw new Error(`no sender chip: ${t.slice(0, 300)}`);
-    if (!/10\.5K IG · checked today · no prior posts/.test(t)) throw new Error(`no creator check line: ${t.slice(0, 400)}`);
+    if (!/10\.5K IG · checked today · no prior post recorded/.test(t)) throw new Error(`no creator check line: ${t.slice(0, 400)}`);
     if (/Reads as Nora|Already featured|No sender saved/.test(t)) throw new Error("a clean draft carries a warning badge");
   });
   await step("#6 warnings on a draft: never-checked numbers, a channel that isn't the saved sender, text that reads as Nora, no sender/offer saved", async () => {
@@ -2572,7 +2574,7 @@ async function v10Flows(browser) {
     await pick(`@${depotHandle}`).tap();
     await p.locator("main h2", { hasText: `Send as @${depotHandle}` }).waitFor({ timeout: 15000 });
     let t = flat(await p.locator("main").innerText());
-    if (!/2 left/.test(t) || !t.includes(cA.name) || !t.includes(`Offer: ${OFFER}`) || !/not Nora/.test(t) || !t.includes("10.5K IG · checked today · no prior posts")) throw new Error(`first card: ${t.slice(0, 500)}`);
+    if (!/2 left/.test(t) || !t.includes(cA.name) || !t.includes(`Offer: ${OFFER}`) || !/not Nora/.test(t) || !t.includes("10.5K IG · checked today · no prior post recorded")) throw new Error(`first card: ${t.slice(0, 500)}`);
     const dm = p.locator("main a", { hasText: "Open DM" });
     if ((await dm.getAttribute("href")) !== `https://ig.me/m/${cA.ig}`) throw new Error(`DM link: ${await dm.getAttribute("href")}`);
     await v10Audit(p, "send mode: one message (390)");
@@ -2660,8 +2662,8 @@ async function v10Flows(browser) {
     if (iAd < 0 || iPlan < 0 || iAd > iPlan || !t.includes(realTask)) throw new Error(`order: ad hoc @${iAd}, checklist @${iPlan}`);
     if (!(await c.locator("details.group").count()) || (await c.locator("details.group[open]").count())) throw new Error("plan rows missing or open by default");
   });
-  /** A generated checklist slot nobody dated or wrote on (those are counted in monthlyPlanSlots, never listed). */
-  const bareSlot = (t) => !!t.deliverableId && !t.dueDate && !t.details && String(t.id).startsWith("tsk_gen_");
+  /** A generated checklist slot nobody dated, wrote on or assigned to Claude (those are counted in monthlyPlanSlots, never listed). */
+  const bareSlot = (t) => !!t.deliverableId && !t.dueDate && !t.details && t.assignee !== "claude" && String(t.id).startsWith("tsk_gen_");
   await step("#4 get_briefing isn't crowded by plan slots: tasksForClaude holds real tasks (never a bare plan slot), the plan is counted per item in monthlyPlanSlots", async () => {
     const b = await tool("get_briefing", {});
     const mine = b.tasksForClaude ?? [];
@@ -2698,12 +2700,13 @@ async function v10Flows(browser) {
   });
 
   /* ── #5 Schedule in Nora's reminders + calendar feed ── */
-  await step("#5 schedule → Nora's 8am reminder: 'Tomorrow: <business>' · '📸 reel owed' (a free job says Free), Mondays add 'N reels owed'; no money", async () => {
+  await step("#5 schedule → Nora's 8am reminder: 'Tomorrow: <business>' · '📸 reel to post' (a free job says Free), Mondays add 'N reels to post' (jobs that have happened); no money", async () => {
     // A far-off week nobody else uses, so "tomorrow" there holds only this run's job. 6 Jan 2031 is a Monday.
     const monday = plusDays("2031-01-06", (Math.floor(Date.now() / 60000) % 1500) * 7);
     const tue = plusDays(monday, 1), wed = plusDays(monday, 2);
-    const reelCafe = `V10 Reel Cafe ${stamp}`, freeCafe = `V10 Free Cafe ${stamp}`;
-    await tool("add_to_schedule", { items: [{ business: reelCafe, date: tue, reel: true }, { business: freeCafe, date: wed, free: true }] });
+    const reelCafe = `V10 Reel Cafe ${stamp}`, freeCafe = `V10 Free Cafe ${stamp}`, doneCafe = `V10 Shot Cafe ${stamp}`;
+    // The Monday line counts only reels from jobs that have happened: doneCafe (shot that Monday) counts, reelCafe (Tuesday) doesn't yet.
+    await tool("add_to_schedule", { items: [{ business: doneCafe, date: monday, reel: true }, { business: reelCafe, date: tue, reel: true }, { business: freeCafe, date: wed, free: true }] });
     const preview = async (ymd) => {
       const r = await fetch(`${BASE}/api/cron/reminders?preview=1&at=${ymd}T14:00:00Z`, { headers: { authorization: `Bearer ${process.env.CRON_SECRET ?? "test"}` } });
       return { status: r.status, body: await r.json().catch(() => null) };
@@ -2713,21 +2716,21 @@ async function v10Flows(browser) {
     if (mon.status !== 200 || !mon.body?.preview) throw new Error(`preview: HTTP ${mon.status} ${JSON.stringify(mon.body).slice(0, 200)}`);
     const msgs = mon.body.messages;
     const m = msgs.find((x) => x.title === `Tomorrow: ${reelCafe}`);
-    if (!m || m.body !== "📸 reel owed" || m.topic !== "visit_reminder" || m.url !== `/calendar?month=${tue.slice(0, 7)}`) throw new Error(`reel job: ${JSON.stringify(m ?? msgs).slice(0, 300)}`);
-    const weekly = msgs.find((x) => /^\d+ reels? owed$/.test(x.title));
+    if (!m || m.body !== "📸 reel to post" || m.topic !== "visit_reminder" || m.url !== `/calendar?month=${tue.slice(0, 7)}`) throw new Error(`reel job: ${JSON.stringify(m ?? msgs).slice(0, 300)}`);
+    const weekly = msgs.find((x) => /^\d+ reels? to post$/.test(x.title));
     if (!weekly || weekly.url !== "/calendar?show=reels" || mon.body.scheduleTomorrow !== 1 || !(mon.body.reelsOwed >= 1)) throw new Error(`weekly line: ${JSON.stringify(weekly ?? mon.body).slice(0, 300)}`);
     const tu = await preview(tue);
     const f = tu.body.messages.find((x) => x.title === `Tomorrow: ${freeCafe}`);
     if (!f || f.body !== "Free") throw new Error(`free job: ${JSON.stringify(f ?? tu.body.messages).slice(0, 300)}`);
-    if (tu.body.messages.some((x) => /reels? owed$/.test(x.title))) throw new Error("the weekly reels line went out on a Tuesday");
+    if (tu.body.messages.some((x) => /reels? to post$/.test(x.title))) throw new Error("the weekly reels line went out on a Tuesday");
     for (const x of [...msgs, ...tu.body.messages].filter((x) => x.topic === "visit_reminder" && !String(x.url).startsWith("/deals"))) {
       if (/\$\s?\d|Zelle|Venmo/i.test(`${x.title} ${x.body}`)) throw new Error(`money in a schedule reminder: ${x.title} · ${x.body}`);
     }
   });
-  await step("#5 calendar feed: tomorrow's job is an all-day 'Nora: <business> · 📸 reel to post' and the coming Monday carries '📸 N reels to post'; no money", async () => {
+  await step("#5 calendar feed: tomorrow's job is an all-day 'Nora: <business> · 📸 reel to post' and the coming Monday carries '📸 N reels to post' (jobs that have happened, never tomorrow's); no money", async () => {
     const tomorrow = plusDays(today, 1);
-    const feedCafe = `V10 Feed Cafe ${stamp}`;
-    await tool("add_to_schedule", { items: [{ business: feedCafe, date: tomorrow, reel: true }] });
+    const feedCafe = `V10 Feed Cafe ${stamp}`, shotCafe = `V10 Feed Shot Cafe ${stamp}`;
+    await tool("add_to_schedule", { items: [{ business: feedCafe, date: tomorrow, reel: true }, { business: shotCafe, date: plusDays(today, -1), reel: true }] });
     await page.goto(`${BASE}/settings/notifications`, { waitUntil: "networkidle" });
     await page.locator("button", { hasText: /Make my calendar link|Make a new link/ }).click();
     await page.locator("#cal-new-link").waitFor({ timeout: 15000 });
@@ -2739,7 +2742,8 @@ async function v10Flows(browser) {
     const weekly = events.find((e) => /SUMMARY:Nora: 📸 \d+ reels? to post/.test(e));
     const day = weekly?.match(/DTSTART;VALUE=DATE:(\d{4})(\d{2})(\d{2})/);
     if (!day || new Date(`${day[1]}-${day[2]}-${day[3]}T12:00:00Z`).getUTCDay() !== 1) throw new Error(`weekly reels event: ${weekly?.slice(0, 300)}`);
-    if (!weekly.includes(feedCafe.replace(/,/g, "\\,")) && !/more/.test(weekly)) throw new Error("the weekly event doesn't list the businesses");
+    if (!weekly.includes(shotCafe.replace(/,/g, "\\,")) && !/more/.test(weekly)) throw new Error("the weekly event doesn't list the businesses");
+    if (weekly.includes(feedCafe.replace(/,/g, "\\,"))) throw new Error("the weekly event counts tomorrow's job, which hasn't happened yet");
     if (/\$\s?\d|Zelle/.test(events.filter((e) => /SUMMARY:Nora: /.test(e)).join("\n"))) throw new Error("money in the feed's schedule events");
   });
 
@@ -2935,7 +2939,7 @@ async function v10Flows(browser) {
     if (left.length) throw new Error(`${left.length} monthly-plan tasks exist before opening day`);
     await page.goto(`${BASE}/clients/${depotId}`, { waitUntil: "networkidle" });
     const t = flat(await page.locator("main").innerText());
-    for (const s of ["Pre-launch", "Launch checklist", "in 12 days", "0 of 6 done", "Verify the Google Business Profile", "Instagram bio", "TikTok bio", "Google Business description", "3 coming-soon posts", "Opening-day creator shortlist", "the monthly plan starts on opening day"]) {
+    for (const s of ["Pre-launch", "Launch checklist", "in 12 days", "0 of 6 done", "Verify the Google Business Profile", "Instagram bio", "TikTok bio", "Google Business description", "3 coming-soon posts", "Opening-day creator shortlist", "no monthly checklist tasks are created before opening day"]) {
       if (!t.includes(s)) throw new Error(`business page misses "${s}"`);
     }
     if (await page.locator("button:has-text(\"Create this month's checklist\")").count()) throw new Error("'Create this month's checklist' is offered before opening day");
@@ -3164,6 +3168,24 @@ async function v10Flows(browser) {
     await open.waitFor({ state: "detached", timeout: 30000 });
     await page.reload({ waitUntil: "networkidle" });
     if (await card(page, /^Launch checklist$/).count()) throw new Error("still showing the launch checklist after 'They're open'");
+    if ((await tool("list_clients", {})).find((x) => x.id === depotId)?.prelaunch) throw new Error("list_clients still says pre-launch");
+  });
+  await step("#8 marking a business open creates this month's checklist: Pre-launch on again clears the untouched slots; unticking 'Not open yet' brings them back (nothing waits for opening day)", async () => {
+    await page.goto(`${BASE}/clients/${depotId}/settings`, { waitUntil: "networkidle" });
+    const form = page.locator("form[aria-label='Pre-launch']");
+    const status = form.locator("p[role='status']");
+    await form.locator("input[name='prelaunch']").check();
+    await form.locator("#s-opening").fill(openDay);
+    await form.locator("button[type='submit']").click();
+    await status.filter({ hasText: /Pre-launch · Opens/ }).waitFor({ timeout: 30000 });
+    if (!/Cleared \d+ untouched monthly checklist tasks?/.test(await status.innerText())) throw new Error(`message: ${await status.innerText()}`);
+    if ((await planTasks()).length) throw new Error("monthly-plan tasks left while the business is pre-launch again");
+    await form.locator("input[name='prelaunch']").uncheck();
+    await form.locator("button[type='submit']").click();
+    await status.filter({ hasText: /Marked as open/ }).waitFor({ timeout: 30000 });
+    const msg = await status.innerText();
+    if (!/Created \d+ monthly checklist tasks? for this month/.test(msg)) throw new Error(`message: ${msg}`);
+    if (!(await planTasks()).length) throw new Error("marking the business open didn't create this month's plan tasks");
     if ((await tool("list_clients", {})).find((x) => x.id === depotId)?.prelaunch) throw new Error("list_clients still says pre-launch");
   });
 

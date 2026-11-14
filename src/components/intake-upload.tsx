@@ -16,12 +16,14 @@ const randomPrefix = () => Array.from(crypto.getRandomValues(new Uint8Array(6)),
  * Optional photo/video/logo upload on the onboarding form. Only rendered when Vercel Blob is configured:
  * files go straight from the phone to Blob (token from /start/<token>/upload), under intake/<intake id>/.
  * The parent owns the list and posts it as JSON in a hidden "uploads" field.
+ * Both upload routes hand out tokens that make exactly one file (no random suffix, no overwrite), so every file
+ * name gets a random prefix here: phone photos are often all called "image.jpg".
  *
  * The owner drop link (/drop/<token>) reuses it with its own folder, upload route, label and file cap; left out,
  * everything works as on the onboarding form.
  */
 export function IntakeUpload({
-  C, token, intakeId, files, onChange, folder, endpoint, label, hint, maxFiles = MAX_FILES, optional = true, uniqueNames = false,
+  C, token, intakeId, files, onChange, folder, endpoint, label, hint, maxFiles = MAX_FILES, optional = true, uniqueNames = true,
 }: {
   C: IntakeCopy; token: string; intakeId: string; files: IntakeUploadedFile[]; onChange: (files: IntakeUploadedFile[]) => void;
   /** Folder in our Blob store, without a trailing slash. Default: intake/<intake id>. */
@@ -33,10 +35,7 @@ export function IntakeUpload({
   maxFiles?: number;
   /** Show "(optional)" after the label. */
   optional?: boolean;
-  /**
-   * Put a random prefix on each file name. For an upload route whose tokens make exactly one file (no random suffix,
-   * no overwrite): phone photos are often all called "image.jpg".
-   */
+  /** Put a random prefix on each file name (the default; see above). Only turn it off for a route that adds its own suffix. */
   uniqueNames?: boolean;
 }) {
   const id = useId();
