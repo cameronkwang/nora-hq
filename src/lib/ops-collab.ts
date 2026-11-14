@@ -43,14 +43,17 @@ const isPerson = (actor: string) => !PEOPLE_ONLY.has(actor.toLowerCase());
 // C0/C1 controls, zero-width and bidi overrides. Newlines/tabs handled separately for multi-line fields.
 const INVISIBLE = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f​-‏‪-‮⁠-⁤⁦-⁩﻿]/g;
 
+// U+0085 (NEL), U+2028 (line separator) and U+2029 (paragraph separator) read as a line break without being "\n":
+// a single-line field gets a space, a multi-line field a real "\n", so text quoted line by line can't slip a line
+// past its quote mark.
 export function cleanLine(v: unknown): string {
   if (typeof v !== "string") return "";
-  return v.replace(INVISIBLE, "").replace(/[\r\n\t]+/g, " ").replace(/\s{2,}/g, " ").trim();
+  return v.replace(/[\u0085\u2028\u2029]+/g, " ").replace(INVISIBLE, "").replace(/[\r\n\t]+/g, " ").replace(/\s{2,}/g, " ").trim();
 }
 
 export function cleanBlock(v: unknown): string {
   if (typeof v !== "string") return "";
-  return v.replace(/\r\n?/g, "\n").replace(INVISIBLE, "").replace(/\t/g, " ").replace(/[  ]+\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim();
+  return v.replace(/\r\n?|[\u0085\u2028\u2029]/g, "\n").replace(INVISIBLE, "").replace(/\t/g, " ").replace(/[  ]+\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim();
 }
 
 /* ───────────────────────── Input ───────────────────────── */

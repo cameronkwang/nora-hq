@@ -44,6 +44,7 @@ import {
   shapeDraft,
   shapeOutreach,
   shapePost,
+  shapePublicFacts,
   shapeTask,
   threadsFor,
   type Ctx,
@@ -209,7 +210,7 @@ export function registerTools(server: McpServer, ctx: Ctx) {
   server.registerTool("list_clients", {
     title: "List businesses",
     description:
-      "Lists the businesses we manage with their ids, location, Instagram/TikTok handles, website, brand voice, notes, creator search areas (outreachAreas: where to look for local creators, e.g. \"Richmond, 757 / Hampton Roads\") and monthly plan (deliverables with target per month; 0 = as needed; platform facebook = Facebook Page posts, posted by hand). " +
+      "Lists the businesses we manage with their ids, location, Instagram/TikTok handles, website, publicFacts (address, phone, opening hours, Facebook Page, Google listing, what they sell, price range — looked up from public sources; save more with set_business_facts), brand voice, notes, creator search areas (outreachAreas: where to look for local creators, e.g. \"Richmond, 757 / Hampton Roads\") and monthly plan (deliverables with target per month; 0 = as needed; platform facebook = Facebook Page posts, posted by hand). " +
       "Use the id as client_id in other tools. Always read brandVoice before drafting anything for a business. " +
       "kind \"creator\" (id \"noraeatsgood\") is Nora's own content-creator workspace (her @noraeatsgood content, stats and collab inbox), not a managed business: file her own content work under it, and don't treat it like a client (no Google mapping, business brand voice or client pitches). ",
     inputSchema: { include_archived: z.boolean().default(false).describe("Include archived businesses.") },
@@ -228,6 +229,7 @@ export function registerTools(server: McpServer, ctx: Ctx) {
       instagramHandle: c.instagramHandle,
       tiktokHandle: c.tiktokHandle,
       website: c.website,
+      publicFacts: shapePublicFacts(c),
       googleConnected: !!c.googleLocation,
       brandVoice: c.brandVoice ? redactSecrets(c.brandVoice) : c.brandVoice,
       notes: c.notes ? redactSecrets(c.notes) : c.notes,
@@ -252,7 +254,7 @@ export function registerTools(server: McpServer, ctx: Ctx) {
     if (!cm) throw new ToolError(`No business with id "${client_id}". Call list_clients for valid ids.`);
     const names = await clientNames();
     return {
-      business: { id: cm.client.id, kind: cm.client.kind, name: businessName(cm.client), instagramHandle: cm.client.instagramHandle, tiktokHandle: cm.client.tiktokHandle, website: cm.client.website, googleConnected: !!cm.client.googleLocation, brandVoice: cm.client.brandVoice ? redactSecrets(cm.client.brandVoice) : cm.client.brandVoice, notes: cm.client.notes ? redactSecrets(cm.client.notes) : cm.client.notes, outreachAreas: cm.client.outreachAreas },
+      business: { id: cm.client.id, kind: cm.client.kind, name: businessName(cm.client), instagramHandle: cm.client.instagramHandle, tiktokHandle: cm.client.tiktokHandle, website: cm.client.website, publicFacts: shapePublicFacts(cm.client), googleConnected: !!cm.client.googleLocation, brandVoice: cm.client.brandVoice ? redactSecrets(cm.client.brandVoice) : cm.client.brandVoice, notes: cm.client.notes ? redactSecrets(cm.client.notes) : cm.client.notes, outreachAreas: cm.client.outreachAreas },
       month: cm.month,
       plan: cm.plan.map((p) => ({ deliverableId: p.deliverable.id, title: p.deliverable.title, platform: p.deliverable.platform, target: p.target || "as needed", done: p.done, tasksPlanned: p.planned })),
       monthTasks: cm.monthTasks.map((t) => shapeTask(t, names)),

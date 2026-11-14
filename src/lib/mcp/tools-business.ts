@@ -6,7 +6,8 @@ import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { getDb, schema } from "@/lib/db";
 import { OpsError } from "@/lib/ops";
 import { SERVICES } from "@/lib/onboard-services";
-import { createBusiness, setBusinessActive, setPlan, updateBusinessDetails } from "@/lib/ops-business";
+import { createBusiness, setBusinessActive, setBusinessFacts, setPlan, updateBusinessDetails } from "@/lib/ops-business";
+import { FACT_LABEL, PRICE_RANGES, factsChecklist, ownerCardFacts, sourceLabel, type FactKey, type FactsChecklist } from "@/lib/business-facts";
 import { getOnboardingStatus } from "@/lib/ops-onboarding";
 import { createIntakeLink, getClientIntakeStatus } from "@/lib/ops-intake";
 import { INTAKE_COPY, INTAKE_LANG_CODES, INTAKE_LANG_TAG } from "@/lib/intake-copy";
@@ -14,7 +15,8 @@ import { absUrl, type Ctx } from "./queries";
 
 /**
  * Claude's business tools: set up a business, edit its details and monthly plan, switch it Active/Inactive,
- * get the onboarding form link (for a PERSON to text) and check on it.
+ * save the public facts it looked up (set_business_facts), get the onboarding form link (for a PERSON to text)
+ * once those facts were researched, and check on it.
  * Claude uses these only when Nora or Cameron asked — in chat or in an ask. Passwords are always refused.
  * Wired in by the integrator: registerBusinessTools(server, ctx) in src/lib/mcp/server.ts.
  */
@@ -55,10 +57,31 @@ const areas = z.union([z.string(), z.array(z.string())]).describe("Where to look
 
 async function businessLabel(id: string) {
   const db = await getDb();
-  const [c] = await db.select({ id: schema.clients.id, name: schema.clients.name, kind: schema.clients.kind, archived: schema.clients.archived })
-    .from(schema.clients).where(eq(schema.clients.id, id));
+  const [c] = await db.select().from(schema.clients).where(eq(schema.clients.id, id));
   if (!c) throw new ToolError(`No business with id "${id}". Use list_clients.`);
   return c;
+}
+
+/** The facts as the tools name them (snake_case) ⇄ as they're stored. */
+const FACT_ARG = {
+  address: "address", phone: "phone", hours: "hours", website: "website", instagram: "instagram", tiktok: "tiktok",
+  facebook: "facebook", google_listing: "googleListing", sells: "sells", price_range: "priceRange",
+} as const satisfies Record<string, FactKey>;
+const FACT_ARGS = Object.keys(FACT_ARG) as [keyof typeof FACT_ARG, ...(keyof typeof FACT_ARG)[]];
+const argFor = (key: FactKey) => FACT_ARGS.find((a) => FACT_ARG[a] === key) ?? key;
+
+const RESEARCH_HOW =
+  "Look each one up in public sources (Google Maps, the business's own website, its Instagram / Facebook / TikTok) and save it with set_business_facts " +
+  "(value + the web address you found it at). Couldn't find one? Save it with not_found: true. Never guess, and never ask the owner.";
+
+/** The prefill checklist, in plain words: what the form can already show the owner, and what nobody has looked up. */
+function prefillChecklist(check: FactsChecklist) {
+  return {
+    alreadyKnown: check.known.map((k) => `${k.label}: ${k.value.replace(/\s*\n\s*/g, " / ")}${k.source ? ` (from ${sourceLabel(k.source)})` : ""}`),
+    lookedForNotFound: check.notFound.length ? check.notFound.map((k) => k.label) : undefined,
+    missing: check.missing.length ? check.missing.map((k) => `${k.label} (fact: ${argFor(k.key)})`) : undefined,
+    lastChecked: check.checkedAt ? `${check.checkedAt.slice(0, 10)} by ${check.checkedBy ?? "someone"}` : undefined,
+  };
 }
 
 /** Has the team finished with a submitted form? True once the "Onboarding form received" ask is done/archived. */
@@ -80,7 +103,7 @@ export function registerBusinessTools(server: McpServer, ctx: Ctx) {
       "If a business with a similar name (same location) already exists, nothing is created and you get its id back — then use update_business. " +
       "Two locations of one brand are two businesses: include location. Handles can be @handles or profile links. " +
       "The owner email for reports is set by Nora or Cameron in Settings — if you were given one, mention it in the ask thread. " +
-      "After it's created, offer to get the onboarding form link with send_onboarding_form. " +
+      "After it's created, work its \"New client\" research ask: look up the public facts (set_business_facts), then get the onboarding form link ready with send_onboarding_form. " +
       NO_PASSWORDS,
     inputSchema: {
       name: z.string().min(1).max(200).describe("Business name, as the owner writes it."),
@@ -133,6 +156,45 @@ export function registerBusinessTools(server: McpServer, ctx: Ctx) {
     return { business: c.name, client_id: c.id, changed: r.changed.length ? r.changed : undefined, note: r.changed.length ? undefined : "Nothing changed — the values were already the same." };
   }));
 
+  server.registerTool("set_business_facts", {
+    title: "Save a business's public facts",
+    description:
+      "Saves PUBLIC facts you looked up about a business — address, phone, opening hours, website, Instagram, TikTok, Facebook Page, Google listing link, what they sell, price range — " +
+      "so the onboarding form can show them to the owner as one \"Is this right?\" card. Owners are busy: every fact you find is one they don't have to type. " +
+      "Use it when Nora or Cameron asked, or when a \"New client …\" research ask, an \"Onboarding form received\" ask or a \"Business details to fix\" ask tells you to (those asks are your go-ahead). " +
+      "Public facts only — what anyone can see on Google Maps, the business's own website or its social profiles. Every value needs `source`: the web address where you found it. Never guess. " +
+      "Looked and couldn't find one? Send it with not_found: true (that never removes a value that's already saved). You can't clear a fact; a wrong name is changed by a person in Settings. " +
+      "Only when working a \"Business details to fix\" ask, and the owner's own correction is the best source (new hours, a new phone number), use source \"owner\". " +
+      "Returns each change as before → after, plus what is still missing before the form can go out. " +
+      NO_PASSWORDS,
+    inputSchema: {
+      client_id: clientId,
+      facts: z.array(z.object({
+        fact: z.enum(FACT_ARGS).describe("Which fact. hours = opening hours (one line per day or range is fine); google_listing = the Google Maps link to their listing; sells = what they sell in a few words (\"Sichuan hot pot, bubble tea\"); price_range = one of " + PRICE_RANGES.join(" ") + "."),
+        value: z.string().max(2000).optional().describe("The fact as found. Handles can be @handles or profile links; facebook is the Page link."),
+        source: z.string().max(600).optional().describe("Web address where you found it (https://…). Required with value."),
+        not_found: z.boolean().optional().describe("true = you looked in public sources and couldn't find it."),
+      })).min(1).max(20),
+    },
+    annotations: { ...WRITE, idempotentHint: true },
+  }, async ({ client_id, facts }) => run(async () => {
+    const c = await businessLabel(client_id);
+    const r = await setBusinessFacts(client_id, facts.map((f) => ({ fact: FACT_ARG[f.fact], value: f.value, source: f.source, notFound: f.not_found })), ACTOR);
+    const missing = r.checklist.missing.map((m) => m.label);
+    return {
+      business: c.name,
+      client_id,
+      changed: r.changed.length ? r.changed : undefined,
+      kept: r.kept.length ? r.kept : undefined,
+      note: r.changed.length || r.kept.length ? undefined : "Nothing changed — the values were already the same.",
+      ...prefillChecklist(r.checklist),
+      readyToSendForm: r.checklist.researched,
+      next: missing.length
+        ? `Still to look up: ${missing.join(", ")}. ${RESEARCH_HOW}`
+        : "Every fact is saved or marked not found. If a person (or the business's research ask) wants the onboarding form, send_onboarding_form now returns the link for them to text.",
+    };
+  }));
+
   server.registerTool("set_plan", {
     title: "Change a business's monthly plan",
     description:
@@ -177,24 +239,57 @@ export function registerBusinessTools(server: McpServer, ctx: Ctx) {
   server.registerTool("send_onboarding_form", {
     title: "Get the onboarding form link to send",
     description:
-      ONLY_WHEN_ASKED +
+      "Use when Nora or Cameron asked for it (in chat or in an ask), or when the business's \"New client …\" research ask tells you to get the link ready — never on your own initiative otherwise. " +
       "Gets the business's private welcome/onboarding form link (/start/…) and ready-to-text messages in English, 简体 and 繁體 for Nora or Cameron to send. " +
+      "RESEARCH COMES FIRST: the form shows the owner what we already know (name, address, hours, phone, website, Instagram, TikTok, Facebook) as one \"Is this right?\" card, so a busy owner only taps Yes. " +
+      "This tool always returns the prefill checklist (what we know, what's missing). It returns the link only once every public fact was saved or marked not found with set_business_facts; " +
+      "until then it tells you what to look up. send_anyway: true skips that, ONLY when Nora or Cameron told you to send it as it is. " +
       "YOU NEVER SEND IT: paste the link and messages back to the person and say they need to text it to the owner. " +
       "If a link was already made and still works, you get that same link (it's never replaced). If the owner already sent the form, read it with get_client_intake instead. " +
       "The link is private: only share it with Nora or Cameron.",
-    inputSchema: { client_id: clientId },
+    inputSchema: {
+      client_id: clientId,
+      send_anyway: z.boolean().optional().describe("true ONLY when Nora or Cameron said to send the form without the missing facts (say so in your reply). Never set it on your own."),
+    },
     annotations: WRITE,
-  }, async ({ client_id }) => run(async () => {
+  }, async ({ client_id, send_anyway }) => run(async () => {
     const c = await businessLabel(client_id);
+    if (c.kind === "creator") throw new ToolError("The onboarding form is for businesses we manage.");
+    const { submitted } = await getClientIntakeStatus(client_id);
+    if (submitted) throw new ToolError(`${c.name} already sent their onboarding form — read it with get_client_intake. Only Nora or Cameron can send a new one (from the business page).`);
+    const check = factsChecklist(c);
+    const prefill = prefillChecklist(check);
+    const preview = absUrl(ctx, `/start-preview/${client_id}`);
+    if (!check.researched && !send_anyway) {
+      // No link yet (and none is created): the research hasn't been attempted for every fact.
+      return {
+        business: c.name,
+        client_id,
+        linkReady: false,
+        prefill,
+        next:
+          `No link yet: ${check.missing.map((m) => m.label).join(", ")} ${check.missing.length === 1 ? "hasn't" : "haven't"} been looked up. ${RESEARCH_HOW} ` +
+          "Then call send_onboarding_form again. If Nora or Cameron told you to send it as it is, call again with send_anyway: true.",
+        previewForTheTeam: preview,
+      };
+    }
     const link = await createIntakeLink(client_id, ACTOR, { origin: ctx.baseUrl });
     const url = absUrl(ctx, link.url);
+    const card = ownerCardFacts(c);
     return {
       business: c.name,
       client_id,
+      linkReady: true,
       url,
       reusedExistingLink: link.reused || undefined,
+      sentWithoutResearch: check.researched ? undefined : `A person asked to send it anyway. Still not looked up: ${check.missing.map((m) => m.label).join(", ")}.`,
+      prefill,
+      ownerWillSee: card.length
+        ? `One "Is this right?" card with the name plus: ${card.map((f) => FACT_LABEL[f.key]).join(", ")}. They tap "Yes, that's right" or "Something's off".`
+        : "No \"Is this right?\" card — we have no facts to show, so they only give their name and a phone or email.",
       messages: Object.fromEntries(INTAKE_LANG_CODES.map((code) => [INTAKE_LANG_TAG[code], INTAKE_COPY[code].share.message(c.name, url)])),
       howToSend: "Not sent. Give these to Nora or Cameron to text the owner (pick the owner's language). Nothing is sent by Nora HQ or by you.",
+      previewForTheTeam: preview,
       teamView: absUrl(ctx, `/clients/${client_id}`),
     };
   }));
@@ -202,7 +297,8 @@ export function registerBusinessTools(server: McpServer, ctx: Ctx) {
   server.registerTool("get_onboarding_status", {
     title: "Onboarding status",
     description:
-      "Where a business is in onboarding: the welcome form (not sent / sent / opened / submitted / expired, with dates; whether the team has processed the answers) " +
+      "Where a business is in onboarding: the public facts we hold for the form's \"Is this right?\" card (known / looked for and not found / still missing), " +
+      "the welcome form (not sent / sent / opened / submitted / expired, with dates; whether the team has processed the answers) " +
       "and the Getting started checklist (done of total, open steps and who they're for). Read the answers themselves with get_client_intake.",
     inputSchema: { client_id: clientId },
     annotations: READ,
@@ -215,17 +311,21 @@ export function registerBusinessTools(server: McpServer, ctx: Ctx) {
       : latest
         ? { status: latest.status, sentOn: day(latest.createdAt), openedOn: day(latest.openedAt), expiresOn: day(latest.expiresAt) }
         : { status: "not_sent" };
+    const check = factsChecklist(c);
     return {
       business: c.name,
       client_id,
       active: !c.archived,
+      publicFacts: c.kind === "creator" ? undefined : { ...prefillChecklist(check), researched: check.researched },
       form,
       gettingStarted: steps.total
         ? { done: steps.done, total: steps.total, open: steps.tasks.filter((t) => t.status !== "done").map((t) => ({ title: t.title, for: t.assignee, status: t.status })) }
         : undefined,
       next:
         form.status === "not_sent" || form.status === "expired" || form.status === "revoked"
-          ? "No working form link. If asked, get one with send_onboarding_form for a person to text."
+          ? (check.researched
+              ? "No working form link. If asked, get one with send_onboarding_form for a person to text."
+              : `No working form link, and some public facts haven't been looked up (${check.missing.map((m) => m.label).join(", ")}): save them with set_business_facts first, then send_onboarding_form gives a person the link to text.`)
           : form.status === "submitted"
             ? ("processed" in form && form.processed ? "Answers processed." : "Answers are in — read them with get_client_intake and work the \"Onboarding form received\" ask.")
             : "Waiting on the owner. If it's been a few days, suggest a friendly nudge (a task for Nora) — don't contact the owner yourself.",

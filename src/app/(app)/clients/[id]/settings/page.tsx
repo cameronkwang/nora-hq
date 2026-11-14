@@ -10,6 +10,7 @@ import { setOwnerEmailAction } from "../../../reports/actions";
 import { setBusinessActiveAction, setOutreachAreasAction } from "./actions";
 import { ActiveToggle } from "./active-toggle";
 import { NotesField } from "./notes-field";
+import { FactsCard } from "./facts-card";
 import { OutreachAreasField } from "@/components/onboard-areas";
 import { STARTING_PLAN_NOTE } from "@/lib/onboard-services";
 
@@ -110,6 +111,13 @@ export default async function ClientSettingsPage({ params }: { params: Promise<{
         </Card>
 
         <div className="flex flex-col gap-6">
+          {/* Public facts — looked up before the onboarding form is sent, shown back to the owner as "Is this right?". */}
+          {!isCreatorClient(client) && (
+            <section id="facts" className="scroll-mt-4">
+              <FactsCard client={client} />
+            </section>
+          )}
+
           {/* Owner email — where an approved external monthly report is sent (only when a person presses Send). */}
           {!isCreatorClient(client) && (
             <section id="owner" className="scroll-mt-4">

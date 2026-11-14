@@ -16,11 +16,14 @@ import {
   type AnyService,
   type Service,
 } from "./onboard-services";
+import { FB_LINK, isGoogleListingUrl, type PublicInfo } from "./business-facts";
 
 /**
  * Adding a business we manage ("land a client → set up in seconds"): creates the client, sets a monthly plan that
  * matches the services we sell them (or copies another business's), drops a short "Getting started" checklist
- * (tasks tagged "onboarding") on its page, and hands the research to Claude as one routed ask.
+ * (tasks tagged "onboarding") on its page, and hands the research to Claude as one routed ask: look up the public
+ * facts and save them (set_business_facts), get the onboarding form link ready for a person to send, then the
+ * brand voice and first-month plan.
  * Same conventions as lib/ops: zod-validated input, `actor` is a user email or "claude".
  * Claude may set a business up only when a person asked it to (create_business, via ops-business.createBusiness,
  * which also refuses passwords and dedupes); it can't convert a lead (marking a lead Won is a person's call).
@@ -212,6 +215,15 @@ export async function onboardClient(
   );
 
   if (outreachAreas) await db.update(schema.clients).set({ outreachAreas }).where(eq(schema.clients.id, clientId));
+  // Public facts we already hold (typed on the New client form, or on the lead's page): one less thing for Claude
+  // to look up, and for the owner to confirm.
+  const known: PublicInfo = {};
+  if (fbPage && fbPage.length <= 300 && FB_LINK.test(fbPage)) known.facebook = fbPage;
+  const listing = mapsUrl ?? blank(lead?.googleMapsUrl);
+  if (listing && listing.length <= 600 && isGoogleListingUrl(listing)) known.googleListing = listing;
+  const sells = blank(lead?.category)?.replace(/\s+/g, " ");
+  if (sells && sells.length <= 300) known.sells = sells;
+  if (Object.keys(known).length) await db.update(schema.clients).set({ publicInfo: known }).where(eq(schema.clients.id, clientId));
   await setPlan(clientId, copied ?? planFor(services));
   const added = await addOnboardingTasks(clientId, services, actor);
 
@@ -258,20 +270,24 @@ export function onboardingBrief(c: {
     c.lead?.why ? `- Why we pitched them: ${c.lead.why}` : null,
   ].filter(Boolean);
   return [
-    `New client ${c.name}: research their public presence (website, Google rating/reviews, Instagram/Facebook/TikTok), draft a brand voice for their settings, suggest a first-month content plan, and list anything we need from the owner.`,
+    `New client ${c.name}: look up their public facts and save them, get the onboarding form ready for a person to send, then draft a brand voice for their settings, suggest a first-month content plan, and list anything we need from the owner.`,
     "",
     `We're doing: ${c.services.map((s) => SERVICE_LABELS[s]).join(", ")}.`,
     ...(known.length ? ["", "What we know so far:", ...known] : ["", "We only have the name — find their website and socials first."]),
     "",
-    "Reply on this ask with:",
+    "Do these two first. The owner is busy: the onboarding form shows them what we found and only asks them to confirm it.",
+    "A. Public facts — find their address, phone, opening hours, website, Instagram, TikTok, Facebook Page, Google listing link, what they sell and price range (Google Maps, their own website, their social profiles). Save each one with set_business_facts: the value plus the web address you found it at. Mark what you can't find as not_found. Never guess.",
+    "B. Onboarding form — then call send_onboarding_form and paste the link and the ready-to-text messages into your reply here, for Nora or Cameron to text the owner. You never send it yourself.",
+    "",
+    "Then reply on this ask with:",
     "1. Snapshot — Google rating & review count (and how many recent reviews have owner replies), follower counts, last post date. Leave anything you can't verify blank; never guess numbers.",
     "2. Brand voice — a short draft for their Settings page (tone, words to use/avoid, signature dishes).",
     "3. First-month plan — content ideas that fit the monthly plan on their page.",
-    "4. What we need from the owner — logins/access, photos, offers, anything missing.",
+    "4. What we need from the owner — access, photos, offers, anything missing. (Never passwords.)",
     ...(c.services.includes("creators")
       ? [`5. Local creators — a shortlist of food creators near ${c.outreachAreas || c.location || "the business"} who'd fit (handle, follower count, why). Search those areas only; draft nothing until we confirm what we can offer them.`]
       : []),
-    "If you find handles or a website we don't have, list them in your reply. Research public info only — don't contact the business.",
+    "Research public info only — don't contact the business.",
   ].join("\n");
 }
 

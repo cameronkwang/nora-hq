@@ -9,6 +9,7 @@ import {
   uniqueIndex,
   index,
 } from "drizzle-orm/pg-core";
+import type { PublicInfo } from "./business-facts";
 
 /**
  * Single source of truth for the data model.
@@ -39,6 +40,12 @@ export const clients = pgTable("clients", {
   ownerEmail: text("owner_email"),
   /** Where to look for creators to feature this business, e.g. "Richmond, VA; 757 / Hampton Roads". */
   outreachAreas: text("outreach_areas"),
+  /**
+   * Public facts looked up before the onboarding form is sent (address, phone, hours, Facebook Page, Google listing,
+   * what they sell, price range), each with its source URL, plus what wasn't found and when it was checked.
+   * Website / Instagram / TikTok stay in their own columns. See lib/business-facts.
+   */
+  publicInfo: jsonb("public_info").$type<PublicInfo>(),
   sortOrder: integer("sort_order").notNull().default(0),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });

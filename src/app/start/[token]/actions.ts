@@ -34,6 +34,9 @@ function readForm(fd: FormData): Record<string, string | string[]> {
   }
   const up = fd.get("uploads");
   if (typeof up === "string") out.uploads = up.slice(0, 20000);
+  // Fingerprint of the "Is this right?" card they were shown (compared with ours on submit; never stored).
+  const fk = fd.get("factsKey");
+  if (typeof fk === "string") out.factsKey = fk.slice(0, 40);
   return out;
 }
 

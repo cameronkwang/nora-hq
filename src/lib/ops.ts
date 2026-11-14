@@ -11,6 +11,7 @@ import { sendOutreachEmail } from "./integrations/gmail";
 import { postReviewKey } from "./post-key";
 import { notifyDraftCreated } from "./notify";
 import type { IntegrationResult } from "./integrations/types";
+import { forgetFactProvenance } from "./business-facts";
 
 /**
  * The ONLY place that mutates data. Both the web UI (server actions) and the Claude connector (MCP tools)
@@ -77,8 +78,19 @@ export async function updateClient(id: string, patch: Partial<z.input<typeof Cli
     set.archived = patch.archived;
   }
   if (Object.keys(set).length === 0) return;
+  const fields = Object.keys(set);
+  // A website or handle that really changed here no longer has the source (or "not found" mark) saved with the old one.
+  const factCols = { website: "website", instagramHandle: "instagram", tiktokHandle: "tiktok" } as const;
+  if ((Object.keys(factCols) as Array<keyof typeof factCols>).some((c) => c in set)) {
+    const [cur] = await db.select().from(schema.clients).where(eq(schema.clients.id, id));
+    if (cur) {
+      const changed = (Object.keys(factCols) as Array<keyof typeof factCols>).filter((c) => c in set && (cur[c] ?? null) !== (set[c] ?? null)).map((c) => factCols[c]);
+      const info = changed.length ? forgetFactProvenance(cur.publicInfo, changed) : null;
+      if (info) set.publicInfo = info;
+    }
+  }
   await db.update(schema.clients).set(set).where(eq(schema.clients.id, id));
-  await logActivity({ actor, action: "client.updated", entityType: "client", entityId: id, clientId: id, summary: `Updated business details (${Object.keys(set).join(", ")})` });
+  await logActivity({ actor, action: "client.updated", entityType: "client", entityId: id, clientId: id, summary: `Updated business details (${fields.join(", ")})` });
 }
 
 export const DeliverableInput = z.object({

@@ -43,5 +43,42 @@ for (let i = 0; i < 3; i++) {
   await db.insert(schema.reviews).values({ id: `sample-review-${i}`, clientId: "crab-o-clock", resourceName: `accounts/sample/locations/sample/reviews/sample-${i}`, rating: 5 - i, reviewer: reviewers[i], comment: `SAMPLE review ${i + 1}: the garlic butter crab was great (fake data).`, createTime: new Date(now - (i + 1) * day) }).onConflictDoNothing();
 }
 await db.update(schema.clients).set({ ownerEmail: "owner@example.com" }).where((await import("drizzle-orm")).eq(schema.clients.id, "crab-o-clock"));
+// Public facts "looked up" for one business (all fake), so the form's "Is this right?" card, the send card's
+// prefill checklist and Settings → Public facts have something to show. Every other sample business has none.
+await db.update(schema.clients).set({
+  website: "https://sample-snf-kingdom.example.com",
+  instagramHandle: "sample_snf_kingdom",
+  publicInfo: {
+    address: "SAMPLE 100 Example St, Sampleton, VA 23000",
+    phone: "(555) 010-0100",
+    hours: "SAMPLE Mon–Thu 11am–9pm\nFri–Sat 11am–10pm\nSun 12pm–8pm",
+    facebook: "facebook.com/sample-snf-kingdom",
+    googleListing: "https://maps.app.goo.gl/sampleSnfKingdom",
+    sells: "SAMPLE seafood boils, fried chicken",
+    priceRange: "$$",
+    sources: {
+      address: "https://maps.app.goo.gl/sampleSnfKingdom", phone: "https://maps.app.goo.gl/sampleSnfKingdom", hours: "https://sample-snf-kingdom.example.com/hours",
+      website: "https://maps.app.goo.gl/sampleSnfKingdom", instagram: "https://sample-snf-kingdom.example.com", facebook: "https://sample-snf-kingdom.example.com",
+      googleListing: "https://maps.app.goo.gl/sampleSnfKingdom", sells: "https://sample-snf-kingdom.example.com/menu", priceRange: "https://maps.app.goo.gl/sampleSnfKingdom",
+    },
+    notFound: ["tiktok"],
+    checkedAt: new Date(now - 2 * day).toISOString(),
+    checkedBy: "claude",
+  },
+}).where((await import("drizzle-orm")).eq(schema.clients.id, "snf-kingdom"));
+// An onboarding form sent back on the EARLIER 7-step form (old answer keys), so the team view's "Earlier answers" stay tested.
+await db.insert(schema.clientIntakes).values({
+  id: "intake_sample_legacy", clientId: "poke-bros", tokenHash: "sample-legacy-intake-not-a-real-token", tokenEnc: "sample-not-decryptable",
+  status: "submitted", lang: "zh-Hans", createdBy: "nora", createdAt: new Date(now - 9 * day), openedAt: new Date(now - 8 * day), submittedAt: new Date(now - 8 * day),
+  answers: {
+    businessName: "Poke Bros", businessNameZh: "SAMPLE 波奇兄弟", address: "SAMPLE 1 Example Ave, Sampleton, VA 23000", hours: "SAMPLE 周一至周日 11am–9pm",
+    priceRange: "2", signatureDishes: "SAMPLE 三文鱼波奇碗", customers: ["students", "office"], goals: ["walkIns"], tone: ["friendly", "fun"], emojis: "some",
+    postLangs: "both", instagram: "@sample_poke", accessMeta: "done", accessGoogle: "help", accessTiktok: "call", complaints: "askFirst",
+    creatorsOk: "maybe", creatorOffer: ["meal2"], visitTimes: "SAMPLE 周二下午", contactName: "SAMPLE 李先生", contactRole: "SAMPLE 老板",
+    contactPhone: "(555) 010-0000", talkLang: "mandarin", reachBy: ["wechat"], wechatId: "sample_wechat", approvalSpeed: "fewDays",
+    oddKeyFromTheFuture: { nested: true }, uploads: "not-a-list",
+    _meta: { ipHash: null },
+  },
+}).onConflictDoNothing();
 await client.close();
 console.log("sample data ready");

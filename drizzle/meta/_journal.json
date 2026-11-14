@@ -71,6 +71,13 @@
       "when": 1794605523850,
       "tag": "0009_schedule_items",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1794627458292,
+      "tag": "0010_client_public_info",
+      "breakpoints": true
     }
   ]
 }
