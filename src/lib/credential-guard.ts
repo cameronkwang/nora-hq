@@ -8,6 +8,10 @@
  *  - "token": one 8+ character word with letters AND digits AND a password-style symbol (!@#$%^&*…), that isn't an
  *    email, URL, @handle, #hashtag, phone number, price, date or opening hours ("Tanklin1991!!", "5006688@Fff").
  *
+ * `looksLikeSecret` is deliberately jumpy: it guards notes the team (or Claude) saves, where a false alarm costs a
+ * reword. `looksLikeTypedSecret` is the calmer check for text an owner types on the public onboarding form, where a
+ * false alarm stops a busy person from sending: a label alone is not enough, the value has to look like a password.
+ *
  * Callers must never echo `text` back to people or Claude — show `hint` (masked) instead.
  */
 
@@ -28,8 +32,8 @@ const STRONG = "passwords|password|passwd|passcode|pwd|pw|密码|密碼|口令";
 const WEAK = "pass|login|log-in|signin|sign-in|账号密码|帳號密碼";
 
 const STRONG_RE = new RegExp(`(?:^|[^\\p{L}\\p{N}])(${STRONG})(\\s*[:=：]\\s*|\\s*-\\s+|\\s+(?:is\\s+|was\\s+)?)([^\\s,;]+)`, "giu");
-/** Chinese labels need no word boundary ("店的密码：…"). */
-const CJK_RE = /(账号密码|帳號密碼|密码|密碼|口令)(\s*[:=：]?\s*)([^\s,;，。、]+)/gu;
+/** Chinese labels need no word boundary ("店的密码：…", "密码是…"). */
+const CJK_RE = /(账号密码|帳號密碼|密码|密碼|口令)(\s*(?:[:=：]|是|为|為)?\s*)([^\s,;，。、]+)/gu;
 const WEAK_RE = new RegExp(`(?:^|[^\\p{L}\\p{N}])(${WEAK})(\\s*[:=：]\\s*)([^\\s,;]+)`, "giu");
 
 /** Words that follow "password" in ordinary sentences ("password manager", "password reset"). */
@@ -59,14 +63,19 @@ function trimToken(t: string): string {
   return t.replace(/^[("'“‘[<]+/, "").replace(/[)"'”’\]>,.;:。，、]+$/, "");
 }
 
+/** An @handle, #hashtag, /path, email, link, price or percentage: never a password. */
+function plainlyNotSecret(t: string): boolean {
+  if (/^[@#/]/.test(t)) return true;
+  if (EMAIL.test(t) || URLISH.test(t) || t.includes("://")) return true;
+  return /^[$€£¥]|^[A-Z]{3}\$|^\d[\d,.]*%/.test(t);
+}
+
 /** True for a standalone word that looks like a password (see file comment). */
 export function isSecretToken(raw: string): boolean {
   const t = trimToken(raw);
   if ([...t].length < 8 || /\s/.test(t)) return false;
   if (!/[A-Za-z]/.test(t) || !/\d/.test(t) || !PASSWORD_SYMBOL.test(t)) return false;
-  if (/^[@#/]/.test(t)) return false; // @handle, #hashtag, /path
-  if (EMAIL.test(t) || URLISH.test(t) || t.includes("://")) return false;
-  if (/^[$€£¥]|^[A-Z]{3}\$|^\d[\d,.]*%/.test(t)) return false; // prices, percentages
+  if (plainlyNotSecret(t)) return false;
   // Dates / times / quantities: nothing letter-like left once the usual unit words are gone.
   if (!/[A-Za-z]/.test(t.replace(BENIGN_WORDS, ""))) return false;
   return true;
@@ -81,8 +90,22 @@ function valueLooksSecret(label: string, value: string, separated: boolean): boo
   return [...v].length >= 4 && (/\d/.test(v) || PASSWORD_SYMBOL.test(v) || (/[a-z]/.test(v) && /[A-Z]/.test(v)));
 }
 
-/** Every likely password/login in `text` (empty when clean). Never show `text` of a match — use `hint`. */
-export function looksLikeSecret(text: string | null | undefined): SecretMatch[] {
+const CJK_CHAR = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u;
+
+/**
+ * The calmer rule for owner-typed text: after a label, only a value shaped like a password counts — no Chinese in
+ * it, and a digit, a symbol or a capital inside the word ("Tanklin1991!!", "hunter2", "sunShine"). Ordinary words
+ * ("password: can you help", "密码怎么办", "密碼我不記得了"), handles, emails, links and prices don't.
+ */
+function typedValueLooksSecret(value: string, separated: boolean): boolean {
+  const v = trimToken(value);
+  const core = v.replace(/[?!.…？！]+$/u, ""); // sentence punctuation ("what is the password for?")
+  if (!core || NOT_A_VALUE.has(core.toLowerCase()) || CJK_CHAR.test(v) || plainlyNotSecret(v)) return false;
+  if ([...core].length < (separated ? 3 : 4)) return false;
+  return /\d/.test(core) || PASSWORD_SYMBOL.test(core) || (/[a-z]/.test(core) && /[A-Z]/.test(core.slice(1)));
+}
+
+function scan(text: string | null | undefined, mode: { typed: boolean; tokens: boolean }): SecretMatch[] {
   if (!text || !text.trim()) return [];
   const out: SecretMatch[] = [];
   const seen = new Set<string>();
@@ -97,11 +120,13 @@ export function looksLikeSecret(text: string | null | undefined): SecretMatch[] 
     for (const m of text.matchAll(re)) {
       const label = m[1];
       const value = trimToken(m[3]);
-      const separated = /[:=：-]/.test(m[2]) || re === CJK_RE;
-      if (valueLooksSecret(label, value, separated)) push({ kind: "labelled", text: value, hint: `${label.toLowerCase()}: ${maskSecret(value)}` });
+      const sep = /[:=：是为為-]/.test(m[2]);
+      const hit = mode.typed ? typedValueLooksSecret(value, sep) : valueLooksSecret(label, value, sep || re === CJK_RE);
+      if (hit) push({ kind: "labelled", text: value, hint: `${label.toLowerCase()}: ${maskSecret(value)}` });
     }
   }
 
+  if (!mode.tokens) return out;
   for (const raw of text.split(/\s+/)) {
     if (!raw) continue;
     // "pw:Secret1!" glued together is caught above; strip a leading "label:" so the token check sees the value.
@@ -109,6 +134,19 @@ export function looksLikeSecret(text: string | null | undefined): SecretMatch[] 
     if (isSecretToken(t)) push({ kind: "token", text: t, hint: maskSecret(t) });
   }
   return out;
+}
+
+/** Every likely password/login in `text` (empty when clean). Never show `text` of a match — use `hint`. */
+export function looksLikeSecret(text: string | null | undefined): SecretMatch[] {
+  return scan(text, { typed: false, tokens: true });
+}
+
+/**
+ * The same for text an owner typed on the public onboarding form (see file comment). `tokens: false` also skips
+ * the bare-word rule, for boxes where deal text like "Buy1Get1!" or "2for$10!" is exactly what we ask for.
+ */
+export function looksLikeTypedSecret(text: string | null | undefined, opts: { tokens?: boolean } = {}): SecretMatch[] {
+  return scan(text, { typed: true, tokens: opts.tokens ?? true });
 }
 
 /** Shorthand for `looksLikeSecret(text).length > 0`. */
