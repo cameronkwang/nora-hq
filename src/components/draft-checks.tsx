@@ -13,6 +13,7 @@ export const KIND_LABELS: Record<string, string> = {
   lead_dm: "Pitch DM",
   comment_reply: "Comment reply",
   report: "Report",
+  profile_copy: "Profile text",
   other: "Other",
 };
 

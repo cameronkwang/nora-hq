@@ -22,6 +22,19 @@ import type { PublicInfo } from "./business-facts";
 export const PLATFORMS = ["instagram", "facebook", "tiktok", "google", "email", "other"] as const;
 export type Platform = (typeof PLATFORMS)[number];
 
+/** Which kind of account a business's creator outreach goes out from (clients.sendFromKind). */
+export const SEND_FROM_KINDS = ["instagram", "tiktok", "email", "other"] as const;
+export type SendFromKind = (typeof SEND_FROM_KINDS)[number];
+
+/**
+ * Result of the last Google review sync for one business (clients.googleSyncStatus):
+ * "ok" = reviews came back; "empty" = the mapped listing returned 0 reviews (worth checking it's the right listing);
+ * "error" = Google refused this location (message in googleSyncError). null = never synced.
+ * "Not linked" is not stored: it's simply clients.googleLocation being empty.
+ */
+export const GOOGLE_SYNC_STATUSES = ["ok", "empty", "error"] as const;
+export type GoogleSyncStatus = (typeof GOOGLE_SYNC_STATUSES)[number];
+
 export const clients = pgTable("clients", {
   id: text("id").primaryKey(), // slug, e.g. "yummy-red-bowl-richmond"
   name: text("name").notNull(),
@@ -46,6 +59,22 @@ export const clients = pgTable("clients", {
    * Website / Instagram / TikTok stay in their own columns. See lib/business-facts.
    */
   publicInfo: jsonb("public_info").$type<PublicInfo>(),
+  /**
+   * Outreach profile: creator outreach is written AS THE BUSINESS and sent from the business's own account, not Nora's.
+   * sendFrom = that account as people would say it ("@craboclockfredericksburg", "hello@example.com"); sendFromKind = what it is.
+   */
+  sendFromKind: text("send_from_kind").$type<SendFromKind>(),
+  sendFrom: text("send_from"),
+  /** The standing offer for creators, e.g. "Free all-you-can-eat seafood boil for 2". */
+  creatorOffer: text("creator_offer"),
+  /** Not open yet: the launch checklist applies and the monthly plan waits for openingDate. */
+  prelaunch: boolean("prelaunch").notNull().default(false),
+  openingDate: text("opening_date"), // "YYYY-MM-DD"
+  /** Last Google review sync for this business's mapped listing (see GOOGLE_SYNC_STATUSES). All null = never synced. */
+  googleSyncAt: timestamp("google_sync_at", { withTimezone: true }),
+  googleSyncStatus: text("google_sync_status").$type<GoogleSyncStatus>(),
+  googleSyncCount: integer("google_sync_count"), // reviews returned by that sync
+  googleSyncError: text("google_sync_error"),
   sortOrder: integer("sort_order").notNull().default(0),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
@@ -83,6 +112,8 @@ export const asks = pgTable(
     claudeNote: text("claude_note"), // what Claude did / questions back
     kind: text("kind").$type<AskKind>().notNull().default("auto"),
     forWho: text("for_who").$type<AskFor>().notNull().default("auto"),
+    /** Set when a business owner sent this through their drop link (/drop/<token>): the text and files are theirs, not the team's. */
+    dropLinkId: text("drop_link_id").references(() => dropLinks.id, { onDelete: "set null" }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -145,11 +176,18 @@ export const DRAFT_KINDS = [
   "report",
   "lead_email",
   "lead_dm",
+  "profile_copy",
   "other",
 ] as const;
 export type DraftKind = (typeof DRAFT_KINDS)[number];
+
 export const DRAFT_STATUSES = ["needs_review", "approved", "rejected", "sent", "failed"] as const;
 export type DraftStatus = (typeof DRAFT_STATUSES)[number];
+
+/** Where a profile_copy draft is meant to be pasted (drafts.meta.surface), and that platform's character limit. */
+export const PROFILE_COPY_SURFACES = ["instagram_bio", "tiktok_bio", "google_description"] as const;
+export type ProfileCopySurface = (typeof PROFILE_COPY_SURFACES)[number];
+export const PROFILE_COPY_LIMITS: Record<ProfileCopySurface, number> = { instagram_bio: 150, tiktok_bio: 80, google_description: 750 };
 
 /**
  * Anything Claude writes that a human must approve.
@@ -159,6 +197,7 @@ export type DraftStatus = (typeof DRAFT_STATUSES)[number];
  *  outreach_email: { outreachId, to, subject }
  *  outreach_dm:   { outreachId, channel: "instagram_dm" | "tiktok_dm", profileUrl }
  *  comment_reply: { commentId, mediaId, connectionId }
+ *  profile_copy:  { surface: ProfileCopySurface }  (a bio / Google description a person pastes in by hand)
  */
 export const drafts = pgTable(
   "drafts",
@@ -233,6 +272,9 @@ export const creators = pgTable("creators", {
   tiktokFollowers: integer("tiktok_followers"),
   engagementRate: real("engagement_rate"), // percent, e.g. 3.4
   statsUpdatedAt: timestamp("stats_updated_at", { withTimezone: true }),
+  /** When the numbers were last checked against the creator's public page, and the URL that was actually read. */
+  statsCheckedAt: timestamp("stats_checked_at", { withTimezone: true }),
+  statsSource: text("stats_source"),
   doNotContact: boolean("do_not_contact").notNull().default(false),
   notes: text("notes"),
   source: text("source"), // "claude research", "vendor", "manual"...
@@ -270,7 +312,10 @@ export const outreach = pgTable(
     lastActivityAt: timestamp("last_activity_at", { withTimezone: true }),
     nextFollowUpAt: timestamp("next_follow_up_at", { withTimezone: true }),
     gmailThreadId: text("gmail_thread_id"),
-    postUrl: text("post_url"),
+    postUrl: text("post_url"), // the post that came out of our outreach (stage "posted")
+    /** A post this creator had already made about the business before we reached out ("already featured"): don't pitch them again. */
+    priorPostUrl: text("prior_post_url"),
+    priorPostFoundAt: timestamp("prior_post_found_at", { withTimezone: true }),
     disclosureOk: boolean("disclosure_ok"),
     notes: text("notes"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -670,7 +715,11 @@ export const clientReports = pgTable(
 
 /* ───────────────────────── App settings (key/value) ───────────────────────── */
 
-/** Small settings blobs, e.g. "media_kit" → { enabled, rateLine, showRates, showPastCollabs, pastCollabs, bio }. */
+/**
+ * Small settings blobs, e.g. "media_kit" → { enabled, rateLine, showRates, showPastCollabs, pastCollabs, bio };
+ * NORA_PAYMENT_KEY → { line } = how Nora gets paid, as printed on payment requests (e.g. "Zelle: …"). Never a password.
+ */
+export const NORA_PAYMENT_KEY = "nora_payment";
 export const appSettings = pgTable("app_settings", {
   key: text("key").primaryKey(),
   value: jsonb("value").$type<Record<string, unknown>>().notNull(),
@@ -760,3 +809,31 @@ export const scheduleItems = pgTable(
 );
 
 export type ScheduleItem = typeof scheduleItems.$inferSelect;
+
+/* ───────────────────────── Owner drop links (private upload link per business) ───────────────────────── */
+
+/**
+ * A long-lived private link (/drop/<token>) a business owner uses from their phone to send a flyer or photo plus
+ * "what's the deal, when does it end". Each drop becomes an ask for Claude (asks.dropLinkId) with the file attached.
+ * Tokens work like client_intakes: the raw token is never stored; tokenHash (sha256) is used for lookup and
+ * tokenEnc (lib/crypto) lets Cameron/Nora re-copy the link. There is no expiry: a link works until revokedAt is set
+ * (regenerate = revoke + new row). lang = the language the owner's page opens in.
+ */
+export const dropLinks = pgTable(
+  "drop_links",
+  {
+    id: text("id").primaryKey(),
+    clientId: text("client_id").notNull().references(() => clients.id, { onDelete: "cascade" }),
+    tokenHash: text("token_hash").notNull().unique(),
+    tokenEnc: text("token_enc").notNull(),
+    lang: text("lang").$type<IntakeLang>(),
+    useCount: integer("use_count").notNull().default(0), // drops received through this link
+    lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+    createdBy: text("created_by").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("drop_links_client_idx").on(t.clientId)],
+);
+
+export type DropLink = typeof dropLinks.$inferSelect;
