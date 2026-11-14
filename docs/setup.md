@@ -175,3 +175,15 @@ This uses the same Meta app as the businesses (step 5). It only asks for read ac
 Notes:
 - TikTok's API has no audience, reach or daily views. "Views, 28 days" for TikTok is the growth in total views across Nora's latest ~60 videos, measured from the daily snapshots. It becomes accurate after about four weeks of syncing.
 - On each post in **Top posts**, pick a business to tag it as a collab. Claude can read all of these numbers through the connector (`get_creator_stats`) when drafting pitches.
+
+## Changing the sign-in password
+
+The production sign-in password is built into the app as a salted hash in `src/lib/team.ts`
+(the Vercel `APP_PASSWORD` variable is no longer used in production). To change it, generate a new hash:
+
+```bash
+node -e 'const c=require("crypto");const s=c.randomBytes(16);console.log("scrypt:"+s.toString("base64")+":"+c.scryptSync(process.argv[1],s,64).toString("base64"))' "new password here"
+```
+
+Replace `PASSWORD_HASH` with the output, commit, and deploy. People allowed to sign in are `TEAM` in the same file,
+plus anyone in the Vercel `APP_USERS` variable.
