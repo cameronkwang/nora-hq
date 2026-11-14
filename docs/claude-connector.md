@@ -94,10 +94,10 @@ You are working Nora HQ's queue through the "Nora HQ" connector. Nothing you do 
    - Read the ask's thread first. If needsYourReply is true, Nora answered your questions there.
    - If the ask is unclear or missing information, don't guess. Call reply_to_ask with your questions and status in_progress.
    - Otherwise call update_ask with status done and a one- or two-line note on what you drafted.
-5. Work through tasksForClaude the same way.
+5. Work through tasksForClaude the same way (these are the real tasks: one-off work, plus any monthly-plan task a person dated or wrote on). Then monthlyPlanSlots, the monthly plan's checklist counted per plan item for this month (with overdue / nextDue when some slots have dates; slots left over from earlier months are one line per business in leftOverFromEarlierMonths): for an item you can draft, get its task ids with list_tasks (client_id, scope "plan", month) and pass task_id on each draft.
 6. For each item in followUpsDue without a pendingFollowUpDraft, draft one short follow-up on the same channel.
 7. If a business has needsMonthTasks for the current month, call generate_month_tasks.
-8. Stop after about 25 drafts in one run. End with a short summary: drafts created, asks updated, questions left for Nora.
+8. Stop after about 25 drafts in one run. End with a short summary: drafts created, asks updated, questions left for Nora, and one line per business listed in googleReviewSync (its Google reviews aren't syncing).
 
 Never invent numbers, reviews, creators, handles or emails. Never contact do-not-contact creators. Never ask anyone for Google or Yelp reviews.
 ```
@@ -140,6 +140,8 @@ curl -s http://localhost:3000/api/mcp \
   - review replies can't ask anyone to change a rating
   - outreach can't ask for Google or Yelp reviews
   - do-not-contact creators are refused
+  - outreach is refused for a creator who already posted about that business (a prior post saved with `upsert_outreach` `prior_post_url`, or stage posted)
+  - outreach drafts get a warning when the creator's numbers were never checked or are over 30 days old, when the business has no sender or offer saved, and when the text reads as if Nora wrote it
   - emails only go to a creator's saved address
   - outreach stages above shortlisted are refused
   - deliverable tasks can't be marked done by Claude
@@ -151,14 +153,16 @@ curl -s http://localhost:3000/api/mcp \
 
 | Tool | What it does |
 | --- | --- |
-| `get_briefing` | Start here: rules, new asks (with their conversation and `needsYourReply`), sent-back drafts, tasks due, follow-ups, per-business summary |
-| `list_clients`, `get_client_month` | Businesses, brand voice, plan progress, tasks, outreach, metrics, posts |
+| `get_briefing` | Start here: rules, new asks (with their conversation and `needsYourReply`), sent-back drafts, tasks due (real tasks: one-off work and monthly-plan tasks a person dated or wrote on; the plan's bare slots are counted per plan item in `monthlyPlanSlots`, earlier months as one line per business), businesses whose Google reviews aren't syncing (`googleReviewSync`), follow-ups, per-business summary |
+| `list_clients`, `get_client_month` | Businesses, brand voice, outreach profile (the business's own sender account and its standing creator offer), `googleReviewSync` (whether that business's Google reviews are really syncing: ok, unlinked, disconnected, never, empty or error), `prelaunch` (only when it isn't open yet: opening day and days to go), plan progress, tasks, outreach, metrics, posts |
 | `list_asks` | Read asks with their conversation thread and `needsYourReply` (a person wrote after Claude) |
 | `reply_to_ask` | Add a message to an ask's conversation: questions for Nora or a progress update (optionally set status) |
 | `update_ask` | Set status, business, and a short summary note (the note replaces the previous one) |
 | `list_tasks`, `create_task`, `update_task`, `generate_month_tasks` | Checklist |
-| `list_drafts`, `create_draft`, `revise_draft` | Drafts for approval |
+| `list_drafts`, `create_draft`, `revise_draft` | Drafts for approval. Kind `profile_copy` is text a person pastes into a profile (`meta.surface`: `instagram_bio` ≤150 characters, `tiktok_bio` ≤80, `google_description` ≤750), used for a business that isn't open yet |
 | `list_calendar`, `create_post`, `update_post` | Calendar ideas (no scheduling or publishing) |
-| `search_creators`, `upsert_creator`, `upsert_outreach`, `list_followups_due` | Creator pipeline (sourced or shortlisted only) |
+| `search_creators`, `upsert_creator`, `upsert_outreach`, `list_followups_due` | Creator pipeline (sourced or shortlisted only). `upsert_creator` takes `stats_source` (the public page the numbers were read from); `upsert_outreach` takes `prior_post_url` (already featured); `search_creators` returns `statsCheck` and `alreadyPostedAbout` |
 | `list_reviews` | Google reviews to reply to |
 | `record_metrics`, `get_monthly_report` | Monthly numbers and recap data |
+| `list_schedule`, `get_reels_to_post`, `add_to_schedule` | Nora's schedule (never money). A job Nora made into a collab deal carries `dealId` (see `get_deal`): the job and the deal share the day and the reel (a new day on the schedule moves the deal's visit); payment stays on the deal |
+| `get_drop_link` | A business's private owner drop link (`/drop/…`) plus ready-to-text messages, for a person to send. What owners send arrives as asks marked `ownerDrop` (see `docs/owner-drop-link.md`) |

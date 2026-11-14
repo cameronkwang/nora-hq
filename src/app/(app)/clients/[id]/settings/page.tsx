@@ -11,8 +11,11 @@ import { setBusinessActiveAction, setOutreachAreasAction } from "./actions";
 import { ActiveToggle } from "./active-toggle";
 import { NotesField } from "./notes-field";
 import { FactsCard } from "./facts-card";
+import { OutreachProfileCard } from "./outreach-profile-card";
+import { LaunchSettingsCard } from "./launch-card";
 import { OutreachAreasField } from "@/components/onboard-areas";
 import { STARTING_PLAN_NOTE } from "@/lib/onboard-services";
+import { ClientGoogleSync } from "@/components/google-sync-status";
 
 export const dynamic = "force-dynamic";
 
@@ -84,6 +87,8 @@ export default async function ClientSettingsPage({ params }: { params: Promise<{
               <p className="mt-1 text-xs text-muted">
                 Needed to pull Google reviews. Looks like <code>accounts/…/locations/…</code>. After connecting Google in Settings, ask Claude to look it up, or copy it from the Business Profile API.
               </p>
+              {/* What the last review sync found for this business. */}
+              <ClientGoogleSync client={client} prefix="Review sync" className="mt-2" />
             </div>
 
             <div>
@@ -138,6 +143,13 @@ export default async function ClientSettingsPage({ params }: { params: Promise<{
             </section>
           )}
 
+          {/* Outreach profile — which account creator outreach is sent from (the business's own, not Nora's) and the standing offer. */}
+          {!isCreatorClient(client) && (
+            <section id="outreach-profile" className="scroll-mt-4">
+              <OutreachProfileCard client={client} />
+            </section>
+          )}
+
           {/* Creator search areas — where Claude/Nora look for local creators to feature this business. */}
           {!isCreatorClient(client) && (
             <section id="creator-areas" className="scroll-mt-4">
@@ -154,6 +166,13 @@ export default async function ClientSettingsPage({ params }: { params: Promise<{
                   </div>
                 </ActionForm>
               </Card>
+            </section>
+          )}
+
+          {/* Pre-launch — not open yet: a launch checklist instead of the monthly plan until opening day. */}
+          {!isCreatorClient(client) && (
+            <section id="launch" className="scroll-mt-4">
+              <LaunchSettingsCard client={client} />
             </section>
           )}
 

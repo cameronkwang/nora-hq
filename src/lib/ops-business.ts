@@ -8,7 +8,9 @@ import { OpsError } from "./ops";
 import { getOnboardingTasks, onboardClient } from "./ops-onboarding";
 import { joinOutreachAreas, normalizeServices, ACCEPTED_SERVICES, SERVICE_LABELS } from "./onboard-services";
 import { looksLikeSecret, secretRefusal } from "./credential-guard";
+import { GOOGLE_SYNC_RESET } from "./ops-google";
 import { cleanBlock, cleanLine } from "./ops-collab";
+import { guessSendFromKind } from "./outreach-profile";
 import {
   FACT_KEYS, FACT_LABEL, FACT_MAX, FB_LINK, INFO_FACT_KEYS, OWNER_SOURCE, PRICE_RANGES, SOURCE_MAX, businessFacts, dropFacebookNote, forgetFactProvenance, sourceLabel, factsChecklist, isGoogleListingUrl, readPublicInfo,
   type FactKey, type FactsChecklist, type InfoFactKey, type PublicInfo,
@@ -36,6 +38,7 @@ const LABEL: Record<string, string> = {
   name: "name", location: "location", brand: "brand group", instagramHandle: "Instagram", tiktokHandle: "TikTok",
   website: "website", ownerEmail: "owner email", outreachAreas: "creator search areas", brandVoice: "brand voice",
   googleLocation: "Google location", notes: "notes",
+  sendFrom: "outreach sender", sendFromKind: "outreach sender type", creatorOffer: "creator offer",
 };
 
 /** Throws a plain-words OpsError if any value looks like a password. The secret itself is never echoed. */
@@ -105,8 +108,31 @@ export const BusinessDetailsPatch = z.object({
   notes: z.string().max(10000).nullish(),
   /** How `notes` is applied: "append" (default — adds a dated paragraph) or "replace" (people only). */
   notesMode: z.enum(["append", "replace"]).optional(),
+  /**
+   * Outreach profile: creator outreach is written AS the business and sent from its own account, never Nora's.
+   * sendFrom = that account ("@craboclockfredericksburg", "hello@example.com"); sendFromKind = what it is (worked out
+   * from the value when left out). Clearing sendFrom clears the kind too.
+   */
+  sendFromKind: z.union([z.literal(""), z.enum(schema.SEND_FROM_KINDS)]).nullish(),
+  sendFrom: z.string().max(200).nullish(),
+  /** The standing offer for creators, e.g. "Free all-you-can-eat seafood boil for 2". Empty clears. */
+  creatorOffer: z.string().max(300).nullish(),
 });
 export type BusinessDetailsPatch = z.input<typeof BusinessDetailsPatch>;
+
+/** The sender as we store it: "@handle" for Instagram / TikTok, a lowercase address for email, the text as typed otherwise. */
+function normalizeSender(kind: schema.SendFromKind | null, raw: string | null | undefined): { kind: schema.SendFromKind | null; sendFrom: string | null } {
+  const s = blank(cleanLine(raw));
+  if (!s) return { kind: null, sendFrom: null };
+  const k = kind ?? guessSendFromKind(s);
+  if (k === "instagram" || k === "tiktok") return { kind: k, sendFrom: `@${normalizeHandle(s, k)}` };
+  if (k === "email") {
+    const address = s.toLowerCase();
+    if (!z.email().safeParse(address).success) throw new OpsError("The outreach sender is set to Email, but that doesn't look like an email address.");
+    return { kind: k, sendFrom: address };
+  }
+  return { kind: "other", sendFrom: s };
+}
 
 /**
  * Edit a business's details. Only the fields given change; null/"" clears (except name).
@@ -126,6 +152,7 @@ export async function updateBusinessDetails(clientId: string, patch: BusinessDet
     name: v.name, location: v.location, brand: v.brand, instagramHandle: v.instagramHandle, tiktokHandle: v.tiktokHandle,
     website: v.website, ownerEmail: v.ownerEmail, outreachAreas: v.outreachAreas as string | string[] | null | undefined,
     brandVoice: v.brandVoice, googleLocation: v.googleLocation, notes: v.notes,
+    sendFrom: v.sendFrom, creatorOffer: v.creatorOffer,
   });
 
   const cur = await getBusiness(clientId);
@@ -150,6 +177,18 @@ export async function updateBusinessDetails(clientId: string, patch: BusinessDet
     diff("ownerEmail", blank(v.ownerEmail)?.toLowerCase() ?? null);
   }
   if (v.outreachAreas !== undefined) diff("outreachAreas", joinOutreachAreas(v.outreachAreas ?? null));
+  if (v.sendFrom !== undefined || v.sendFromKind !== undefined || v.creatorOffer !== undefined) {
+    const offer = v.creatorOffer === undefined ? undefined : blank(cleanLine(v.creatorOffer));
+    const sender = v.sendFrom === undefined && v.sendFromKind === undefined
+      ? undefined
+      : normalizeSender(v.sendFromKind === undefined ? cur.sendFromKind : v.sendFromKind || null, v.sendFrom === undefined ? cur.sendFrom : v.sendFrom);
+    if (cur.kind === "creator" && (offer || sender?.sendFrom)) throw new OpsError("Nora's own workspace has no outreach profile: creator outreach is sent as a business we manage.");
+    if (sender) {
+      diff("sendFrom", sender.sendFrom);
+      diff("sendFromKind", sender.kind);
+    }
+    if (offer !== undefined) diff("creatorOffer", offer);
+  }
   if (v.brandVoice !== undefined) diff("brandVoice", blank(v.brandVoice), true);
   if (v.googleLocation !== undefined) diff("googleLocation", blank(v.googleLocation));
   if (v.notes !== undefined) {
@@ -171,6 +210,8 @@ export async function updateBusinessDetails(clientId: string, patch: BusinessDet
   const moved: FactKey[] = [...("website" in set ? ["website" as const] : []), ...("instagramHandle" in set ? ["instagram" as const] : []), ...("tiktokHandle" in set ? ["tiktok" as const] : [])];
   const info = moved.length ? forgetFactProvenance(cur.publicInfo, moved) : null;
   if (info) set.publicInfo = info;
+  // A different Google listing: the last review-sync result described the old one, so clear it.
+  if ("googleLocation" in set) Object.assign(set, GOOGLE_SYNC_RESET);
   const db = await getDb();
   await db.update(schema.clients).set(set).where(eq(schema.clients.id, clientId));
   await logActivity({

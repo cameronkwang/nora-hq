@@ -8,6 +8,9 @@ import { DraftQueue } from "@/components/draft-queue";
 import { KIND_LABELS, MANUAL_SEND_KINDS } from "@/components/draft-checks";
 import { EmptyState, PageHeader, clientLabel, cx } from "@/components/ui";
 import { REVIEW_TABS, getDraft, gmailConnected, googleConnected, listDrafts, loadContexts, tabCounts, type ReviewTab } from "./queries";
+import { listReadyToSend, readyToSendCount } from "./send-queries";
+import { ReadyToSend } from "@/components/ready-to-send";
+import { outreachInboxAddress } from "@/lib/ops-outreach";
 
 export const dynamic = "force-dynamic";
 
@@ -38,16 +41,21 @@ export default async function ReviewPage({ searchParams }: { searchParams: Promi
   const msg = one(sp.msg);
   const tone = one(sp.tone);
   const nextId = one(sp.next);
+  // Send mode ("Ready to send"): approved creator outreach, grouped by the account it goes out from, one at a time.
+  const sendMode = one(sp.send) === "1" && !focusId;
 
   const filters = { client: client || undefined, kind: kind || undefined };
-  const [clients, counts, focused, gmail, google] = await Promise.all([
+  const [clients, counts, focused, gmail, google, inbox, toSend, sendGroups] = await Promise.all([
     listClients({ includeArchived: true }),
     tabCounts(filters),
     focusId ? getDraft(focusId) : Promise.resolve(null),
     gmailConnected(),
     googleConnected(),
+    outreachInboxAddress(),
+    sendMode || focusId ? Promise.resolve(0) : readyToSendCount({ client: client || undefined }),
+    sendMode ? listReadyToSend({ client: client || undefined }) : Promise.resolve([]),
   ]);
-  const drafts = focused ? [focused] : await listDrafts(tab, filters);
+  const drafts = focused ? [focused] : sendMode ? [] : await listDrafts(tab, filters);
   const contexts = await loadContexts(drafts);
 
   const names = new Map(clients.map((c) => [c.id, clientLabel(c)]));
@@ -64,6 +72,7 @@ export default async function ReviewPage({ searchParams }: { searchParams: Promi
   };
   const returnTo = focused ? `/review?draft=${focused.id}` : qs({});
   const focusedTab = focused ? tabStatusFor(focused.status, focused.kind) : null;
+  const shownTab: ReviewTab = sendMode ? "approved" : tab;
 
   return (
     <div>
@@ -97,7 +106,7 @@ export default async function ReviewPage({ searchParams }: { searchParams: Promi
           <nav aria-label="Queue" className="relative -mx-4 mb-4 overflow-x-auto px-4 md:mx-0 md:px-0">
             <ul className="flex min-w-max gap-1 border-b border-border">
               {REVIEW_TABS.map((t) => {
-                const active = t.key === tab;
+                const active = t.key === shownTab;
                 const n = counts[t.key];
                 return (
                   <li key={t.key}>
@@ -121,19 +130,37 @@ export default async function ReviewPage({ searchParams }: { searchParams: Promi
               })}
             </ul>
           </nav>
-          <DraftFilters
-            tab={tab === "needs_review" ? "" : tab}
-            client={client}
-            kind={kind}
-            clients={clients.filter((c) => !c.archived || c.id === client).map((c) => ({ id: c.id, label: clientLabel(c) }))}
-            kinds={DRAFT_KINDS.map((k) => ({ id: k, label: KIND_LABELS[k] ?? k }))}
-          />
+          {sendMode ? (
+            <ReadyToSend groups={sendGroups} backHref={qs({ tab: "approved" })} />
+          ) : (
+            <>
+              <DraftFilters
+                tab={tab === "needs_review" ? "" : tab}
+                client={client}
+                kind={kind}
+                clients={clients.filter((c) => !c.archived || c.id === client).map((c) => ({ id: c.id, label: clientLabel(c) }))}
+                kinds={DRAFT_KINDS.map((k) => ({ id: k, label: KIND_LABELS[k] ?? k }))}
+              />
+              {toSend > 0 && (tab === "approved" || tab === "needs_review") && (
+                <Link
+                  href={qs({ tab: "approved", kind: "", send: "1" })}
+                  className="mb-4 flex min-h-11 items-center justify-between gap-3 rounded-lg bg-accent-soft px-4 py-3 text-sm"
+                >
+                  <span>
+                    <span className="font-semibold">{toSend} outreach {toSend === 1 ? "message is" : "messages are"} ready to send.</span>{" "}
+                    <span className="text-muted">One at a time, from each business&apos;s own account.</span>
+                  </span>
+                  <span className="shrink-0 font-semibold text-accent">Send →</span>
+                </Link>
+              )}
+            </>
+          )}
         </>
       )}
 
       {focusId && !focused && <EmptyState title="That draft doesn't exist anymore">It may have been deleted. <Link href="/review" className="text-accent hover:underline">Go to the queue</Link>.</EmptyState>}
 
-      {!focusId && drafts.length === 0 && (
+      {!focusId && !sendMode && drafts.length === 0 && (
         <EmptyState title={client || kind ? `${EMPTY[tab].title} for this filter` : EMPTY[tab].title}>
           {EMPTY[tab].body}
           {(client || kind) && (
@@ -155,6 +182,7 @@ export default async function ReviewPage({ searchParams }: { searchParams: Promi
             personName={personName}
             returnTo={returnTo}
             gmailConnected={gmail}
+            gmailAddress={inbox}
             highlight={!!focused}
           />
         );

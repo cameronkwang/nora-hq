@@ -12,6 +12,7 @@ import { blobEnabled } from "@/lib/uploads";
 import { QuickAsk } from "@/components/quick-ask";
 import { NotifyHomeCard } from "@/components/notify-home-card";
 import { NewClientLink } from "@/components/onboard-link";
+import { ClientHealth } from "@/components/client-health-strip";
 import { Badge, Card, EmptyState, PageHeader, ProgressBar, clientLabel, cx, formatNumber, humanize } from "@/components/ui";
 
 export const dynamic = "force-dynamic";
@@ -226,6 +227,9 @@ export default async function Home({ searchParams }: { searchParams: Promise<Rec
           </div>
         )}
       </Card>
+
+      {/* One row per business: a colored dot and its single worst issue (or "All good"). */}
+      <ClientHealth />
 
       <section>
         <div className="mb-3 flex items-end justify-between gap-2">

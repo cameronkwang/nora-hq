@@ -71,6 +71,8 @@ async function ScheduleTab({ sp, month, tabs }: { sp: SP; month: string; tabs: R
     isFree: r.isFree,
     needsReel: r.needsReel,
     reelPostedAt: r.reelPostedAt ? r.reelPostedAt.toISOString() : null,
+    dealId: r.dealId,
+    payment: r.payment, // Paid / Not paid from the linked deal — never an amount
   });
   const items = rows.map(toEntry);
   const otherReels = pending.filter((r) => r.month !== month).map(toEntry);

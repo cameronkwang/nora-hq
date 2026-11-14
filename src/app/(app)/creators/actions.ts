@@ -6,6 +6,7 @@ import { z } from "zod";
 import { requireUser } from "@/lib/auth";
 import { OUTREACH_CHANNELS, OUTREACH_STAGES, type OutreachChannel, type OutreachStage } from "@/lib/schema";
 import { updateCreator, upsertCreator, upsertOutreach } from "@/lib/ops";
+import { markCreatorStatsChecked } from "@/lib/ops-outreach";
 import { COMP_TYPES, findExistingCreator, findOutreach, normalizeHandle } from "./queries";
 
 export type FormState = { ok?: boolean; error?: string; message?: string; at?: number };
@@ -69,6 +70,8 @@ function creatorFields(fd: FormData) {
       engagementRate,
       notes: opt(fd, "notes"),
       source: opt(fd, "source"),
+      // Creator check: the public page the numbers were read from (only when the form has the field).
+      ...(fd.has("statsSource") ? { statsSource: opt(fd, "statsSource") } : {}),
     },
   } as const;
 }
@@ -135,6 +138,14 @@ export async function updateCreatorAction(creatorId: string, _prev: FormState, f
   return { ok: true, message: "Saved.", at: Date.now() };
 }
 
+/** Stats card → "Checked today": a person looked at the creator's public page and the saved numbers are right. */
+export async function markStatsCheckedAction(creatorId: string): Promise<void> {
+  const user = await requireUser();
+  await markCreatorStatsChecked(creatorId, user.email);
+  refresh(creatorId);
+  revalidatePath("/review");
+}
+
 export async function setDoNotContactAction(creatorId: string, fd: FormData): Promise<void> {
   const user = await requireUser();
   const on = str(fd, "doNotContact") === "1";
@@ -160,6 +171,8 @@ export async function saveOutreachAction(clientId: string, creatorId: string, _p
         compType: compOf(fd),
         nextFollowUpAt: followUpDate(str(fd, "nextFollowUpAt")),
         postUrl: opt(fd, "postUrl"),
+        // Already featured: a post they'd made about this business before we reached out. Empty clears it.
+        ...(fd.has("priorPostUrl") ? { priorPostUrl: opt(fd, "priorPostUrl") } : {}),
         disclosureOk: disclosure === "yes" ? true : disclosure === "no" ? false : null,
         notes: opt(fd, "notes"),
       },
@@ -201,7 +214,7 @@ export async function addOutreachAction(creatorId: string, _prev: FormState, fd:
   try {
     if (await findOutreach(clientId, creatorId)) return { error: "They're already in outreach for that business." };
     await upsertOutreach(
-      { clientId, creatorId, channel: channelOf(fd), compType: compOf(fd), stage: stageOf(fd, "shortlisted") },
+      { clientId, creatorId, channel: channelOf(fd), compType: compOf(fd), stage: stageOf(fd, "shortlisted"), ...(opt(fd, "priorPostUrl") ? { priorPostUrl: opt(fd, "priorPostUrl") } : {}) },
       user.email,
     );
   } catch (e) {

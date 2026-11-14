@@ -15,6 +15,8 @@ import { TaskTable, type TaskLite } from "@/components/task-table";
 import { BoardView } from "@/components/board-view";
 import { ViewToggle } from "@/components/view-toggle";
 import { Card, EmptyState, PageHeader, clientLabel, cx } from "@/components/ui";
+import { groupPlanTasks, isPlanTask, type PlanGroup } from "@/lib/plan-groups";
+import { PlanTaskGroups } from "@/components/plan-task-groups";
 import {
   BOARD_DONE_DAYS, SORT_KEYS, VIEWS, isFiltered, loadBoardTasks, loadTasks, parseTaskFilters, sortTasks, tasksHref, viewCookieName,
 } from "./queries";
@@ -110,7 +112,9 @@ export default async function TasksPage({ searchParams }: { searchParams: Promis
       </TaskSelection>
     );
   } else {
-    body = <ListBody tasks={tasks} f={f} clients={clients} names={names} nameOf={nameOf} now={now} />;
+    // Monthly-plan slots are condensed per plan item; everything else is listed as it is.
+    const planGroups = await groupPlanTasks(tasks);
+    body = <ListBody tasks={tasks.filter((t) => !isPlanTask(t))} planGroups={planGroups} f={f} clients={clients} names={names} nameOf={nameOf} now={now} month={f.month || currentMonth()} />;
   }
 
   return (
@@ -188,18 +192,40 @@ export default async function TasksPage({ searchParams }: { searchParams: Promis
   );
 }
 
+/**
+ * List view. Real tasks (ad hoc, Getting started) are listed as they are. Monthly-plan slots are condensed
+ * underneath: per business, one collapsible row per plan item ("Instagram feed posts · 3 of 8 ▸"), closed by default.
+ */
 function ListBody({
-  tasks, f, clients, names, nameOf, now,
+  tasks, planGroups, f, clients, names, nameOf, now, month,
 }: {
+  /** Everything except monthly-plan slots. */
   tasks: Task[];
+  /** The monthly-plan slots, grouped per plan item and month (lib/plan-groups). */
+  planGroups: PlanGroup[];
   f: ReturnType<typeof parseTaskFilters>;
   clients: Array<{ id: string }>;
   names: Map<string, string>;
   nameOf: (t: Task) => string | null;
   now: string;
+  month: string;
 }) {
   const weekEnd = addDays(now, 6);
-  type Group = { key: string; label: string; tone?: "danger" | "warn"; tasks: Task[] };
+  /** `client` = the business a card belongs to ("" = none), when it is a business card. */
+  type Group = { key: string; label: string; tone?: "danger" | "warn"; tasks: Task[]; plan: PlanGroup[]; client?: string };
+
+  const planBy = new Map<string, PlanGroup[]>();
+  for (const g of planGroups) {
+    const k = g.clientId ?? "";
+    planBy.set(k, [...(planBy.get(k) ?? []), g]);
+  }
+  // Businesses in sidebar order, then archived ones, then "no business".
+  const inOrder = (keys: Iterable<string>) => {
+    const have = new Set(keys);
+    return [...clients.map((c) => c.id), ...[...have].filter((k) => k && !names.has(k)), ""].filter((k) => have.has(k));
+  };
+  const businessLabel = (k: string) => (k ? (names.get(k) ?? "Archived business") : "No business / general");
+
   let groups: Group[];
   if (f.group === "business") {
     const byClient = new Map<string, Task[]>();
@@ -207,18 +233,16 @@ function ListBody({
       const k = t.clientId ?? "";
       byClient.set(k, [...(byClient.get(k) ?? []), t]);
     }
-    const order = [...clients.map((c) => c.id), ...[...byClient.keys()].filter((k) => k && !names.has(k)), ""];
-    groups = order
-      .filter((k) => byClient.has(k))
-      .map((k) => ({ key: k || "none", label: k ? (names.get(k) ?? "Archived business") : "No business / general", tasks: byClient.get(k)! }));
+    groups = inOrder([...byClient.keys(), ...planBy.keys()])
+      .map((k) => ({ key: k || "none", label: businessLabel(k), tasks: byClient.get(k) ?? [], plan: planBy.get(k) ?? [], client: k }));
   } else {
     const buckets: Group[] = [
-      { key: "overdue", label: "Overdue", tone: "danger", tasks: [] },
-      { key: "today", label: "Today", tone: "warn", tasks: [] },
-      { key: "week", label: "Next 7 days", tasks: [] },
-      { key: "later", label: "Later", tasks: [] },
-      { key: "none", label: "No due date", tasks: [] },
-      { key: "done", label: "Done", tasks: [] },
+      { key: "overdue", label: "Overdue", tone: "danger", tasks: [], plan: [] },
+      { key: "today", label: "Today", tone: "warn", tasks: [], plan: [] },
+      { key: "week", label: "Next 7 days", tasks: [], plan: [] },
+      { key: "later", label: "Later", tasks: [], plan: [] },
+      { key: "none", label: "No due date", tasks: [], plan: [] },
+      { key: "done", label: "Done", tasks: [], plan: [] },
     ];
     const pick = (k: string) => buckets.find((b) => b.key === k)!.tasks;
     for (const t of tasks) {
@@ -229,11 +253,14 @@ function ListBody({
       else if (t.dueDate <= weekEnd) pick("week").push(t);
       else pick("later").push(t);
     }
-    groups = buckets.filter((b) => b.tasks.length);
+    // The plan comes after the dated buckets, one card per business.
+    const planCards: Group[] = inOrder(planBy.keys())
+      .map((k) => ({ key: `plan-${k || "none"}`, label: `Monthly plan · ${businessLabel(k)}`, tasks: [], plan: planBy.get(k)!, client: k }));
+    groups = [...buckets.filter((b) => b.tasks.length), ...planCards];
   }
 
   return (
-    <TaskSelection ids={tasks.map((t) => t.id)}>
+    <TaskSelection ids={[...tasks.map((t) => t.id), ...planGroups.flatMap((g) => g.tasks.map((t) => t.id))]}>
       <div className="mb-2 flex min-h-11 items-center justify-between gap-2">
         <TaskSelectAll />
         <span className="ml-auto">
@@ -246,12 +273,12 @@ function ListBody({
             key={g.key}
             title={
               <span className={cx(g.tone === "danger" && "text-danger", g.tone === "warn" && "text-warn")}>
-                {g.label} <span className="font-normal text-muted">· {g.tasks.length}</span>
+                {g.label} <span className="font-normal text-muted">· {g.tasks.length + g.plan.reduce((n, p) => n + p.tasks.length, 0)}</span>
               </span>
             }
             actions={
-              f.group === "business" && g.key !== "none" && names.has(g.key) ? (
-                <Link href={`/clients/${g.key}`} className="text-xs font-medium text-accent hover:underline">
+              g.client && names.has(g.client) ? (
+                <Link href={`/clients/${g.client}`} className="text-xs font-medium text-accent hover:underline">
                   Business page
                 </Link>
               ) : undefined
@@ -259,13 +286,22 @@ function ListBody({
             className="overflow-hidden"
             padded={false}
           >
-            <div className="px-4">
-              <TaskList>
-                {g.tasks.map((t) => (
-                  <TaskRow key={t.id} task={t} clientName={nameOf(t)} showClient={f.group !== "business"} selectable />
-                ))}
-              </TaskList>
-            </div>
+            {g.tasks.length > 0 && (
+              <div className="px-4">
+                <TaskList>
+                  {g.tasks.map((t) => (
+                    <TaskRow key={t.id} task={t} clientName={nameOf(t)} showClient={f.group !== "business"} selectable />
+                  ))}
+                </TaskList>
+              </div>
+            )}
+            {g.plan.length > 0 && (
+              <div className={cx("px-4 py-1", g.tasks.length > 0 && "border-t border-border")}>
+                {/* Under a business's own tasks the plan needs its own label; a "Monthly plan · …" card already says it. */}
+                {f.group === "business" && <p className="pt-2 text-xs font-semibold uppercase tracking-wide text-muted">Monthly plan</p>}
+                <PlanTaskGroups groups={g.plan} month={month} selectable />
+              </div>
+            )}
           </Card>
         ))}
       </div>

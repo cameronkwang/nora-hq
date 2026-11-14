@@ -1,5 +1,5 @@
 import "server-only";
-import { and, asc, desc, eq, gte, inArray, ne, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, isNotNull, isNull, ne, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import { getDb, schema } from "./db";
 import { newId } from "./ids";
@@ -262,9 +262,12 @@ export async function updateDeal(id: string, patch: Partial<DealInputT>, actor: 
   // Switching to gifted means there's nothing to invoice; switching away re-opens it.
   if (v.compType === "gifted" && cur.paymentStatus === "not_requested") set.paymentStatus = "not_applicable";
   if (v.compType && v.compType !== "gifted" && cur.paymentStatus === "not_applicable") set.paymentStatus = "not_requested";
+  // A deal made from Nora's schedule: the job's day follows the visit (checked before anything is written).
+  const move = v.visitAt !== undefined ? await scheduleMoveFor(id, v.visitAt ?? null) : null;
   const db = await getDb();
   const [row] = await db.update(schema.deals).set(set).where(eq(schema.deals.id, id)).returning();
   await logActivity({ actor, action: "deal.updated", entityType: "deal", entityId: id, clientId: CREATOR_WORKSPACE_ID, summary: `Updated deal: ${row.businessName}` });
+  if (move) await moveScheduleItem(move, actor);
   return row;
 }
 
@@ -324,7 +327,10 @@ async function maybeAutoPosted(dealId: string, actor: string) {
   }
 }
 
-export async function addDeliverable(dealId: string, input: z.input<typeof DeliverableInput>, actor: string) {
+/** `syncSchedule: false` is for "Make it a deal", which copies the reel FROM the schedule item it is linking. */
+type DeliverableOpts = { syncSchedule?: boolean };
+
+export async function addDeliverable(dealId: string, input: z.input<typeof DeliverableInput>, actor: string, opts: DeliverableOpts = {}) {
   people(actor, "add a deliverable");
   const v = DeliverableInput.parse(input);
   const deal = await getDealRow(dealId);
@@ -333,6 +339,7 @@ export async function addDeliverable(dealId: string, input: z.input<typeof Deliv
   const id = newId("dd_");
   await db.insert(schema.dealDeliverables).values({ id, dealId, kind: v.kind, dueDate: v.dueDate ?? null, sortOrder: n });
   await logActivity({ actor, action: "deal.deliverable_added", entityType: "deal", entityId: dealId, clientId: CREATOR_WORKSPACE_ID, summary: `${deal.businessName}: added ${DELIVERABLE_LABEL[v.kind]}` });
+  if (v.kind === "ig_reel" && opts.syncSchedule !== false) await syncReelToSchedule(dealId, actor);
   return id;
 }
 
@@ -345,7 +352,7 @@ const DeliverablePatch = z.object({
 });
 
 /** Edit a deliverable. A post link marks it posted (unless posted:false); when every deliverable is posted the deal moves to posted. */
-export async function updateDeliverable(id: string, patch: z.input<typeof DeliverablePatch>, actor: string) {
+export async function updateDeliverable(id: string, patch: z.input<typeof DeliverablePatch>, actor: string, opts: DeliverableOpts = {}) {
   people(actor, "update a deliverable");
   const v = DeliverablePatch.parse(patch);
   const db = await getDb();
@@ -368,6 +375,7 @@ export async function updateDeliverable(id: string, patch: z.input<typeof Delive
     summary: `${deal.businessName}: ${DELIVERABLE_LABEL[row.kind]}${set.postedAt ? " posted" : posted === false ? " un-posted" : " updated"}`,
   });
   if (set.postedAt) await maybeAutoPosted(cur.dealId, actor);
+  if ((cur.kind === "ig_reel" || row.kind === "ig_reel") && opts.syncSchedule !== false) await syncReelToSchedule(cur.dealId, actor);
   return row;
 }
 
@@ -379,6 +387,115 @@ export async function deleteDeliverable(id: string, actor: string) {
   await db.delete(schema.dealDeliverables).where(eq(schema.dealDeliverables.id, id));
   const deal = await getDealRow(cur.dealId);
   await logActivity({ actor, action: "deal.deliverable_removed", entityType: "deal", entityId: cur.dealId, clientId: CREATOR_WORKSPACE_ID, summary: `${deal.businessName}: removed ${DELIVERABLE_LABEL[cur.kind]}` });
+  if (cur.kind === "ig_reel") await syncReelToSchedule(cur.dealId, actor);
+}
+
+/* ───────────────────────── The schedule job a deal was made from ───────────────────────── */
+
+/**
+ * A deal made from Nora's schedule ("Make it a deal") and its schedule item are ONE job seen in two places: the day
+ * and the reel live on both. A change on either side is written through to the other, or reminders fire on the old
+ * day and "reel owed" never clears.
+ *  - deal → schedule: updateDeal moves the job's day with the visit; the deliverable functions keep the job's 📸 in
+ *    step with the deal's Reel deliverables (owed while any isn't posted).
+ *  - schedule → deal: lib/ops-schedule calls moveDealVisitToDay / setDealReelsPosted when the job's day or 📸 changes.
+ * The write-through halves check no actor (they follow a change that was already allowed) and never call back.
+ */
+
+async function linkedScheduleItem(dealId: string) {
+  const db = await getDb();
+  const [item] = await db.select().from(schema.scheduleItems).where(eq(schema.scheduleItems.dealId, dealId)).limit(1);
+  return item ?? null;
+}
+
+type ScheduleMove = { item: schema.ScheduleItem; date: string | null; month: string };
+
+/**
+ * Where the linked schedule item goes when the deal's visit becomes `visitAt` (no visit = "no set day", same month).
+ * Null when there is no linked item or its day already matches. Throws, before anything is written, when the
+ * business is already on the schedule in the month the visit moves to (one line per business and month).
+ */
+async function scheduleMoveFor(dealId: string, visitAt: Date | null): Promise<ScheduleMove | null> {
+  const item = await linkedScheduleItem(dealId);
+  if (!item) return null;
+  const date = visitAt ? today(visitAt) : null;
+  if (date === item.date) return null;
+  const month = date ? date.slice(0, 7) : item.month;
+  if (month !== item.month) {
+    const db = await getDb();
+    const [clash] = await db.select({ id: schema.scheduleItems.id }).from(schema.scheduleItems)
+      .where(and(eq(schema.scheduleItems.month, month), eq(schema.scheduleItems.nameKey, item.nameKey), ne(schema.scheduleItems.id, item.id)));
+    if (clash) throw new OpsError(`${item.businessName} is already on Nora's schedule for ${month}. Move or remove that one first, then change the visit.`);
+  }
+  return { item, date, month };
+}
+
+const shortDay = (ymdDate: string | null) => (ymdDate ? `${ymdDate.slice(5, 7)}/${ymdDate.slice(8, 10)}` : "no set day");
+
+async function moveScheduleItem({ item, date, month }: ScheduleMove, actor: string) {
+  const db = await getDb();
+  await db.update(schema.scheduleItems).set({ date, month, updatedAt: new Date() }).where(eq(schema.scheduleItems.id, item.id));
+  await logActivity({
+    actor, action: "schedule.updated", entityType: "schedule_item", entityId: item.id, clientId: item.clientId,
+    summary: `Updated ${item.businessName} on Nora's schedule — date: ${shortDay(item.date)} → ${shortDay(date)} (its deal's visit moved).`,
+  });
+}
+
+/**
+ * The linked schedule item's 📸 follows the deal's Reel deliverables: a reel is owed while any of them isn't posted,
+ * and it's ticked once they all are. A deal with no Reel deliverable leaves the schedule's own 📸 as it is.
+ */
+async function syncReelToSchedule(dealId: string, actor: string) {
+  const item = await linkedScheduleItem(dealId);
+  if (!item) return;
+  const db = await getDb();
+  const reels = await db.select({ postedAt: schema.dealDeliverables.postedAt }).from(schema.dealDeliverables)
+    .where(and(eq(schema.dealDeliverables.dealId, dealId), eq(schema.dealDeliverables.kind, "ig_reel")));
+  if (!reels.length) return;
+  const posted = reels.every((r) => !!r.postedAt);
+  if (item.needsReel && posted === !!item.reelPostedAt) return;
+  await db.update(schema.scheduleItems)
+    .set({ needsReel: true, reelPostedAt: posted ? (item.reelPostedAt ?? new Date()) : null, updatedAt: new Date() })
+    .where(eq(schema.scheduleItems.id, item.id));
+  await logActivity({
+    actor, action: posted ? "schedule.reel_posted" : "schedule.reel_unposted", entityType: "schedule_item", entityId: item.id, clientId: item.clientId,
+    summary: posted ? `Reel posted for ${item.businessName} (marked on its deal).` : `Reel to post for ${item.businessName} (from its deal).`,
+  });
+}
+
+/**
+ * The schedule moved the job to `date` (null = no set day): the deal's visit follows, keeping its time of day
+ * (noon when it had none — the schedule has no time). Called by lib/ops-schedule for an item that has a deal.
+ */
+export async function moveDealVisitToDay(dealId: string, date: string | null, actor: string): Promise<void> {
+  const db = await getDb();
+  const [deal] = await db.select().from(schema.deals).where(eq(schema.deals.id, dealId));
+  if (!deal || (deal.visitAt ? today(deal.visitAt) : null) === date) return;
+  const time = deal.visitAt ? dateToZonedLocal(deal.visitAt).slice(11) : "12:00";
+  const visitAt = date ? zonedLocalToDate(`${date}T${time}`) : null;
+  await db.update(schema.deals)
+    .set({ visitAt, updatedAt: new Date(), ...(visitAt && deal.status === "planning" ? { status: "scheduled" as const } : {}) })
+    .where(eq(schema.deals.id, dealId));
+  await logActivity({
+    actor, action: "deal.updated", entityType: "deal", entityId: dealId, clientId: CREATOR_WORKSPACE_ID,
+    summary: `${deal.businessName}: visit ${date ? `moved to ${shortDay(date)}` : "has no set day now"} (changed on Nora's schedule)`,
+  });
+}
+
+/** The schedule ticked (or unticked) the job's reel: the deal's Reel deliverables follow. Called by lib/ops-schedule. */
+export async function setDealReelsPosted(dealId: string, posted: boolean, actor: string): Promise<void> {
+  const db = await getDb();
+  const dd = schema.dealDeliverables;
+  const rows = await db.update(dd).set({ postedAt: posted ? new Date() : null })
+    .where(and(eq(dd.dealId, dealId), eq(dd.kind, "ig_reel"), posted ? isNull(dd.postedAt) : isNotNull(dd.postedAt)))
+    .returning({ id: dd.id });
+  if (!rows.length) return;
+  const [deal] = await db.update(schema.deals).set({ updatedAt: new Date() }).where(eq(schema.deals.id, dealId)).returning({ businessName: schema.deals.businessName });
+  await logActivity({
+    actor, action: "deal.deliverable_updated", entityType: "deal", entityId: dealId, clientId: CREATOR_WORKSPACE_ID,
+    summary: `${deal?.businessName ?? "Deal"}: ${DELIVERABLE_LABEL.ig_reel} ${posted ? "posted" : "un-posted"} (ticked on Nora's schedule)`,
+  });
+  if (posted) await maybeAutoPosted(dealId, actor);
 }
 
 export const DELIVERABLE_LABEL: Record<(typeof schema.DELIVERABLE_KINDS)[number], string> = {

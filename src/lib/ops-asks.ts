@@ -108,7 +108,7 @@ export async function createRoutedAsk(
   input: z.input<typeof AskInput>,
   route: { kind: schema.AskKind; forWho: schema.AskFor },
   actor: string,
-  opts: { skipTask?: boolean } = {},
+  opts: { skipTask?: boolean; /** The owner drop link this ask came through (lib/ops-drop): written with the ask, never after. */ dropLinkId?: string | null } = {},
 ) {
   const v = AskInput.parse(input);
   const r = TriageInput.pick({ kind: true, forWho: true }).parse(route);
@@ -117,6 +117,7 @@ export async function createRoutedAsk(
   const id = newId("ask_");
   const [row] = await db.insert(schema.asks).values({
     id, clientId: v.clientId || null, body: v.body.trim(), attachments: v.attachments, createdBy: actor, kind: r.kind, forWho: r.forWho,
+    dropLinkId: opts.dropLinkId ?? null,
   }).returning();
   const routed = r.kind === "auto" && r.forWho === "auto" ? "" : ` (${KIND_LABEL[r.kind]} for ${FOR_LABEL[r.forWho]})`;
   await logActivity({ actor, action: "ask.created", entityType: "ask", entityId: id, clientId: row.clientId, summary: `New ask${routed}: ${v.body.slice(0, 80)}` });

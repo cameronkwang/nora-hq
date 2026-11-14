@@ -78,6 +78,20 @@
       "when": 1794627458292,
       "tag": "0010_client_public_info",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1794640166214,
+      "tag": "0011_enhancements_2_12",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1794650557912,
+      "tag": "0012_drop_link_limits",
+      "breakpoints": true
     }
   ]
 }

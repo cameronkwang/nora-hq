@@ -1,8 +1,9 @@
 "use client";
 
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
-import { addScheduleItemAction, deleteScheduleItemAction, updateScheduleItemAction } from "@/app/(app)/calendar/schedule-actions";
+import { addScheduleItemAction, deleteScheduleItemAction, makeDealFromScheduleAction, updateScheduleItemAction } from "@/app/(app)/calendar/schedule-actions";
 import { ScheduleSheet } from "./schedule-sheet";
 import { Button, buttonClass } from "./ui";
 import type { ScheduleEntry } from "./schedule-board";
@@ -16,7 +17,10 @@ const lastDay = (month: string) => {
   return `${month}-${String(new Date(Date.UTC(y, m, 0)).getUTCDate()).padStart(2, "0")}`;
 };
 
-/** Add (no `item`) or edit one schedule entry. Business, day or "no set day", free, reel. No money. */
+/**
+ * Add (no `item`) or edit one schedule entry. Business, day or "no set day", free, reel. No money.
+ * A saved, non-free job can be made into a deal from here; once it has one, this links to it.
+ */
 export function ScheduleItemForm({ month, item, onDone }: { month: string; item?: ScheduleEntry; onDone: (message?: string) => void }) {
   const router = useRouter();
   const [name, setName] = useState(item?.businessName ?? "");
@@ -52,6 +56,16 @@ export function ScheduleItemForm({ month, item, onDone }: { month: string; item?
       if (!r.ok) return setError(r.error);
       router.refresh();
       onDone(`Removed ${item.businessName}.`);
+    });
+
+  const makeDeal = () =>
+    start(async () => {
+      if (!item) return;
+      setError(null);
+      const r = await makeDealFromScheduleAction(item.id);
+      if (!r.ok) return setError(r.error);
+      onDone();
+      router.push(`/deals/${r.dealId}${r.created ? "?from=schedule" : ""}`);
     });
 
   return (
@@ -106,6 +120,18 @@ export function ScheduleItemForm({ month, item, onDone }: { month: string; item?
             <Button type="button" variant="ghost" className="text-danger" onClick={() => setConfirmDelete(true)}>Remove</Button>
           ))}
       </div>
+
+      {item?.dealId ? (
+        <div className="border-t border-border pt-3">
+          <Link href={`/deals/${item.dealId}`} className={buttonClass("secondary")}>Open the deal</Link>
+          <p className="mt-1 text-xs text-muted">The fee and payment live on the deal. The schedule only shows Paid or Not paid.</p>
+        </div>
+      ) : item && !item.isFree && !isFree ? (
+        <div className="border-t border-border pt-3">
+          <Button type="button" variant="secondary" disabled={pending} onClick={makeDeal}>Make it a deal</Button>
+          <p className="mt-1 text-xs text-muted">Track the fee, deliverables and payment on a deal. The schedule only shows Paid or Not paid, never an amount.</p>
+        </div>
+      ) : null}
     </form>
   );
 }

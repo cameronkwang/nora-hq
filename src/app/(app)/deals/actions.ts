@@ -29,6 +29,7 @@ function refresh(id?: string) {
     revalidatePath(`/deals/${id}/visit`);
   }
   revalidatePath(`/clients/${CREATOR_WORKSPACE_ID}`);
+  revalidatePath("/calendar"); // a job made into a deal shows Paid / Not paid on Nora's schedule
 }
 
 /** Runs a form action; ops/validation errors come back to the page as ?error=. */

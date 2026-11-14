@@ -55,8 +55,9 @@ export default async function NotificationSettingsPage() {
 
         <Card title="Calendar">
           <p className="mb-3 text-sm text-muted">
-            Subscribe once and your calendar app shows collab visits (with address and notes), scheduled posts,
-            deliverable due dates and your own tasks with due dates. Updates on its own every hour or so.
+            Subscribe once and your calendar app shows collab visits (with address and notes), Nora&apos;s schedule
+            (and a Monday line for reels still to post), scheduled posts, deliverable due dates and your own tasks
+            with due dates. Updates on its own every hour or so.
           </p>
           {feed && (
             <div className="mb-3 flex items-center justify-between gap-3 rounded-lg border border-border px-3 py-2">

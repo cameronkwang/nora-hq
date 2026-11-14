@@ -12,6 +12,7 @@ import { registerReportTools } from "./tools-reports";
 import { registerIntakeTools } from "./tools-intake";
 import { registerBusinessTools } from "./tools-business";
 import { registerScheduleTools } from "./tools-schedule";
+import { registerDropTools } from "./tools-drop";
 import type { Ctx } from "./queries";
 
 /** A fresh MCP server per request (stateless Streamable HTTP — works on serverless). */
@@ -31,5 +32,6 @@ export function createMcpServer(ctx: Ctx): McpServer {
   registerIntakeTools(server);
   registerBusinessTools(server, ctx);
   registerScheduleTools(server);
+  registerDropTools(server, ctx);
   return server;
 }

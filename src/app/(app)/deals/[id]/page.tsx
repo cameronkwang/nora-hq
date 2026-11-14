@@ -3,13 +3,18 @@ import { notFound } from "next/navigation";
 import { eq } from "drizzle-orm";
 import { requireUser } from "@/lib/auth";
 import { getDb, schema } from "@/lib/db";
-import { formatDate, today } from "@/lib/dates";
+import { formatDate, monthLabel, today } from "@/lib/dates";
 import { DELIVERABLE_LABEL, PAYMENT_DUE_DAYS, addDays, dateToZonedLocal, getDeal, isOverdue } from "@/lib/ops-deals";
+import { getKitIdentity } from "@/lib/ops-kit";
+import { getPaymentLine } from "@/lib/ops-payment";
+import { scheduleItemForDeal } from "@/lib/ops-schedule";
+import { buildPaymentRequest } from "@/lib/payment-request";
 import { ActionForm, ConfirmButton, SubmitButton } from "@/components/client-form";
 import {
   COMP_LABEL, DEAL_STATUS_LABEL, DealStatusBadge, PaymentChip, centsToDollarsInput, compText, formatMoney, formatVisit,
 } from "@/components/deal-bits";
 import { DealShotList } from "@/components/deal-shot-list";
+import { PaymentRequest } from "@/components/payment-request";
 import { Card, LinkButton, PageHeader, buttonClass, cx } from "@/components/ui";
 import {
   addDeliverableAction, askShotListAction, deleteDealAction, deleteDeliverableAction, saveDealAction, saveDeliverableAction,
@@ -29,18 +34,36 @@ export default async function DealPage({ params, searchParams }: { params: Promi
   const deal = await getDeal(id);
   if (!deal) notFound();
   const db = await getDb();
-  const [lead, client] = await Promise.all([
+  const [lead, client, paymentLine, identity, scheduleItem] = await Promise.all([
     deal.leadId ? db.select({ id: schema.leads.id, name: schema.leads.name }).from(schema.leads).where(eq(schema.leads.id, deal.leadId)).then((r) => r[0] ?? null) : null,
     deal.clientId ? db.select({ id: schema.clients.id, name: schema.clients.name }).from(schema.clients).where(eq(schema.clients.id, deal.clientId)).then((r) => r[0] ?? null) : null,
+    getPaymentLine(),
+    getKitIdentity(),
+    scheduleItemForDeal(deal.id),
   ]);
   const t = today();
   const error = one(sp.error);
   const flash = one(sp.new)
     ? "Deal created. Claude has been asked for a shot list — it shows up below once it’s written."
+    : one(sp.from) === "schedule"
+      ? `Deal made from Nora’s schedule. Add the fee here — the schedule only ever shows Paid or Not paid.${deal.visitAt ? " The visit is set to noon on that day; change the time below if you know it." : ""}`
     : one(sp.asked) ? "Asked Claude for a shot list." : "";
   const paidComp = deal.compType !== "gifted";
   const posted = deal.deliverables.filter((d) => d.postedAt).length;
   const back = `/deals/${deal.id}`;
+  // "Request payment": template text (no AI) from what's on this deal. Nothing is sent from here.
+  const request = buildPaymentRequest({
+    businessName: deal.businessName,
+    contactName: deal.contactName,
+    amountCents: deal.amountCents,
+    deliverables: deal.deliverables.map((d) => ({ label: DELIVERABLE_LABEL[d.kind], postUrl: d.postUrl, postedOn: d.postedAt ? today(d.postedAt) : null, dueDate: d.dueDate })),
+    visitDate: deal.visitAt ? today(deal.visitAt) : null,
+    dueDate: deal.paymentDueDate ?? addDays(t, PAYMENT_DUE_DAYS),
+    paymentLine,
+    fromName: identity.name,
+    fromHandle: identity.igHandle,
+    today: t,
+  });
 
   return (
     <>
@@ -254,6 +277,16 @@ export default async function DealPage({ params, searchParams }: { params: Promi
                   </div>
                 </form>
                 <p className="mt-2 text-xs text-muted">Only you can change this — Claude never marks anything paid.</p>
+                {deal.paymentStatus !== "paid" && deal.status !== "cancelled" && (
+                  <PaymentRequest
+                    invoice={request.invoice}
+                    reminder={request.reminder}
+                    missing={request.missing}
+                    to={deal.contactEmail}
+                    paymentLine={paymentLine}
+                    invoiced={deal.paymentStatus === "requested"}
+                  />
+                )}
               </>
             )}
           </Card>
@@ -263,6 +296,9 @@ export default async function DealPage({ params, searchParams }: { params: Promi
               <LinkedRow label="Collab request" href={deal.collabRequestId ? `/collabs/${deal.collabRequestId}` : null} text="Open request" />
               <LinkedRow label="Lead" href={lead ? `/leads/${lead.id}` : null} text={lead?.name ?? ""} />
               <LinkedRow label="Business" href={client ? `/clients/${client.id}` : null} text={client?.name ?? ""} />
+              {scheduleItem && (
+                <LinkedRow label="Nora’s schedule" href={`/calendar?month=${scheduleItem.month}`} text={scheduleItem.date ? formatDate(scheduleItem.date) : monthLabel(scheduleItem.month)} />
+              )}
             </ul>
           </Card>
 

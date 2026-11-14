@@ -3,6 +3,7 @@ import { and, asc, desc, eq, inArray, ne, sql, type SQL } from "drizzle-orm";
 import { getDb, schema } from "@/lib/db";
 import type { ClientReport, ContentPost, Creator, Draft, DraftKind, DraftStatus, Lead, Outreach, Review } from "@/lib/schema";
 import { MANUAL_SEND_KINDS } from "@/components/draft-checks";
+import { outreachProfileOf, type OutreachProfile } from "@/lib/outreach-profile";
 
 export const REVIEW_TABS = [
   { key: "needs_review", label: "Needs review", status: "needs_review" as DraftStatus },
@@ -28,6 +29,8 @@ export type DraftContext = {
   lead?: Pick<Lead, "id" | "name" | "contactName" | "city"> | null;
   /** kind "report": the client_reports row (meta.reportId) and the business owner's email, if saved. */
   report?: ReportContext | null;
+  /** Outreach kinds: the business's outreach profile — the account it's sent from (never Nora's) and the standing offer. */
+  profile?: OutreachProfile | null;
 };
 
 function baseFilters(f: { client?: string; kind?: string }) {
@@ -135,6 +138,18 @@ export async function loadContexts(drafts: Draft[]): Promise<Map<string, DraftCo
     ]),
   );
 
+  // Outreach profile of each business an outreach draft is for.
+  const profileIds = [...new Set(
+    drafts.filter((d) => d.kind === "outreach_email" || d.kind === "outreach_dm")
+      .map((d) => d.clientId ?? outreachById.get(String(d.meta.outreachId))?.clientId)
+      .filter((x): x is string => !!x),
+  )];
+  const profileRows = profileIds.length
+    ? await db.select({ id: schema.clients.id, name: schema.clients.name, sendFromKind: schema.clients.sendFromKind, sendFrom: schema.clients.sendFrom, creatorOffer: schema.clients.creatorOffer })
+        .from(schema.clients).where(inArray(schema.clients.id, profileIds))
+    : [];
+  const profiles = new Map(profileRows.map((c) => [c.id, outreachProfileOf(c)]));
+
   const out = new Map<string, DraftContext>();
   for (const d of drafts) {
     const ctx: DraftContext = {};
@@ -142,6 +157,7 @@ export async function loadContexts(drafts: Draft[]): Promise<Map<string, DraftCo
     if (d.kind === "outreach_email" || d.kind === "outreach_dm") {
       const o = outreachById.get(String(d.meta.outreachId));
       ctx.outreach = o ? { ...o, history: o.history.filter((h) => h.id !== d.id) } : null;
+      ctx.profile = profiles.get(d.clientId ?? o?.clientId ?? "") ?? null;
     }
     if (d.kind === "instagram_post" || d.kind === "tiktok_post") ctx.post = posts.find((p) => p.id === String(d.meta.postId)) ?? null;
     if (d.kind === "lead_email" || d.kind === "lead_dm") ctx.lead = leadRows.find((l) => l.id === String(d.meta.leadId)) ?? null;

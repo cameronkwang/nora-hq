@@ -10,7 +10,6 @@ import { ActionForm, SubmitButton } from "@/components/client-form";
 import { CreatorFilterChips, CreatorList, filterOutreach, type CreatorFilter } from "@/components/client-creators";
 import { ViewsChart, type ViewsPoint } from "@/components/views-chart";
 import { TaskRow, isOverdue } from "@/components/task-row";
-import { isAdHocTask } from "@/lib/ops-tasks";
 import type { Task } from "@/lib/schema";
 import { generateChecklistAction, quickAddTaskAction, saveMetricsAction } from "../actions";
 import { monthBounds } from "@/lib/integrations/time";
@@ -25,6 +24,12 @@ import { ClientIntakeCard } from "@/components/client-intake-card";
 import { PASSWORD_WARNING, hasSecret } from "@/lib/credential-guard";
 import { ActiveToggle } from "./settings/active-toggle";
 import { setBusinessActiveAction } from "./settings/actions";
+import { ClientGoogleSync } from "@/components/google-sync-status";
+import { groupPlanTasks, isPlanTask, type PlanGroup } from "@/lib/plan-groups";
+import { PlanTaskGroups } from "@/components/plan-task-groups";
+import { LaunchCard } from "@/components/launch-card";
+import { ClientDropCard } from "@/components/client-drop-card";
+import { LAUNCH_TAG, launchInfo, planHoldLine } from "@/lib/launch";
 
 export const dynamic = "force-dynamic";
 
@@ -52,7 +57,9 @@ export default async function ClientPage({
   if (data.client.kind === "creator") return <CreatorWorkspace data={data} month={month} now={now} />;
   const { client, plan, outreach, metrics, posts } = data;
   // While Getting started is showing, its steps live in that card rather than twice on the page.
-  const openTasks = onboarding.active ? data.openTasks.filter((t) => t.tag !== "onboarding") : data.openTasks;
+  // Not open yet: the launch steps live in the Launch checklist card, and the monthly plan waits for opening day.
+  const launch = launchInfo(client);
+  const openTasks = data.openTasks.filter((t) => !(onboarding.active && t.tag === "onboarding") && !(launch.prelaunch && t.tag === LAUNCH_TAG));
 
   // Month edges in the app timezone (America/New_York), matching the calendar and Instagram insights.
   const { start: monthStart, end: nextStart } = monthBounds(month);
@@ -97,6 +104,7 @@ export default async function ClientPage({
             <h1 className="text-2xl font-semibold tracking-tight">
               {client.name}
               {client.archived && <Badge className="ml-2 align-middle">Inactive</Badge>}
+              {launch.prelaunch && <Badge tone="info" className="ml-2 align-middle">Pre-launch</Badge>}
             </h1>
             <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
               {client.location && <span className="text-muted">{client.location}</span>}
@@ -119,6 +127,8 @@ export default async function ClientPage({
                 <Link href={`/clients/${client.id}/settings`} className="text-accent hover:underline">Add social handles</Link>
               )}
             </div>
+            {/* What the last Google review sync found for THIS business (not the account-wide "Connected"). */}
+            <ClientGoogleSync client={client} prefix="Google reviews" className="mt-2" />
           </div>
           <div className="flex flex-wrap gap-2 self-start">
             <LinkButton href={`/reports?client=${client.id}`} size="sm">Reports</LinkButton>
@@ -163,11 +173,16 @@ export default async function ClientPage({
           </Card>
         )}
 
+        <LaunchCard client={client} />
+
         <ClientIntakeCard clientId={client.id} clientName={client.name} />
+
+        {/* Owner drop link: the owner's private page for sending a flyer or photo + "what's the deal, when does it end". */}
+        <ClientDropCard clientId={client.id} clientName={client.name} inactive={client.archived} />
 
         <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
           {/* a. Plan */}
-          <PlanCard clientId={client.id} plan={plan} month={month} now={now} />
+          <PlanCard clientId={client.id} plan={plan} month={month} now={now} holdNote={planHoldLine(client.name, launch) || undefined} />
 
           {/* b. Outstanding */}
           <OutstandingCard
@@ -178,7 +193,7 @@ export default async function ClientPage({
             now={now}
             pendingDrafts={data.pendingDrafts}
             unrepliedReviews={data.unrepliedReviews}
-            needsChecklist={needsChecklist && plan.length > 0}
+            needsChecklist={needsChecklist && plan.length > 0 && !launch.planOnHold}
             defaultAssignee={assigneeFor(user)}
           />
         </div>
@@ -331,7 +346,7 @@ function MetricTile({ label, value, prev, prevLabel, synced }: { label: string; 
 }
 
 
-function PlanCard({ clientId, plan, month, now }: { clientId: string; plan: ClientMonth["plan"]; month: string; now: string }) {
+function PlanCard({ clientId, plan, month, now, holdNote }: { clientId: string; plan: ClientMonth["plan"]; month: string; now: string; /** Pre-launch: why no checklist is created yet. */ holdNote?: string }) {
   const mon = monthLabel(month, "long");
   const needsChecklist = plan.some((p) => p.planned < Math.max(1, p.target));
   const totalTarget = plan.reduce((a, p) => a + p.target, 0);
@@ -373,7 +388,8 @@ function PlanCard({ clientId, plan, month, now }: { clientId: string; plan: Clie
               </li>
             ))}
           </ul>
-          {needsChecklist && (
+          {holdNote && <p className="mt-4 rounded-lg bg-surface-2 p-3 text-xs text-muted">{holdNote}</p>}
+          {needsChecklist && !holdNote && (
             <form action={generateChecklistAction.bind(null, clientId, month)} className="mt-4 rounded-lg bg-surface-2 p-3">
               <p className="mb-2 text-xs text-muted">
                 Turn the plan into tasks for {mon} so progress can be tracked. Only adds what&apos;s missing.
@@ -387,7 +403,7 @@ function PlanCard({ clientId, plan, month, now }: { clientId: string; plan: Clie
   );
 }
 
-function OutstandingCard({
+async function OutstandingCard({
   clientId,
   clientName,
   openTasks,
@@ -411,15 +427,14 @@ function OutstandingCard({
   placeholder?: string;
 }) {
   const mon = monthLabel(month, "long");
-  /* outstanding: the plan checklist vs one-off (ad hoc) work. Ad hoc goes first when any of it is overdue. */
-  const adHoc = openTasks.filter(isAdHocTask);
-  const checklist = openTasks.filter((t) => !isAdHocTask(t));
-  const adHocFirst = adHoc.some((t) => isOverdue(t));
-  const sections = [
-    { key: "checklist", title: `${month === now ? "This month's" : `${mon}'s`} checklist`, tasks: checklist },
-    { key: "adhoc", title: "Ad hoc", tasks: adHoc },
-  ];
-  if (adHocFirst) sections.reverse();
+  /*
+   * Outstanding: real (ad hoc) tasks are listed as they are, on top. The monthly plan's slots sit underneath,
+   * condensed to one collapsible row per plan item ("Instagram feed posts · 3 of 8 ▸") so they can't bury them.
+   */
+  const real = openTasks.filter((t) => !isPlanTask(t));
+  const planTasks = openTasks.filter(isPlanTask);
+  const planGroups: PlanGroup[] = await groupPlanTasks(planTasks);
+  const planOverdue = planTasks.filter((t) => isOverdue(t)).length;
   return (
     <Card title={`Outstanding${openTasks.length ? ` (${openTasks.length})` : ""}`} padded={false}>
       {(pendingDrafts > 0 || unrepliedReviews > 0) && (
@@ -444,9 +459,17 @@ function OutstandingCard({
           </EmptyState>
         ) : (
           <div className="flex flex-col gap-5">
-            {sections.filter((sec) => sec.tasks.length > 0).map((sec) => (
-              <OutstandingSection key={sec.key} title={sec.title} tasks={sec.tasks} month={month} clientName={clientName} />
-            ))}
+            {real.length > 0 && <OutstandingSection title="Ad hoc" tasks={real} month={month} clientName={clientName} />}
+            {planGroups.length > 0 && (
+              <section>
+                <h3 className="mb-1 flex items-baseline gap-2 text-xs font-semibold uppercase tracking-wide text-muted">
+                  {month === now ? "This month's" : `${mon}'s`} checklist
+                  <span className="font-normal normal-case tracking-normal tabular-nums">· {planTasks.length} left</span>
+                  {planOverdue > 0 && <span className="font-medium normal-case tracking-normal text-danger">{planOverdue} overdue</span>}
+                </h3>
+                <PlanTaskGroups groups={planGroups} month={month} />
+              </section>
+            )}
           </div>
         )}
       </div>

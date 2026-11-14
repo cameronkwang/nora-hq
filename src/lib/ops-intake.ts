@@ -448,6 +448,17 @@ export async function submitIntake(token: string, input: Record<string, unknown>
   if (ig && empty(client.instagramHandle)) fill.instagramHandle = ig;
   if (tt && empty(client.tiktokHandle)) fill.tiktokHandle = tt;
   if (a.contactEmail && empty(client.ownerEmail)) fill.ownerEmail = a.contactEmail;
+  // Outreach profile, fill-only, and only on a clear "Yes" to creators: what they ticked (our own option labels, never
+  // typed text) becomes the standing offer, and outreach goes out from the business's own Instagram (else TikTok).
+  if (a.creatorsOk === "yes") {
+    if (a.creatorOffer.length && empty(client.creatorOffer)) fill.creatorOffer = labels("creatorOffer", a.creatorOffer);
+    const sender = fill.instagramHandle ?? client.instagramHandle ?? null;
+    const senderTt = fill.tiktokHandle ?? client.tiktokHandle ?? null;
+    if (empty(client.sendFrom) && (sender || senderTt)) {
+      fill.sendFrom = `@${sender ?? senderTt}`;
+      fill.sendFromKind = sender ? "instagram" : "tiktok";
+    }
+  }
   // Accounts the owner gave us (page 2 only asks for the ones we couldn't find): saved with "the owner" as the source.
   const have = businessFacts(client);
   const fb = a.facebook && !have.facebook && a.facebook.length <= 300 && FB_LINK.test(a.facebook) ? a.facebook : null;
@@ -465,7 +476,7 @@ export async function submitIntake(token: string, input: Record<string, unknown>
   fill.notes = empty(client.notes) ? summary : `${client.notes!.trimEnd()}\n\n${summary}`;
   try {
     await db.update(schema.clients).set(fill).where(eq(schema.clients.id, client.id));
-    const filled = [...Object.keys(fill).filter((k) => k !== "notes" && k !== "publicInfo"), ...(fb ? ["Facebook Page"] : [])];
+    const filled = [...Object.keys(fill).filter((k) => k !== "notes" && k !== "publicInfo" && k !== "sendFromKind"), ...(fb ? ["Facebook Page"] : [])];
     await logActivity({
       actor, action: "client.updated", entityType: "client", entityId: client.id, clientId: client.id,
       summary: `Onboarding form added notes${filled.length ? ` and filled ${filled.join(", ")}` : ""}`,
