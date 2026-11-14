@@ -8,7 +8,10 @@ import { ScheduleItemForm } from "./schedule-item-form";
 import { ScheduleSheet } from "./schedule-sheet";
 import { Badge, EmptyState, cx } from "./ui";
 
-/** One row of Nora's schedule as the page hands it to the browser. No money — the table has none. */
+/**
+ * One row of Nora's schedule as the page hands it to the browser. No money — the table has none. A job that
+ * was made into a deal carries the deal's id and whether it's paid; the amount stays on the deal.
+ */
 export type ScheduleEntry = {
   id: string;
   month: string;
@@ -19,6 +22,8 @@ export type ScheduleEntry = {
   isFree: boolean;
   needsReel: boolean;
   reelPostedAt: string | null;
+  dealId: string | null;
+  payment: "paid" | "not_paid" | null;
 };
 export type ScheduleFilter = "all" | "reels" | "free";
 
@@ -161,6 +166,7 @@ function Row({ item, onEdit, hideDate, showMonth }: { item: ScheduleEntry; onEdi
             <span className="text-sm font-medium">{item.businessName}</span>
           )}
           {item.isFree && <Badge tone="ok">Free</Badge>}
+          {item.dealId && <DealBadge item={item} />}
         </span>
         {((!hideDate && when) || showMonth) && <span className="block text-xs text-muted">{when}</span>}
       </span>
@@ -174,6 +180,16 @@ function Row({ item, onEdit, hideDate, showMonth }: { item: ScheduleEntry; onEdi
         Edit
       </button>
     </li>
+  );
+}
+
+/** Payment status of the job's deal — Paid / Not paid, never an amount. Opens the deal. */
+function DealBadge({ item }: { item: ScheduleEntry }) {
+  const label = item.payment === "paid" ? "Paid" : item.payment === "not_paid" ? "Not paid" : "Deal";
+  return (
+    <Link href={`/deals/${item.dealId}`} className="inline-flex min-h-11 items-center md:min-h-0" aria-label={`${label} — open the ${item.businessName} deal`}>
+      <Badge tone={item.payment === "paid" ? "ok" : item.payment === "not_paid" ? "warn" : "neutral"}>{label}</Badge>
+    </Link>
   );
 }
 
@@ -242,7 +258,7 @@ function ScheduleGrid({ month, items, todayStr, onOpen }: { month: string; items
                         key={it.id}
                         type="button"
                         onClick={() => onOpen(it)}
-                        title={`${it.businessName}${it.isFree ? " · Free" : ""}${owesReel(it) ? " · Reel to post" : it.reelPostedAt ? " · Reel posted" : ""}`}
+                        title={`${it.businessName}${it.isFree ? " · Free" : ""}${it.payment === "paid" ? " · Paid" : it.payment === "not_paid" ? " · Not paid" : ""}${owesReel(it) ? " · Reel to post" : it.reelPostedAt ? " · Reel posted" : ""}`}
                         className={cx(
                           "flex min-w-0 items-center gap-1 rounded px-1.5 py-0.5 text-left text-[11px] font-medium",
                           owesReel(it) ? "bg-warn-soft text-warn" : "bg-surface-2 text-text hover:bg-accent-soft",

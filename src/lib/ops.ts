@@ -12,6 +12,8 @@ import { postReviewKey } from "./post-key";
 import { notifyDraftCreated } from "./notify";
 import type { IntegrationResult } from "./integrations/types";
 import { forgetFactProvenance } from "./business-facts";
+import { GOOGLE_SYNC_RESET } from "./ops-google";
+import { publicUrl } from "./outreach-profile";
 
 /**
  * The ONLY place that mutates data. Both the web UI (server actions) and the Claude connector (MCP tools)
@@ -79,6 +81,11 @@ export async function updateClient(id: string, patch: Partial<z.input<typeof Cli
   }
   if (Object.keys(set).length === 0) return;
   const fields = Object.keys(set);
+  // A different Google listing: the last review-sync result described the old one, so clear it (shows "Not synced yet").
+  if ("googleLocation" in set) {
+    const [was] = await db.select({ googleLocation: schema.clients.googleLocation }).from(schema.clients).where(eq(schema.clients.id, id));
+    if (was && (was.googleLocation ?? null) !== (set.googleLocation ?? null)) Object.assign(set, GOOGLE_SYNC_RESET);
+  }
   // A website or handle that really changed here no longer has the source (or "not found" mark) saved with the old one.
   const factCols = { website: "website", instagramHandle: "instagram", tiktokHandle: "tiktok" } as const;
   if ((Object.keys(factCols) as Array<keyof typeof factCols>).some((c) => c in set)) {
@@ -423,6 +430,14 @@ export async function createDraft(input: z.input<typeof DraftInput>, actor = "cl
       else delete v.meta.profileUrl;
     }
   }
+  if (v.kind === "profile_copy") {
+    // A bio / Google description a person pastes in by hand: a known surface, within that platform's length limit.
+    if (!v.clientId) throw new OpsError("profile_copy drafts need clientId");
+    const { assertProfileCopy } = await import("./ops-launch");
+    const ok = assertProfileCopy(v.meta, v.body);
+    v.body = ok.body;
+    v.meta = { ...v.meta, surface: ok.surface };
+  }
   if (v.kind === "instagram_post" || v.kind === "tiktok_post") {
     if (!v.meta.postId) {
       if (!v.clientId) throw new OpsError("post drafts need clientId");
@@ -468,6 +483,11 @@ export async function reviseDraft(id: string, patch: { body?: string; title?: st
       patch = { ...patch, meta: { ...patch.meta, channel, profileUrl: url ?? undefined } };
     }
   }
+  if (cur.kind === "profile_copy" && (patch.body !== undefined || patch.meta !== undefined)) {
+    // Claude's revision must fit the platform's limit. A person may save a longer work in progress: approving it is what's refused.
+    const { assertProfileCopy } = await import("./ops-launch");
+    assertProfileCopy({ ...cur.meta, ...patch.meta }, patch.body ?? cur.body, { length: actor === "claude" });
+  }
   const set: Partial<typeof schema.drafts.$inferInsert> = { updatedAt: new Date() };
   if (patch.body !== undefined) set.body = patch.body;
   if (patch.title !== undefined) set.title = patch.title;
@@ -510,6 +530,11 @@ export async function approveDraft(id: string, actor: string, opts: { body?: str
     const { reportForDraft } = await import("./ops-reports");
     await reportForDraft(cur);
   }
+  if (cur.kind === "profile_copy") {
+    // A bio / Google description over the platform's limit can't be pasted in: refuse before it's marked approved.
+    const { assertProfileCopy } = await import("./ops-launch");
+    assertProfileCopy(cur.meta, opts.body ?? cur.body);
+  }
   if ((cur.kind === "instagram_post" || cur.kind === "tiktok_post") && cur.meta.postId) {
     // The reviewer approved what the review page showed them. If the post's media, time or format changed since
     // (e.g. Claude edited it), refuse rather than schedule something the person never saw.
@@ -542,6 +567,13 @@ export async function approveDraft(id: string, actor: string, opts: { body?: str
     }
     case "outreach_email": {
       const [o] = await db.select().from(schema.outreach).where(eq(schema.outreach.id, String(draft.meta.outreachId)));
+      // Outreach goes out from the business's own account, never Nora's. The connected Gmail inbox only sends it
+      // when that inbox IS the business's saved sender (or no sender is saved yet); otherwise a person sends it.
+      const { outreachEmailPlan } = await import("./ops-outreach");
+      const plan = await outreachEmailPlan(draft.clientId ?? o?.clientId ?? null);
+      if (!plan.auto && plan.sendFrom) {
+        return { status: "approved", message: `Approved. Not emailed automatically: send it from ${plan.sendFrom} (not Nora's), then tap “Mark sent”.` };
+      }
       return finish(
         await sendOutreachEmail({ to: String(draft.meta.to), subject: String(draft.meta.subject), body: draft.body, threadId: o?.gmailThreadId }),
         `Email sent to ${String(draft.meta.to)}.`,
@@ -583,6 +615,11 @@ export async function approveDraft(id: string, actor: string, opts: { body?: str
       // Marks the client report approved. Never sends: a person sends it from the business's Reports page.
       const { onReportDraftApproved } = await import("./ops-reports");
       return onReportDraftApproved(draft, actor);
+    }
+    case "profile_copy": {
+      // Never posted by the app: a person pastes it into the profile, then marks it done.
+      const { profileCopyApprovedMessage } = await import("./ops-launch");
+      return { status: "approved", message: profileCopyApprovedMessage(draft.meta) };
     }
     default:
       return { status: "approved", message: "Approved." };
@@ -700,9 +737,24 @@ export const CreatorInput = z.object({
   doNotContact: z.boolean().optional(),
   notes: z.string().nullish(),
   source: z.string().nullish(),
+  /** The public page the follower numbers were actually read from (https://www.tiktok.com/@x). Stamps statsCheckedAt. */
+  statsSource: z.string().max(600).nullish(),
 });
 
-/** Creates or updates a creator; de-dupes on IG handle, TikTok handle, or email. */
+/** The stats source as stored: a public web address, or null. undefined = not passed. Throws when it isn't a public link. */
+function statsSourceOf(raw: string | null | undefined): string | null | undefined {
+  if (raw === undefined) return undefined;
+  if (!d(raw)) return null;
+  const url = publicUrl(raw);
+  if (!url) throw new OpsError("The stats source must be the public web address the numbers were read from (https://…).");
+  return url;
+}
+
+/**
+ * Creates or updates a creator; de-dupes on IG handle, TikTok handle, or email.
+ * Creator check: passing statsSource (the public page the numbers were read from) stamps "checked now". Numbers that
+ * change without one (an import, a pasted sheet) lose the old check, because it vouched for the old numbers.
+ */
 export async function upsertCreator(input: z.input<typeof CreatorInput>, actor: string) {
   const v = CreatorInput.parse(input);
   const db = await getDb();
@@ -713,6 +765,12 @@ export async function upsertCreator(input: z.input<typeof CreatorInput>, actor: 
   if (!existing && tt) [existing] = await db.select().from(schema.creators).where(eq(schema.creators.tiktokHandle, tt));
   if (!existing && email) [existing] = await db.select().from(schema.creators).where(eq(schema.creators.email, email));
   const statsTouched = v.instagramFollowers != null || v.tiktokFollowers != null || v.engagementRate != null;
+  const statsSource = statsSourceOf(v.statsSource);
+  const statsMoved = !!existing && (
+    (v.instagramFollowers != null && v.instagramFollowers !== existing.instagramFollowers) ||
+    (v.tiktokFollowers != null && v.tiktokFollowers !== existing.tiktokFollowers) ||
+    (v.engagementRate != null && v.engagementRate !== existing.engagementRate)
+  );
   const values = {
     name: v.name.trim(),
     ...(ig || !existing ? { instagramHandle: ig ?? existing?.instagramHandle ?? null } : {}),
@@ -724,6 +782,7 @@ export async function upsertCreator(input: z.input<typeof CreatorInput>, actor: 
     ...(v.tiktokFollowers != null ? { tiktokFollowers: v.tiktokFollowers } : {}),
     ...(v.engagementRate != null ? { engagementRate: v.engagementRate } : {}),
     ...(statsTouched ? { statsUpdatedAt: new Date() } : {}),
+    ...(statsSource ? { statsCheckedAt: new Date(), statsSource } : statsMoved ? { statsCheckedAt: null, statsSource: null } : {}),
     ...(v.doNotContact !== undefined ? { doNotContact: v.doNotContact } : {}),
     ...(v.notes !== undefined ? { notes: d(v.notes) } : {}),
     ...(v.source !== undefined ? { source: d(v.source) } : {}),
@@ -748,13 +807,20 @@ export const OutreachInput = z.object({
   compType: z.enum(["gifted", "paid", "affiliate", "tbd"]).optional(),
   notes: z.string().nullish(),
   postUrl: z.string().nullish(),
+  /** A post the creator had ALREADY made about this business before we reached out ("already featured"). Empty clears it. */
+  priorPostUrl: z.string().max(600).nullish(),
   disclosureOk: z.boolean().nullish(),
   nextFollowUpAt: z.coerce.date().nullish(),
 });
 
-/** One relationship per (business, creator). Stage changes bump lastActivityAt. */
+/**
+ * One relationship per (business, creator). Stage changes bump lastActivityAt.
+ * priorPostUrl records a post they'd already made about the business (no contact needed): they aren't pitched again.
+ */
 export async function upsertOutreach(input: z.input<typeof OutreachInput>, actor: string) {
   const v = OutreachInput.parse(input);
+  const prior = v.priorPostUrl === undefined ? undefined : d(v.priorPostUrl) ? publicUrl(v.priorPostUrl) : null;
+  if (d(v.priorPostUrl) && !prior) throw new OpsError("The earlier post must be a public link to the post itself (https://…).");
   const db = await getDb();
   const [creator] = await db.select().from(schema.creators).where(eq(schema.creators.id, v.creatorId));
   if (!creator) throw new OpsError("creator not found");
@@ -768,19 +834,23 @@ export async function upsertOutreach(input: z.input<typeof OutreachInput>, actor
     if (v.compType) set.compType = v.compType;
     if (v.notes !== undefined) set.notes = d(v.notes);
     if (v.postUrl !== undefined) set.postUrl = d(v.postUrl);
+    const priorChanged = prior !== undefined && prior !== existing.priorPostUrl;
+    if (priorChanged) { set.priorPostUrl = prior; set.priorPostFoundAt = prior ? now : null; }
     if (v.disclosureOk !== undefined) set.disclosureOk = v.disclosureOk;
     if (v.nextFollowUpAt !== undefined) set.nextFollowUpAt = v.nextFollowUpAt;
     await db.update(schema.outreach).set(set).where(eq(schema.outreach.id, existing.id));
-    await logActivity({ actor, action: "outreach.updated", entityType: "outreach", entityId: existing.id, clientId: v.clientId, summary: `${creator.name}: ${v.stage ? `→ ${v.stage.replace("_", " ")}` : "updated"}` });
+    const what = [v.stage ? `→ ${v.stage.replace("_", " ")}` : null, priorChanged ? (prior ? "already posted about this business (earlier post saved)" : "earlier post removed") : null].filter(Boolean).join("; ");
+    await logActivity({ actor, action: "outreach.updated", entityType: "outreach", entityId: existing.id, clientId: v.clientId, summary: `${creator.name}: ${what || "updated"}` });
     return existing.id;
   }
   const id = newId("out_");
   await db.insert(schema.outreach).values({
     id, clientId: v.clientId, creatorId: v.creatorId, channel: v.channel, stage: v.stage ?? "sourced", compType: v.compType ?? "tbd",
     notes: d(v.notes), postUrl: d(v.postUrl), disclosureOk: v.disclosureOk ?? null, nextFollowUpAt: v.nextFollowUpAt ?? null,
+    priorPostUrl: prior ?? null, priorPostFoundAt: prior ? now : null,
     contactedAt: contacting ? now : null, lastActivityAt: now,
   });
-  await logActivity({ actor, action: "outreach.created", entityType: "outreach", entityId: id, clientId: v.clientId, summary: `${creator.name} added to outreach (${v.channel.replace("_", " ")})` });
+  await logActivity({ actor, action: "outreach.created", entityType: "outreach", entityId: id, clientId: v.clientId, summary: `${creator.name} added to outreach (${v.channel.replace("_", " ")})${prior ? " — already posted about this business" : ""}` });
   return id;
 }
 
@@ -822,9 +892,13 @@ export async function upsertReviews(rows: Array<Omit<typeof schema.reviews.$infe
 /**
  * Turns a client's monthly plan into concrete tasks for `month`, topping up to each deliverable's target.
  * Idempotent: re-running only adds what's missing. targetPerMonth 0 ("as needed") yields one umbrella task.
+ * A business that isn't open yet (Pre-launch, opening day still ahead) gets none: returns 0.
  */
 export async function generateMonthTasks(clientId: string, month: string, actor: string) {
   if (!isMonth(month)) throw new OpsError("month must be YYYY-MM");
+  // Pre-launch: no monthly-plan tasks until opening day (the launch checklist is the work until then). See lib/ops-launch.
+  const { planHold } = await import("./ops-launch");
+  if ((await planHold(clientId))?.planOnHold) return 0;
   const db = await getDb();
   const dels = await db.select().from(schema.deliverables)
     .where(and(eq(schema.deliverables.clientId, clientId), eq(schema.deliverables.active, true)));
@@ -886,7 +960,18 @@ export async function updateCreator(id: string, input: Omit<Partial<z.input<type
   if (v.instagramFollowers !== undefined && (v.instagramFollowers ?? null) !== cur.instagramFollowers) { set.instagramFollowers = v.instagramFollowers ?? null; statsChanged = true; }
   if (v.tiktokFollowers !== undefined && (v.tiktokFollowers ?? null) !== cur.tiktokFollowers) { set.tiktokFollowers = v.tiktokFollowers ?? null; statsChanged = true; }
   if (v.engagementRate !== undefined && (v.engagementRate ?? null) !== cur.engagementRate) { set.engagementRate = v.engagementRate ?? null; statsChanged = true; }
-  if (statsChanged) set.statsUpdatedAt = new Date();
+  // Creator check. New numbers typed by a person were read somewhere, so that counts as a check (with the link they
+  // gave, if any; the old link vouched for the old numbers). Anyone else changing numbers without a link clears it.
+  const statsSource = statsSourceOf(v.statsSource);
+  if (statsChanged) {
+    set.statsUpdatedAt = new Date();
+    const person = actor !== "claude" && actor !== "system" && actor !== "public";
+    set.statsCheckedAt = person || statsSource ? new Date() : null;
+    set.statsSource = statsSource ?? null;
+  } else if (statsSource !== undefined && statsSource !== cur.statsSource) {
+    set.statsSource = statsSource;
+    if (statsSource) set.statsCheckedAt = new Date();
+  }
   if (Object.keys(set).length === 0) return id;
   await db.update(schema.creators).set(set).where(eq(schema.creators.id, id));
   const name = set.name ?? cur.name;

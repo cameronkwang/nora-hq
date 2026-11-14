@@ -8,6 +8,10 @@ import { postReviewKey } from "@/lib/post-key";
 import { MediaStrip } from "./calendar-media";
 import { MANUAL_SEND_KINDS, asksForPlatformReview, hasDisclosureLanguage, kindLabel } from "./draft-checks";
 import { firstName, type ReplyCategory, type ReplyContext } from "./reply-fill";
+import { alreadyPosted, draftChannel, readsAsNora, sendFromText } from "@/lib/outreach-profile";
+import { CreatorCheckLine, SenderChip } from "./outreach-sender";
+import { PROFILE_COPY_LINK, PROFILE_COPY_PLATFORM, PROFILE_COPY_WHERE, profileCopySurface } from "@/lib/profile-copy";
+import { PROFILE_COPY_LIMITS } from "@/lib/schema";
 
 const KIND_PLATFORM: Record<string, string> = {
   instagram_post: "instagram",
@@ -47,6 +51,8 @@ function OutreachPanel({ o, draft, clientName }: { o: OutreachContext; draft: Dr
         <StatusBadge status={o.stage} />
         {o.compType !== "tbd" && <Badge tone="neutral">{humanize(o.compType)}</Badge>}
       </div>
+      {/* Creator check: their numbers, when they were last read from the public page, and whether they already posted about this business. */}
+      <CreatorCheckLine creator={c} channel={draftChannel(draft.kind, draft.meta)} posted={alreadyPosted(o)} business={clientName(draft.clientId ?? o.clientId)} />
       <dl className="grid gap-1.5 sm:grid-cols-2">
         {c.instagramHandle && (
           <Row label="Instagram">
@@ -208,6 +214,12 @@ function manualLinks(draft: Draft, ctx: DraftContext, clientName: (id: string | 
     links.push({ href: `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(clientName(draft.clientId))}`, label: "Open in Google Maps" });
   }
   if (draft.kind === "comment_reply" && typeof draft.meta.permalink === "string") links.push({ href: draft.meta.permalink, label: "Open post" });
+  if (draft.kind === "profile_copy") {
+    // Where the approved text gets pasted (the business's own account has to be signed in there).
+    const surface = profileCopySurface(draft.meta);
+    const link = surface ? PROFILE_COPY_LINK[surface] : undefined;
+    if (link) links.push(link);
+  }
   return links.length ? (
     <>
       {links.map((l) => (
@@ -245,6 +257,7 @@ export function DraftCard({
   personName,
   returnTo,
   gmailConnected,
+  gmailAddress,
   highlight,
 }: {
   draft: Draft;
@@ -253,16 +266,24 @@ export function DraftCard({
   personName: (actor: string | null) => string;
   returnTo: string;
   gmailConnected: boolean;
+  /** The connected Gmail outreach inbox (outreach emails are only auto-sent when it is the business's saved sender). */
+  gmailAddress?: string | null;
   highlight?: boolean;
 }) {
   const isOutreach = draft.kind === "outreach_email" || draft.kind === "outreach_dm";
-  const platform = draft.kind === "outreach_dm" || draft.kind === "lead_dm" ? String(draft.meta.channel ?? "instagram_dm") : KIND_PLATFORM[draft.kind];
+  // Profile text (a bio / Google description): where it gets pasted, and that platform's length limit.
+  const profileSurface = draft.kind === "profile_copy" ? profileCopySurface(draft.meta) : null;
+  const platform =
+    draft.kind === "outreach_dm" || draft.kind === "lead_dm" ? String(draft.meta.channel ?? "instagram_dm") : profileSurface ? PROFILE_COPY_PLATFORM[profileSurface] : KIND_PLATFORM[draft.kind];
   const manualKind = (MANUAL_SEND_KINDS as readonly string[]).includes(draft.kind);
   const mode =
     draft.status === "needs_review" ? "review" : draft.status === "failed" ? "failed" : draft.status === "approved" && manualKind ? "approved" : "readonly";
   const reply = replyContextFor(draft, ctx, clientName);
   const reportAudience = draft.meta.audience === "internal" || ctx.report?.audience === "internal" ? "internal" : "external";
   const hasContext = ["review_reply", "outreach_email", "outreach_dm", "lead_email", "lead_dm", "instagram_post", "tiktok_post", "comment_reply"].includes(draft.kind);
+  // Creator outreach is written as the business and sent from its own account (the outreach profile), never Nora's.
+  const profile = isOutreach ? (ctx.profile ?? null) : null;
+  const postedAlready = isOutreach && ctx.outreach ? alreadyPosted(ctx.outreach) : null;
 
   return (
     <article id={`d-${draft.id}`} className={cx("scroll-mt-20 rounded-xl border bg-surface", highlight ? "border-accent ring-2 ring-accent-soft" : "border-border")}>
@@ -275,6 +296,8 @@ export function DraftCard({
           {draft.status !== "needs_review" && <StatusBadge status={draft.status} />}
           {isOutreach && asksForPlatformReview(draft.body) && <Badge tone="danger">Asks for a review</Badge>}
           {isOutreach && !hasDisclosureLanguage(draft.body) && <Badge tone="warn">No disclosure</Badge>}
+          {isOutreach && draft.status !== "sent" && postedAlready && <Badge tone="danger">Already featured</Badge>}
+          {isOutreach && draft.status !== "sent" && readsAsNora(draft.body) && <Badge tone="warn">Reads as Nora</Badge>}
         </div>
         <h3 className="break-words text-base font-semibold">{draft.title}</h3>
         <p className="text-xs text-muted">
@@ -285,6 +308,13 @@ export function DraftCard({
         </p>
       </header>
 
+      {/* Outreach: which account it goes out from (the business's own, never Nora's) and the standing offer. */}
+      {profile && draft.status !== "sent" && (
+        <div className="px-4 pt-4">
+          <SenderChip profile={profile} channel={draftChannel(draft.kind, draft.meta)} gmailAddress={gmailAddress} pending={draft.status === "needs_review" || draft.status === "failed"} />
+        </div>
+      )}
+
       <div className={cx("grid gap-4 p-4", hasContext && "lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]")}>
         {hasContext && (
           <div className="min-w-0 rounded-lg bg-surface-2/50 lg:border-r lg:border-border lg:pr-4">
@@ -292,6 +322,11 @@ export function DraftCard({
           </div>
         )}
         <div className="flex min-w-0 flex-col gap-3">
+          {profileSurface && draft.status === "needs_review" && (
+            <p className="rounded-lg bg-surface-2 px-3 py-2 text-sm text-muted">
+              Goes in <span className="font-medium text-text">{PROFILE_COPY_WHERE[profileSurface]}</span> · {PROFILE_COPY_LIMITS[profileSurface]} characters max. Nothing is changed on the profile until you paste it in.
+            </p>
+          )}
           {draft.status === "failed" && draft.error && (
             <p role="alert" className="rounded-lg bg-danger-soft px-3 py-2 text-sm text-danger">
               Sending failed: {draft.error}
@@ -305,10 +340,14 @@ export function DraftCard({
           )}
           {mode === "approved" && (
             <p className="rounded-lg bg-warn-soft px-3 py-2 text-sm text-warn">
-              {draft.kind === "outreach_email" || draft.kind === "lead_email"
+              {profile?.sendFrom
+                ? `Copy it, send it from ${sendFromText(profile, draftChannel(draft.kind, draft.meta))} (not Nora's), then click “Mark sent”.`
+                : draft.kind === "outreach_email" || draft.kind === "lead_email"
                 ? gmailConnected
                   ? "Approved but not sent. Send it from your email, then click “Mark sent”."
                   : "Gmail isn't connected — send this from your email, then click “Mark sent”."
+                : draft.kind === "profile_copy"
+                  ? `Copy it, paste it into ${profileSurface ? PROFILE_COPY_WHERE[profileSurface] : "the profile"}, then click “Mark done”.`
                 : draft.kind === "review_reply"
                   ? "Copy the reply, post it on Google, then click “Mark sent”."
                   : draft.kind === "report"

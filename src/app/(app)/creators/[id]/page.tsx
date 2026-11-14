@@ -8,8 +8,9 @@ import { ActionForm, SubmitButton } from "@/components/client-form";
 import { CreatorCopyButton } from "@/components/creator-copy";
 import { CreatorFields } from "@/components/creator-fields";
 import { ChannelSelect, CompSelect, StageSelect } from "@/components/outreach-fields";
-import { Badge, Card, EmptyState, PageHeader, PlatformTag, StatusBadge, clientLabel, formatNumber, humanize } from "@/components/ui";
-import { addOutreachAction, saveOutreachAction, setDoNotContactAction, updateCreatorAction } from "../actions";
+import { Badge, Card, EmptyState, PageHeader, PlatformTag, StatusBadge, clientLabel, cx, formatNumber, humanize } from "@/components/ui";
+import { shortUrl, statsCheck } from "@/lib/outreach-profile";
+import { addOutreachAction, markStatsCheckedAction, saveOutreachAction, setDoNotContactAction, updateCreatorAction } from "../actions";
 import { AGREED_STAGES, COMP_LABEL, getCreatorDetail, igDmUrl, igProfileUrl, isFollowUpDue, ttProfileUrl, type OutreachWithClient } from "../queries";
 
 export const dynamic = "force-dynamic";
@@ -27,6 +28,7 @@ export default async function CreatorPage({ params, searchParams }: { params: Pr
   const flash = one(sp.merged) ? "They were already in the roster, so we updated their existing profile." : one(sp.added) ? "Creator added." : "";
   const available = clients.filter((cl) => !outreach.some((o) => o.clientId === cl.id));
   const draftsFor = (o: OutreachWithClient) => drafts.filter((d) => d.meta.outreachId === o.id);
+  const check = statsCheck(c, now);
 
   return (
     <>
@@ -102,6 +104,21 @@ export default async function CreatorPage({ params, searchParams }: { params: Pr
             <p className="mt-3 text-xs text-muted">
               {c.statsUpdatedAt ? `Updated ${formatDate(c.statsUpdatedAt)} (${relativeTime(c.statsUpdatedAt, now)})` : "Not recorded yet."} Follower counts change — refresh before pitching.
             </p>
+            {/* Creator check: when the numbers were last read from their public page. Outreach drafts warn when it's never or over 30 days. */}
+            <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-border pt-3">
+              <p className={cx("min-w-0 break-words text-sm", check.state === "fresh" ? "text-muted" : "font-medium text-warn")}>
+                {check.state === "never" ? "Never checked against their page" : `${check.label.replace(/^c/, "C")}${check.state === "stale" ? " (over 30 days)" : ""}`}
+                {c.statsSource && check.state !== "never" && (
+                  <>
+                    {" · "}
+                    <a href={c.statsSource} target="_blank" rel="noopener noreferrer nofollow" className="font-normal text-accent hover:underline">{shortUrl(c.statsSource)} ↗</a>
+                  </>
+                )}
+              </p>
+              <form action={markStatsCheckedAction.bind(null, c.id)}>
+                <SubmitButton variant="secondary" size="sm" pendingLabel="Saving…">Checked today</SubmitButton>
+              </form>
+            </div>
           </Card>
 
           <Card title="Notes">
@@ -149,6 +166,10 @@ export default async function CreatorPage({ params, searchParams }: { params: Pr
                 <ChannelSelect idPrefix="add" defaultValue={c.instagramHandle ? "instagram_dm" : c.tiktokHandle ? "tiktok_dm" : "email"} />
                 <CompSelect idPrefix="add" />
                 <StageSelect idPrefix="add" stages={["sourced", "shortlisted"]} />
+                <div className="sm:col-span-2">
+                  <label className="label" htmlFor="add-prior">Already posted about this business? (link, optional)</label>
+                  <input id="add-prior" name="priorPostUrl" type="url" inputMode="url" className="input" placeholder="https://www.tiktok.com/@creator/video/…" autoCapitalize="none" autoComplete="off" />
+                </div>
                 <div className="flex items-end">
                   <SubmitButton pendingLabel="Adding…">Add</SubmitButton>
                 </div>
@@ -183,6 +204,7 @@ function OutreachCard({ o, creatorId, drafts, now }: { o: OutreachWithClient; cr
       actions={
         <div className="flex flex-wrap items-center justify-end gap-1.5">
           {due && <Badge tone="warn">Follow up due</Badge>}
+          {o.priorPostUrl && <Badge tone="danger">Already featured</Badge>}
           <StatusBadge status={o.stage} />
         </div>
       }
@@ -216,6 +238,14 @@ function OutreachCard({ o, creatorId, drafts, now }: { o: OutreachWithClient; cr
         <div className="sm:col-span-2">
           <label className="label" htmlFor={`${idp}-url`}>Post link</label>
           <input id={`${idp}-url`} name="postUrl" type="url" className="input" defaultValue={o.postUrl ?? ""} placeholder="https://www.instagram.com/p/…" />
+        </div>
+        <div className="sm:col-span-2">
+          <label className="label" htmlFor={`${idp}-prior`}>Earlier post about {o.client.name} (before we reached out)</label>
+          <input id={`${idp}-prior`} name="priorPostUrl" type="url" inputMode="url" className="input" defaultValue={o.priorPostUrl ?? ""} placeholder="https://www.tiktok.com/@creator/video/…" autoCapitalize="none" autoComplete="off" />
+          <p className="mt-1 text-xs text-muted">
+            {o.priorPostUrl && o.priorPostFoundAt ? `Found ${formatDate(o.priorPostFoundAt)}. ` : ""}
+            If they already posted about this business, paste that post here. They&apos;re marked already featured and Claude won&apos;t pitch them for it again.
+          </p>
         </div>
         <div className="sm:col-span-2">
           <label className="label" htmlFor={`${idp}-disc`}>Their post clearly says gifted/#ad</label>

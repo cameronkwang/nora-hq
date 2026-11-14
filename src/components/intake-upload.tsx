@@ -9,16 +9,35 @@ export type IntakeUploadedFile = { url: string; name: string; contentType?: stri
 const MAX_BYTES = 25 * 1024 * 1024;
 const MAX_FILES = 30;
 const okType = (t: string) => t.startsWith("image/") || t.startsWith("video/") || t === "application/pdf";
+/** 12 random hex characters. */
+const randomPrefix = () => Array.from(crypto.getRandomValues(new Uint8Array(6)), (b) => b.toString(16).padStart(2, "0")).join("");
 
 /**
  * Optional photo/video/logo upload on the onboarding form. Only rendered when Vercel Blob is configured:
  * files go straight from the phone to Blob (token from /start/<token>/upload), under intake/<intake id>/.
  * The parent owns the list and posts it as JSON in a hidden "uploads" field.
+ *
+ * The owner drop link (/drop/<token>) reuses it with its own folder, upload route, label and file cap; left out,
+ * everything works as on the onboarding form.
  */
 export function IntakeUpload({
-  C, token, intakeId, files, onChange,
+  C, token, intakeId, files, onChange, folder, endpoint, label, hint, maxFiles = MAX_FILES, optional = true, uniqueNames = false,
 }: {
   C: IntakeCopy; token: string; intakeId: string; files: IntakeUploadedFile[]; onChange: (files: IntakeUploadedFile[]) => void;
+  /** Folder in our Blob store, without a trailing slash. Default: intake/<intake id>. */
+  folder?: string;
+  /** Route that hands out upload tokens. Default: /start/<token>/upload. */
+  endpoint?: string;
+  label?: string;
+  hint?: string;
+  maxFiles?: number;
+  /** Show "(optional)" after the label. */
+  optional?: boolean;
+  /**
+   * Put a random prefix on each file name. For an upload route whose tokens make exactly one file (no random suffix,
+   * no overwrite): phone photos are often all called "image.jpg".
+   */
+  uniqueNames?: boolean;
 }) {
   const id = useId();
   const [busy, setBusy] = useState<{ done: number; total: number } | null>(null);
@@ -32,7 +51,7 @@ export function IntakeUpload({
       else if (f.size > MAX_BYTES) setError(C.upload.tooBig(f.name));
       else good.push(f);
     }
-    const room = Math.max(0, MAX_FILES - files.length);
+    const room = Math.max(0, maxFiles - files.length);
     const todo = good.slice(0, room);
     if (!todo.length) return;
     setBusy({ done: 0, total: todo.length });
@@ -41,9 +60,9 @@ export function IntakeUpload({
       const { upload } = await import("@vercel/blob/client");
       for (const f of todo) {
         const safe = f.name.replace(/[^\w.\-]+/g, "-").replace(/^[-.]+/, "").slice(-80) || "file";
-        const res = await upload(`intake/${intakeId}/${safe}`, f, {
+        const res = await upload(`${folder ?? `intake/${intakeId}`}/${uniqueNames ? `${randomPrefix()}-` : ""}${safe}`, f, {
           access: "public",
-          handleUploadUrl: `/start/${encodeURIComponent(token)}/upload`,
+          handleUploadUrl: endpoint ?? `/start/${encodeURIComponent(token)}/upload`,
           contentType: f.type,
           multipart: f.size > 8 * 1024 * 1024,
         });
@@ -61,8 +80,8 @@ export function IntakeUpload({
 
   return (
     <div className="intake-js">
-      <p className="mb-1.5 text-[16px] font-medium">{C.fields.uploads.label} <span className="font-normal text-muted">({C.common.optional})</span></p>
-      <p className="mb-2 text-[15px] text-muted">{C.fields.uploads.hint}</p>
+      <p className="mb-1.5 text-[16px] font-medium">{label ?? C.fields.uploads.label}{optional && <> <span className="font-normal text-muted">({C.common.optional})</span></>}</p>
+      <p className="mb-2 text-[15px] text-muted">{hint ?? C.fields.uploads.hint}</p>
       <input
         id={id}
         type="file"

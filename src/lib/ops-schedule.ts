@@ -6,6 +6,7 @@ import { newId } from "./ids";
 import { logActivity } from "./activity";
 import { OpsError } from "./ops";
 import { isMonth, today as todayYmd } from "./dates";
+import { addDeliverable, createDeal, deleteDeal, moveDealVisitToDay, setDealReelsPosted, updateDeliverable, zonedLocalToDate } from "./ops-deals";
 import { looksLikeMoney, matchBusiness, parseSchedule, scheduleNameKey, scrubMoney, type ParsedSchedule, type ParsedScheduleItem } from "./schedule-parse";
 import type { IcalEvent } from "./ical";
 
@@ -15,9 +16,24 @@ import type { IcalEvent } from "./ical";
  * Same conventions as lib/ops: zod input, `actor` is a user email or "claude", every write is logged.
  * Claude may add and update items (import a pasted list, fix a date); deleting items and ticking a
  * reel as posted are for people.
+ *
+ * A paid job can be turned into a collab deal ("Make it a deal", people only): the fee, deliverables and
+ * payment then live on the deal (lib/ops-deals), linked by schedule_items.deal_id. The schedule itself only
+ * ever learns Paid / Not paid from it — never an amount. From then on the item and its deal are one job: moving
+ * the day here moves the deal's visit, ticking the reel here marks the deal's Reel posted, and the same the other
+ * way round (see "The schedule job a deal was made from" in lib/ops-deals).
  */
 
-export type ScheduleRow = schema.ScheduleItem & { clientName: string | null };
+/** What the schedule shows for a linked deal. null = no deal, or a deal with nothing to pay (gifted / cancelled). */
+export type SchedulePayment = "paid" | "not_paid";
+export type ScheduleRow = schema.ScheduleItem & { clientName: string | null; payment: SchedulePayment | null };
+
+function paymentOf(dealId: string | null, paymentStatus: schema.PaymentStatus | null, dealStatus: schema.DealStatus | null): SchedulePayment | null {
+  if (!dealId || !paymentStatus) return null;
+  if (paymentStatus === "paid") return "paid";
+  if (paymentStatus === "not_applicable" || dealStatus === "cancelled") return null;
+  return "not_paid";
+}
 type Source = "paste" | "manual" | "claude";
 
 const isClaude = (actor: string) => actor.toLowerCase() === "claude";
@@ -49,25 +65,27 @@ export async function listSchedule(month: string): Promise<ScheduleRow[]> {
   if (!isMonth(month)) throw new OpsError("Month should look like 2026-11.");
   const db = await getDb();
   const rows = await db
-    .select({ s: schema.scheduleItems, clientName: schema.clients.name })
+    .select({ s: schema.scheduleItems, clientName: schema.clients.name, paymentStatus: schema.deals.paymentStatus, dealStatus: schema.deals.status })
     .from(schema.scheduleItems)
     .leftJoin(schema.clients, eq(schema.clients.id, schema.scheduleItems.clientId))
+    .leftJoin(schema.deals, eq(schema.deals.id, schema.scheduleItems.dealId))
     .where(eq(schema.scheduleItems.month, month))
     .orderBy(sql`${schema.scheduleItems.date} asc nulls first`, asc(schema.scheduleItems.businessName));
-  return rows.map((r) => ({ ...r.s, clientName: r.clientName }));
+  return rows.map((r) => ({ ...r.s, clientName: r.clientName, payment: paymentOf(r.s.dealId, r.paymentStatus, r.dealStatus) }));
 }
 
 /** Every reel still owed (📸 and not ticked), oldest first. */
 export async function reelsToPost(): Promise<ScheduleRow[]> {
   const db = await getDb();
   const rows = await db
-    .select({ s: schema.scheduleItems, clientName: schema.clients.name })
+    .select({ s: schema.scheduleItems, clientName: schema.clients.name, paymentStatus: schema.deals.paymentStatus, dealStatus: schema.deals.status })
     .from(schema.scheduleItems)
     .leftJoin(schema.clients, eq(schema.clients.id, schema.scheduleItems.clientId))
+    .leftJoin(schema.deals, eq(schema.deals.id, schema.scheduleItems.dealId))
     .where(and(eq(schema.scheduleItems.needsReel, true), isNull(schema.scheduleItems.reelPostedAt)))
     .orderBy(asc(schema.scheduleItems.month), sql`${schema.scheduleItems.date} asc nulls last`, asc(schema.scheduleItems.businessName))
     .limit(500);
-  return rows.map((r) => ({ ...r.s, clientName: r.clientName }));
+  return rows.map((r) => ({ ...r.s, clientName: r.clientName, payment: paymentOf(r.s.dealId, r.paymentStatus, r.dealStatus) }));
 }
 
 export async function reelsToPostCount(): Promise<number> {
@@ -233,6 +251,9 @@ export async function importSchedule(input: string | ScheduleItemInput[], actor:
         .update(schema.scheduleItems)
         .set({ date: r.date, needsReel: r.needsReel, isFree: r.isFree, clientId: r.clientId, updatedAt: now })
         .where(eq(schema.scheduleItems.id, r.id));
+      // A job with a deal: the deal's visit follows the new day.
+      const was = existing.find((e) => e.id === r.id);
+      if (was?.dealId && was.date !== r.date) await moveDealVisitToDay(was.dealId, r.date, actor);
     }
   }
   result.add = rows.filter((r) => r.action === "add").length;
@@ -353,6 +374,8 @@ export async function updateScheduleItem(id: string, patch: z.input<typeof Updat
     actor, action: "schedule.updated", entityType: "schedule_item", entityId: id, clientId: set.clientId ?? cur.clientId,
     summary: `Updated ${cur.businessName} on Nora's schedule — ${changes.join("; ")}.`,
   });
+  // A job with a deal: the deal's visit follows the new day (so the reminder fires once, on the right day).
+  if (cur.dealId && set.date !== undefined) await moveDealVisitToDay(cur.dealId, set.date, actor);
 }
 
 export async function deleteScheduleItem(id: string, actor: string): Promise<void> {
@@ -381,21 +404,126 @@ export async function markReelPosted(id: string, actor: string, posted = true): 
     actor, action: posted ? "schedule.reel_posted" : "schedule.reel_unposted", entityType: "schedule_item", entityId: id, clientId: cur.clientId,
     summary: posted ? `Reel posted for ${cur.businessName}.` : `Reel for ${cur.businessName} marked as not posted yet.`,
   });
+  // A job with a deal: its Reel deliverable follows.
+  if (cur.dealId) await setDealReelsPosted(cur.dealId, posted, actor);
 }
 
-/* ───────────────────────── Calendar feed ───────────────────────── */
+/* ───────────────────────── Make it a deal ───────────────────────── */
 
-/** Dated schedule items between two days (inclusive) as all-day events. Undated items aren't in the feed. */
-export async function scheduleIcalEvents(fromDate: string, toDate: string, link: (path: string) => string | null): Promise<IcalEvent[]> {
+const MACHINE = new Set(["claude", "public", "system"]);
+
+/**
+ * Turns a paid job on the schedule into a collab deal (people only): the deal gets the business, the linked
+ * client and the day (visit set to noon — the schedule has no time), plus a Reel deliverable when the job is
+ * marked 📸 (already posted if the reel is ticked). The item is linked through schedule_items.deal_id; an
+ * item that already has a deal returns that deal. No fee is set here: money only ever lives on the deal.
+ * Claude isn't asked for a shot list (the deal page has that button).
+ */
+export async function makeDealFromScheduleItem(id: string, actor: string): Promise<{ dealId: string; created: boolean }> {
+  if (MACHINE.has(actor.toLowerCase())) throw new OpsError("Only Nora or Cameron can make a deal from the schedule.");
+  const db = await getDb();
+  const [cur] = await db.select().from(schema.scheduleItems).where(eq(schema.scheduleItems.id, id));
+  if (!cur) throw new OpsError("That schedule item was deleted.");
+  if (cur.dealId) return { dealId: cur.dealId, created: false };
+  if (cur.isFree) throw new OpsError("Free jobs don't need a deal. Untick Free first if this one is paid.");
+
+  const past = !!cur.date && cur.date < todayYmd();
+  const deal = await createDeal(
+    {
+      businessName: cur.businessName.slice(0, 160), // a deal's name is capped shorter than a schedule line
+      clientId: cur.clientId,
+      compType: "paid",
+      visitAt: cur.date ? zonedLocalToDate(`${cur.date}T12:00`) : null,
+      // A day that has passed means the visit happened: the deal starts as "shot", so it reads "To invoice".
+      ...(past ? { status: "shot" as const } : {}),
+    },
+    actor,
+    { askClaude: false },
+  );
+
+  // Link it — unless someone else linked this item a moment ago (double tap): then keep theirs and drop ours.
+  const linked = await db
+    .update(schema.scheduleItems)
+    .set({ dealId: deal.id, updatedAt: new Date() })
+    .where(and(eq(schema.scheduleItems.id, id), isNull(schema.scheduleItems.dealId)))
+    .returning({ id: schema.scheduleItems.id });
+  if (!linked.length) {
+    await deleteDeal(deal.id, actor);
+    const [now] = await db.select({ dealId: schema.scheduleItems.dealId }).from(schema.scheduleItems).where(eq(schema.scheduleItems.id, id));
+    if (!now?.dealId) throw new OpsError("That schedule item was deleted.");
+    return { dealId: now.dealId, created: false };
+  }
+
+  if (cur.needsReel) {
+    // Copied FROM the item, so nothing is written back to it here.
+    const deliverableId = await addDeliverable(deal.id, { kind: "ig_reel" }, actor, { syncSchedule: false });
+    if (cur.reelPostedAt) await updateDeliverable(deliverableId, { posted: true }, actor, { syncSchedule: false });
+  }
+  await logActivity({
+    actor, action: "schedule.deal_made", entityType: "schedule_item", entityId: id, clientId: cur.clientId,
+    summary: `Made a deal from Nora's schedule: ${cur.businessName} (${cur.date ? short(cur.date) : `sometime in ${cur.month}`}).`,
+  });
+  return { dealId: deal.id, created: true };
+}
+
+/** The schedule item (if any) a deal was made from — for the deal page's "Linked" list. */
+export async function scheduleItemForDeal(dealId: string): Promise<{ id: string; month: string; date: string | null } | null> {
+  const db = await getDb();
+  const [row] = await db
+    .select({ id: schema.scheduleItems.id, month: schema.scheduleItems.month, date: schema.scheduleItems.date })
+    .from(schema.scheduleItems)
+    .where(eq(schema.scheduleItems.dealId, dealId))
+    .limit(1);
+  return row ?? null;
+}
+
+/* ───────────────────────── Reminders & calendar feed ───────────────────────── */
+
+export type ScheduleDayItem = schema.ScheduleItem & { dealVisitAt: Date | null; dealStatus: schema.DealStatus | null };
+
+/** Jobs dated on one day, with the linked deal's visit time (the morning reminder uses it to avoid saying things twice). */
+export async function scheduleOn(date: string): Promise<ScheduleDayItem[]> {
   const db = await getDb();
   const rows = await db
-    .select()
+    .select({ s: schema.scheduleItems, dealVisitAt: schema.deals.visitAt, dealStatus: schema.deals.status })
     .from(schema.scheduleItems)
-    .where(and(isNotNull(schema.scheduleItems.date), gte(schema.scheduleItems.date, fromDate), lte(schema.scheduleItems.date, toDate)));
-  return rows.map((r) => {
+    .leftJoin(schema.deals, eq(schema.deals.id, schema.scheduleItems.dealId))
+    .where(eq(schema.scheduleItems.date, date))
+    .orderBy(asc(schema.scheduleItems.businessName));
+  return rows.map((r) => ({ ...r.s, dealVisitAt: r.dealVisitAt, dealStatus: r.dealStatus }));
+}
+
+/** The Monday on or after `ymd` — where the weekly "reels to post" line sits in the calendar. */
+export function mondayOnOrAfter(ymd: string): string {
+  const d = new Date(`${ymd}T12:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + ((8 - d.getUTCDay()) % 7));
+  return d.toISOString().slice(0, 10);
+}
+
+/**
+ * Nora's schedule for the calendar feed. Never money.
+ *  - Dated jobs between two days (inclusive) as all-day events; undated jobs aren't in the feed. A job whose
+ *    linked deal already has a visit that day is left out (the "Visit: …" event covers it) unless a reel is owed.
+ *  - One weekly line, "📸 N reels to post", on the coming Monday (today if it is Monday) while any are owed.
+ */
+export async function scheduleIcalEvents(fromDate: string, toDate: string, link: (path: string) => string | null, opts: { today?: string } = {}): Promise<IcalEvent[]> {
+  const db = await getDb();
+  const [rows, owed] = await Promise.all([
+    db
+      .select({ s: schema.scheduleItems, dealVisitAt: schema.deals.visitAt, dealStatus: schema.deals.status })
+      .from(schema.scheduleItems)
+      .leftJoin(schema.deals, eq(schema.deals.id, schema.scheduleItems.dealId))
+      .where(and(isNotNull(schema.scheduleItems.date), gte(schema.scheduleItems.date, fromDate), lte(schema.scheduleItems.date, toDate))),
+    reelsToPost(),
+  ]);
+  const events: IcalEvent[] = [];
+  for (const { s: r, dealVisitAt, dealStatus } of rows) {
+    const owesReel = r.needsReel && !r.reelPostedAt;
+    const visitThatDay = !!dealVisitAt && dealStatus !== "cancelled" && todayYmd(dealVisitAt) === r.date;
+    if (visitThatDay && !owesReel) continue;
     const url = link(`/calendar?month=${r.month}`);
     const reel = r.needsReel ? (r.reelPostedAt ? " · ✓ reel posted" : " · 📸 reel to post") : "";
-    return {
+    events.push({
       uid: `schedule-${r.id}@nora-hq`,
       summary: `Nora: ${r.businessName}${r.isFree ? " (free)" : ""}${reel}`,
       date: r.date!,
@@ -403,6 +531,21 @@ export async function scheduleIcalEvents(fromDate: string, toDate: string, link:
       url,
       lastModified: r.updatedAt,
       categories: ["Schedule"],
-    };
-  });
+    });
+  }
+  if (owed.length) {
+    const monday = mondayOnOrAfter(opts.today ?? todayYmd());
+    const url = link("/calendar?show=reels");
+    const names = owed.slice(0, 15).map((r) => `• ${r.businessName}`);
+    if (owed.length > names.length) names.push(`+ ${owed.length - names.length} more`);
+    events.push({
+      uid: `schedule-reels-owed-${monday}@nora-hq`,
+      summary: `Nora: 📸 ${owed.length} reel${owed.length === 1 ? "" : "s"} to post`,
+      date: monday,
+      description: [...names, url].filter(Boolean).join("\n"),
+      url,
+      categories: ["Schedule"],
+    });
+  }
+  return events;
 }

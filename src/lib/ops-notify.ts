@@ -10,7 +10,9 @@ import { APP_TZ, today } from "./dates";
 import { OpsError } from "./ops";
 import { appUrl } from "./integrations/oauth";
 import { buildCalendar, type IcalEvent } from "./ical";
-import { personEmail, sendToUser } from "./notify";
+import { personEmail, sendToUser, type PushPayload } from "./notify";
+import { reelsToPost, scheduleOn } from "./ops-schedule";
+import { scheduleNameKey } from "./schedule-parse";
 import { NOTIFY_TOPICS, type NotifyTopic } from "./schema";
 
 /**
@@ -270,17 +272,36 @@ function hourInTz(d: Date) {
   return Number(new Intl.DateTimeFormat("en-US", { timeZone: APP_TZ, hour: "numeric", hourCycle: "h23" }).format(d));
 }
 const timeInTz = (d: Date) => new Intl.DateTimeFormat("en-US", { timeZone: APP_TZ, hour: "numeric", minute: "2-digit" }).format(d);
+/** Exactly 12:00 in the app timezone — the placeholder time of a deal made from a (day-only) schedule item. */
+function isNoonInTz(d: Date) {
+  const p = new Intl.DateTimeFormat("en-US", { timeZone: APP_TZ, hourCycle: "h23", hour: "2-digit", minute: "2-digit" }).formatToParts(d);
+  const get = (t: string) => Number(p.find((x) => x.type === t)?.value);
+  return get("hour") % 24 === 12 && get("minute") === 0;
+}
 const shortDate = (ymd: string) => new Date(`${ymd}T12:00:00Z`).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
 
+/** Mondays carry the weekly "N reels owed" line. */
+const isMonday = (ymd: string) => new Date(`${ymd}T12:00:00Z`).getUTCDay() === 1;
+const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? "" : "s"}`;
+
 /**
- * Once a day (first sync run after 8am NY): payments overdue → Nora; tomorrow's visits → Nora (with address).
- * Safe to call hourly: an app_settings row ("notify.daily") records the day it ran, claimed atomically.
+ * Once a day (first sync run after 8am NY), all to Nora:
+ *  - payments overdue (deals);
+ *  - tomorrow's deal visits (with address);
+ *  - tomorrow's jobs on her schedule that a deal visit doesn't already cover ("Tomorrow: S&F · 📸 reel owed");
+ *  - on Mondays, how many reels she still owes.
+ * The schedule lines never carry money. Safe to call hourly: an app_settings row ("notify.daily") records the
+ * day it ran, claimed atomically. `force` (testing) sends everything now, the weekly line included.
+ * `preview` (testing) sends nothing and claims nothing: it returns the messages that WOULD go out for `now`
+ * (weekly line only when that day is a Monday), so the wording can be checked without a phone.
  */
-export async function runDailyReminders(now = new Date(), opts: { force?: boolean } = {}) {
+export async function runDailyReminders(now = new Date(), opts: { force?: boolean; preview?: boolean } = {}) {
   const day = today(now);
-  if (!opts.force && hourInTz(now) < DAILY_HOUR) return { ok: true, skipped: "too_early" as const };
+  const preview = !!opts.preview;
+  const force = !!opts.force && !preview;
+  if (!force && !preview && hourInTz(now) < DAILY_HOUR) return { ok: true, skipped: "too_early" as const };
   const db = await getDb();
-  if (!opts.force) {
+  if (!force && !preview) {
     const claimed = await db.insert(schema.appSettings)
       .values({ key: "notify.daily", value: { date: day }, updatedBy: "system" })
       .onConflictDoUpdate({
@@ -293,6 +314,13 @@ export async function runDailyReminders(now = new Date(), opts: { force?: boolea
   }
   const nora = personEmail("nora");
   if (!nora) return { ok: true, skipped: "no_nora" as const };
+  // Every reminder goes through here, so a preview sees exactly what a real run would send.
+  const messages: Array<PushPayload & { topic: NotifyTopic }> = [];
+  const push = async (topic: NotifyTopic, payload: PushPayload) => {
+    if (!preview) return sendToUser(nora, topic, payload);
+    messages.push({ topic, ...payload });
+    return { sent: 0, removed: 0, failed: 0 };
+  };
 
   const overdue = await db.select().from(schema.deals).where(and(
     eq(schema.deals.paymentStatus, "requested"), isNotNull(schema.deals.paymentDueDate), lt(schema.deals.paymentDueDate, day), ne(schema.deals.status, "cancelled"),
@@ -300,7 +328,7 @@ export async function runDailyReminders(now = new Date(), opts: { force?: boolea
   let paymentSent = 0;
   if (overdue.length) {
     const list = overdue.slice(0, 4).map((d) => `${d.businessName}${money(d.amountCents) ? ` ${money(d.amountCents)}` : ""} (due ${shortDate(d.paymentDueDate!)})`).join(" · ");
-    const r = await sendToUser(nora, "payment_overdue", {
+    const r = await push("payment_overdue", {
       title: overdue.length === 1 ? "Payment overdue" : `${overdue.length} payments overdue`,
       body: overdue.length > 4 ? `${list} · +${overdue.length - 4} more` : list,
       url: overdue.length === 1 ? dealHref(overdue[0].id) : "/deals",
@@ -314,15 +342,70 @@ export async function runDailyReminders(now = new Date(), opts: { force?: boolea
     isNotNull(schema.deals.visitAt), gte(schema.deals.visitAt, now), lte(schema.deals.visitAt, new Date(now.getTime() + 50 * 3600_000)), ne(schema.deals.status, "cancelled"),
   )).orderBy(asc(schema.deals.visitAt));
   const visits = soon.filter((d) => today(d.visitAt!) === tomorrow);
+  // Nora's schedule for tomorrow. A job that is the same as one of the deal visits rides along on that
+  // visit's reminder; the rest get their own line below.
+  // (If the schedule can't be read, the deal reminders still go out.)
+  const jobs = await scheduleOn(tomorrow).catch((e) => {
+    console.error("[notify] schedule reminders skipped", e);
+    return [] as Awaited<ReturnType<typeof scheduleOn>>;
+  });
+  const jobFor = (d: (typeof visits)[number]) => jobs.find((j) => j.dealId === d.id) ?? jobs.find((j) => !j.dealId && j.nameKey === scheduleNameKey(d.businessName));
+  const covered = new Set<string>();
   let visitSent = 0;
   for (const d of visits) {
-    const r = await sendToUser(nora, "visit_reminder", {
-      title: `Tomorrow ${timeInTz(d.visitAt!)}: ${d.businessName}`,
-      body: [d.address, d.dietaryNotes ? `Dietary: ${d.dietaryNotes}` : null].filter(Boolean).join(" · ") || "Visit tomorrow",
+    const job = jobFor(d);
+    if (job) covered.add(job.id);
+    // A deal made from the schedule has a noon placeholder until someone sets the real time: don't announce it.
+    const placeholder = job?.dealId === d.id && isNoonInTz(d.visitAt!);
+    const r = await push("visit_reminder", {
+      title: placeholder ? `Tomorrow: ${d.businessName}` : `Tomorrow ${timeInTz(d.visitAt!)}: ${d.businessName}`,
+      body: [d.address, job && owesReel(job) ? "📸 reel owed" : null, d.dietaryNotes ? `Dietary: ${d.dietaryNotes}` : null].filter(Boolean).join(" · ") || "Visit tomorrow",
       url: dealHref(d.id),
       tag: `visit-${d.id}`,
     });
     visitSent += r.sent;
   }
-  return { ok: true, overdue: overdue.length, visitsTomorrow: visits.length, sent: paymentSent + visitSent };
+
+  const rest = jobs.filter((j) => !covered.has(j.id));
+  let scheduleSent = 0;
+  if (rest.length) {
+    const one = rest.length === 1 ? rest[0] : null;
+    const r = await push("visit_reminder", {
+      title: one ? `Tomorrow: ${one.businessName}` : `Tomorrow: ${rest.length} on your schedule`,
+      body: one
+        ? [owesReel(one) ? "📸 reel owed" : null, one.isFree ? "Free" : null].filter(Boolean).join(" · ") || "On your schedule tomorrow"
+        : rest.map((j) => `${j.businessName}${owesReel(j) ? " 📸" : ""}`).join(" · "),
+      url: `/calendar?month=${tomorrow.slice(0, 7)}`,
+      tag: `schedule-${tomorrow}`,
+    });
+    scheduleSent = r.sent;
+  }
+
+  let reelsOwed: number | undefined;
+  let reelsSent = 0;
+  if (force || isMonday(day)) {
+    const reels = await reelsToPost().catch((e) => {
+      console.error("[notify] weekly reels line skipped", e);
+      return [] as Awaited<ReturnType<typeof reelsToPost>>;
+    }); // oldest first
+    reelsOwed = reels.length;
+    if (reels.length) {
+      const names = reels.slice(0, 5).map((r) => r.businessName).join(" · ");
+      const r = await push("visit_reminder", {
+        title: `${plural(reels.length, "reel")} owed`,
+        body: reels.length > 5 ? `${names} · +${reels.length - 5} more` : names,
+        url: "/calendar?show=reels",
+        tag: `reels-owed-${day}`,
+      });
+      reelsSent = r.sent;
+    }
+  }
+  return {
+    ok: true, overdue: overdue.length, visitsTomorrow: visits.length, scheduleTomorrow: rest.length,
+    ...(reelsOwed === undefined ? {} : { reelsOwed }),
+    sent: paymentSent + visitSent + scheduleSent + reelsSent,
+    ...(preview ? { preview: true as const, day, messages } : {}),
+  };
 }
+
+const owesReel = (j: { needsReel: boolean; reelPostedAt: Date | null }) => j.needsReel && !j.reelPostedAt;

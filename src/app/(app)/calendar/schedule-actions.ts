@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { requireUser } from "@/lib/auth";
 import { OpsError } from "@/lib/ops";
-import { addScheduleItem, deleteScheduleItem, importSchedule, markReelPosted, updateScheduleItem, type ImportResult } from "@/lib/ops-schedule";
+import { addScheduleItem, deleteScheduleItem, importSchedule, makeDealFromScheduleItem, markReelPosted, updateScheduleItem, type ImportResult } from "@/lib/ops-schedule";
 
 export type ScheduleActionResult = { ok: true; message?: string } | { ok: false; error: string };
 
@@ -18,6 +18,9 @@ function errorMessage(e: unknown): string {
 function refresh() {
   revalidatePath("/calendar");
   revalidatePath("/clients/[id]", "page");
+  // A job with a deal: its day and reel are written through to the deal (lib/ops-deals).
+  revalidatePath("/deals");
+  revalidatePath("/deals/[id]", "page");
 }
 
 /** Paste → preview (dryRun) or import. Returns the preview so the sheet can show it; never echoes money. */
@@ -72,6 +75,19 @@ export async function deleteScheduleItemAction(id: string): Promise<ScheduleActi
     await deleteScheduleItem(id, user.email);
     refresh();
     return { ok: true };
+  } catch (e) {
+    return { ok: false, error: errorMessage(e) };
+  }
+}
+
+/** "Make it a deal" on a paid job: creates (or finds) its collab deal and links it. The fee is set on the deal, never here. */
+export async function makeDealFromScheduleAction(id: string): Promise<{ ok: true; dealId: string; created: boolean } | { ok: false; error: string }> {
+  const user = await requireUser();
+  try {
+    const r = await makeDealFromScheduleItem(id, user.email);
+    refresh();
+    revalidatePath("/deals");
+    return { ok: true, ...r };
   } catch (e) {
     return { ok: false, error: errorMessage(e) };
   }

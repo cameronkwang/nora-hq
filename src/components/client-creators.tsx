@@ -61,6 +61,7 @@ export function CreatorList({ rows, emptyHint, now = new Date() }: { rows: Row[]
                 {c.name}
               </Link>
               {c.doNotContact && <Badge tone="danger" className="ml-2">Do not contact</Badge>}
+              {r.priorPostUrl && <Badge tone="danger" className="ml-2">Already featured</Badge>}
               <p className="mt-0.5 flex flex-wrap gap-x-2 text-xs text-muted">
                 {c.instagramHandle && <span>IG @{c.instagramHandle}</span>}
                 {c.tiktokHandle && <span>TT @{c.tiktokHandle}</span>}

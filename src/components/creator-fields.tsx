@@ -45,6 +45,11 @@ export function CreatorFields({ creator }: { creator?: Creator }) {
         </div>
       </div>
       <div className="sm:col-span-2">
+        <label className="label" htmlFor="cr-src">Where you read the numbers (link)</label>
+        <input id="cr-src" name="statsSource" inputMode="url" className="input" defaultValue={c?.statsSource ?? ""} placeholder="https://www.tiktok.com/@handle" autoCapitalize="none" autoComplete="off" spellCheck={false} />
+        <p className="mt-1 text-xs text-muted">Their public profile. With a link, the numbers count as checked today.</p>
+      </div>
+      <div className="sm:col-span-2">
         <label className="label" htmlFor="cr-notes">Notes</label>
         <textarea id="cr-notes" name="notes" className="input" defaultValue={c?.notes ?? ""} placeholder="Content style, past collabs, dietary notes, best time to reach them…" />
       </div>

@@ -34,7 +34,11 @@ export async function syncReviewsAction(formData: FormData) {
   if (r.notConfigured) flash(r.errors[0] ?? "Connect Google Business Profile first.", "warn", back);
   if (!r.ok) flash(r.errors.join(" · ") || "Review sync failed.", "danger", back);
   if (r.locations === 0) flash(r.errors[0] ?? "No locations to sync.", "warn", back);
-  flash(`Synced ${plural(r.synced, "review")} from ${plural(r.locations, "location")}.`, "ok", back);
+  // A sync that "worked" can still leave a business with nothing: say which ones, per business.
+  const notes: string[] = [];
+  if (r.empty?.length) notes.push(`${r.empty.join(", ")}: 0 reviews came back — check it's the right Google listing.`);
+  if (r.unlinked?.length) notes.push(`Not linked to a Google listing yet: ${r.unlinked.join(", ")}.`);
+  flash([`Synced ${plural(r.synced, "review")} from ${plural(r.locations, "location")}.`, ...notes].join(" "), notes.length ? "warn" : "ok", back);
 }
 
 export async function syncInstagramViewsAction(formData: FormData) {

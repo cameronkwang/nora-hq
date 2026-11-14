@@ -13,6 +13,9 @@ import { Badge, Card, EmptyState, PageHeader, buttonClass, clientLabel, cx } fro
 import { ConfirmButton, SubmitButton } from "@/components/client-form";
 import { CopyButton } from "@/components/copy-button";
 import { SavedRepliesRow } from "@/components/reply-links";
+import { GoogleSyncList, GoogleSyncSummaryBadge } from "@/components/google-sync-status";
+import { PaymentLineForm } from "@/components/payment-line-form";
+import { getPaymentLine } from "@/lib/ops-payment";
 import {
   checkRepliesAction, disconnectAction, refreshInstagramTokensAction, saveLocationsAction, syncInstagramViewsAction, syncReviewsAction,
 } from "./actions";
@@ -71,7 +74,7 @@ function SetupHint({ children }: { children: ReactNode }) {
 export default async function SettingsPage({ searchParams }: { searchParams: Promise<SP> }) {
   await requireUser();
   const sp = await searchParams;
-  const [clients, connections] = await Promise.all([listClients(), listConnectionSummaries()]);
+  const [clients, connections, paymentLine] = await Promise.all([listClients(), listConnectionSummaries(), getPaymentLine()]);
   const env = envStatus();
   const igReady = instagramConfigured();
   const googleReady = googleOAuthConfigured();
@@ -79,6 +82,8 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
   const google = connections.find((c) => c.provider === "google" && !c.clientId);
   const gmail = connections.find((c) => c.provider === "gmail" && !c.clientId);
   const igByClient = new Map(connections.filter((c) => c.provider === "instagram" && c.clientId).map((c) => [c.clientId!, c]));
+  // Managed businesses only (Nora's own workspace has no Google listing): each gets its own review-sync line.
+  const businesses = clients.filter((c) => !isCreatorClient(c));
 
   let locations: GoogleLocation[] | null = null;
   let locationsError: string | null = null;
@@ -198,22 +203,29 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
               <Link href="/stats" className={buttonClass("ghost", "sm")}>My stats →</Link>
             </div>
           </div>
+          {/* How Nora gets paid: one line, printed on a deal's "Request payment" text. */}
+          <div id="payment" className="mt-4 scroll-mt-4 border-t border-border pt-4">
+            <PaymentLineForm line={paymentLine} />
+          </div>
         </Card>
 
         <div className="grid gap-6 lg:grid-cols-2">
           {/* Google Business Profile */}
+          <section id="google" className="scroll-mt-4">
           <Card
+            className="h-full"
             title="Google Business Profile"
             actions={google ? (
               <form action={syncReviewsAction}><SubmitButton variant="secondary" size="sm" pendingLabel="Syncing…">Sync reviews</SubmitButton></form>
             ) : undefined}
           >
             <div className="flex flex-col gap-3">
-              <p className="text-sm text-muted">One Google account that manages all the restaurants&apos; profiles. Used to pull reviews and post approved replies.</p>
+              <p className="text-sm text-muted">One Google account that manages all the businesses&apos; profiles. Used to pull reviews and post approved replies.</p>
               {!googleReady && <SetupHint>Add GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET first (docs/setup.md, step 6).</SetupHint>}
               <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
                 <div className="min-w-0">
-                  <ConnStatus conn={google} />
+                  {/* Counts businesses that are really syncing; the account being signed in says nothing about any one of them. */}
+                  <GoogleSyncSummaryBadge clients={businesses} connection={google} />
                   {google && <ConnMeta conn={google} />}
                 </div>
                 <div className="flex shrink-0 flex-wrap gap-2">
@@ -221,9 +233,12 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
                   {google && <Disconnect id={google.id} what="Google Business Profile" />}
                 </div>
               </div>
+              {/* Per business: what the last sync actually found. */}
+              <GoogleSyncList clients={businesses} connected={!!google} />
               <p className="text-xs text-muted">Google keeps API quota at 0 until it approves your access request — if syncing says so, see docs/setup.md.</p>
             </div>
           </Card>
+          </section>
 
           {/* Gmail */}
           <Card
@@ -251,6 +266,7 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
         </div>
 
         {/* Location mapping */}
+        <section id="google-locations" className="scroll-mt-4">
         <Card title="Google locations → businesses">
           {!google ? (
             <EmptyState title="Connect Google Business Profile first">Then pick which Google listing belongs to each business here.</EmptyState>
@@ -291,6 +307,7 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
             </form>
           )}
         </Card>
+        </section>
 
         <div className="grid gap-6 lg:grid-cols-2">
           {/* Claude connector */}

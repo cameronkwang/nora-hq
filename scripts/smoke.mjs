@@ -1,5 +1,7 @@
 // Smoke test for Nora HQ. Usage:
-//   BASE_URL=http://localhost:3200 NODE_PATH=$(npm root -g) node scripts/smoke.mjs [crawl|flows|all|responsive|nora|v6|v7|v8]
+//   BASE_URL=http://localhost:3200 NODE_PATH=$(npm root -g) node scripts/smoke.mjs [crawl|flows|all|responsive|nora|v6|v7|v8|v10]
+// V10_SHOTS=/path saves the enhancements 2–12 screenshots (device scale 2) during the v10 flows. v10 reads the reminder
+// wording from /api/cron/reminders?preview=1: start the dev server with CRON_SECRET=test (or set the same CRON_SECRET here).
 // V8_SHOTS=/path saves the nav / schedule / business-tools screenshots (device scale 2) during the v8 flows.
 // V7_SHOTS=/path saves the onboarding-form screenshots (device scale 2) during the v7 flows.
 // Optional: SHOTS_DIR=/path to save screenshots, MCP_TOKEN=... to exercise /api/mcp in the flows.
@@ -15,6 +17,7 @@ const CLIENT_IDS = ["yummy-red-bowl-richmond", "yummy-red-bowl-sc", "crab-o-cloc
 const ROUTES = ["/", "/asks", "/asks/new", "/tasks", "/tasks?view=list", "/tasks?view=board", "/tasks?view=table", "/tasks/import", "/review", "/calendar", "/calendar/new",
   "/creators", "/creators?view=table", "/creators?view=pipeline", "/creators/new", "/creators/import", "/leads", "/leads?view=board", "/leads/new", "/leads/import", "/numbers", "/reviews", "/activity", "/settings", "/settings/capture", "/stats", "/tasks?scope=adhoc", "/tasks?scope=plan", "/tasks?scope=all", "/clients", "/clients?inactive=1", "/clients/new", "/calendar?tab=posts", "/calendar?show=reels", "/clients/noraeatsgood", "/clients/noraeatsgood/settings", "/collabs",
   "/deals", "/replies", "/kit-settings", "/reports", "/reports?client=crab-o-clock", "/reports?client=crab-o-clock&tab=internal", "/settings/notifications",
+  "/review?tab=approved", "/review?tab=approved&send=1",
   "/start-preview/snf-kingdom", "/start-preview/snf-kingdom?lang=zh-Hans", "/start-preview/snf-kingdom?lang=zh-Hant", "/start-preview/maxs-virginia-beach",
   ...CLIENT_IDS.flatMap((id) => [`/clients/${id}`, `/clients/${id}/settings`])];
 const PUBLIC_ROUTES = ["/collab", "/start/smoke-not-a-real-token", "/start/smoke-not-a-real-token?lang=zh-Hans", "/start/smoke-not-a-real-token?lang=zh-Hant"];
@@ -34,16 +37,33 @@ async function login(context, email = EMAIL) {
   await page.close();
 }
 
+/** When a page last saw the dev server drop a connection (`next dev` restarts itself near its memory limit). */
+let lastBlip = 0;
+const noteBlip = (text) => { if (DEV_BLIP.test(String(text ?? ""))) lastBlip = Date.now(); };
+
 function watch(page, label) {
   const errors = [];
-  page.on("console", (m) => { if (m.type() === "error") errors.push(`console: ${m.text()}`); });
-  page.on("pageerror", (e) => errors.push(`pageerror: ${e.message}`));
+  page.on("console", (m) => { if (m.type() === "error") { noteBlip(m.text()); errors.push(`console: ${m.text()}`); } });
+  page.on("pageerror", (e) => { noteBlip(e.message); errors.push(`pageerror: ${e.message}`); });
   return { errors, label };
 }
 
 async function checkPage(page, path, label, errs) {
   const before = errs.length;
-  const res = await page.goto(BASE + path, { waitUntil: "networkidle", timeout: 90000 });
+  // `next dev` restarts itself near its memory limit, which drops the connection: wait for it and load the page again.
+  let res;
+  for (let attempt = 0; ; attempt++) {
+    try {
+      res = await page.goto(BASE + path, { waitUntil: "networkidle", timeout: 90000 });
+      if (attempt < 2 && errs.slice(before).some((e) => DEV_BLIP.test(e.replace(/^(console|pageerror): /, "")))) { errs.length = before; await waitForServer(); continue; }
+      break;
+    } catch (e) {
+      const msg = e.message.split("\n")[0];
+      if (attempt >= 2 || !DEV_BLIP.test(msg)) { fail(`${label} ${path}: ${msg}`); return; }
+      errs.length = before;
+      await waitForServer();
+    }
+  }
   const status = res?.status();
   if (status !== 200) fail(`${label} ${path}: HTTP ${status}`);
   const overlay = await page.locator("nextjs-portal").count();
@@ -79,7 +99,9 @@ async function crawl(browser) {
     for (const path of ROUTES) await checkPage(page, path, vp.name, errors);
     // first creator / draft / task / ask / post detail pages, if any exist
     for (const [list, sel] of [["/creators", "a[href^='/creators/']:not([href='/creators/new']):not([href^='/creators/export']):not([href^='/creators/import'])"], ["/tasks?status=all", "a[href^='/tasks/']:not([href^='/tasks/import']):not([href^='/tasks/export'])"], ["/asks", "a[href^='/asks/']:not([href='/asks/new'])"], ["/calendar", "a[href^='/calendar/']:not([href^='/calendar/new'])"], ["/leads", "a[href^='/leads/']:not([href='/leads/new']):not([href^='/leads/import']):not([href^='/leads/export'])"], ["/collabs", "a[href^='/collabs/']"], ["/deals", "a[href^='/deals/']"], ["/deals", "a[href$='/visit']"]]) {
-      await page.goto(BASE + list, { waitUntil: "networkidle" });
+      const before = errors.length;
+      await page.goto(BASE + list, { waitUntil: "networkidle" }).catch(async () => { await waitForServer(); await page.goto(BASE + list, { waitUntil: "networkidle" }); });
+      errors.length = before; // the list pages were already checked above; only the detail page is checked here
       const href = await page.locator(sel).first().getAttribute("href").catch(() => null);
       if (href) await checkPage(page, href, vp.name, errors);
     }
@@ -140,10 +162,13 @@ async function toolRaw(name, args) {
 
 async function step(name, fn) {
   // `next dev` restarts itself near its memory limit; a dropped connection is retried once after it's back up.
+  // That also covers a step that timed out on a page the restart left dead (any page saw a dropped connection meanwhile).
   for (let attempt = 0; ; attempt++) {
+    const started = Date.now();
     try { await fn(); ok(name); return; } catch (e) {
       const msg = e.message.split("\n")[0];
-      if (attempt === 0 && /fetch failed|ECONNREFUSED|ECONNRESET/.test(msg) || (attempt === 0 && DEV_BLIP.test(msg))) { await waitForServer(); continue; }
+      const blip = /fetch failed|ECONNREFUSED|ECONNRESET/.test(msg) || DEV_BLIP.test(msg) || lastBlip >= started;
+      if (attempt === 0 && blip) { await waitForServer(); continue; }
       fail(`${name}: ${msg}`); return;
     }
   }
@@ -760,7 +785,9 @@ async function noraFlows(browser) {
   });
   await step("Home: Nora's card first, with the new-requests chip", async () => {
     await page.goto(`${BASE}/`, { waitUntil: "networkidle" });
-    const first = page.locator("main a[href^='/clients/']").filter({ hasNotText: /^New client$/ }).first();
+    // the Businesses grid (the Client health strip above it links to businesses too, and leaves Nora's workspace out)
+    const grid = page.locator("main section", { has: page.locator("h2", { hasText: /^Businesses$/ }) }).last();
+    const first = grid.locator("a[href^='/clients/']").filter({ hasNotText: /^New client$/ }).first();
     const href = await first.getAttribute("href");
     if (href !== "/clients/noraeatsgood") throw new Error(`first business card is ${href}`);
     if (!(await page.locator("a[href='/collabs']", { hasText: /new collab request/ }).count())) throw new Error("no 'new collab requests' chip");
@@ -1631,6 +1658,9 @@ async function v7Flows(browser) {
     if (m.business.website !== site) throw new Error(`website overwritten: ${m.business.website}`);
     if (m.business.instagramHandle !== `smoke_pre_${stamp}`) throw new Error(`instagram overwritten: ${m.business.instagramHandle}`);
     if (m.business.tiktokHandle !== `smoke_tt_${stamp}`) throw new Error(`tiktok not filled: ${m.business.tiktokHandle}`);
+    // v10 #2: a clear "Yes" to creators prefills the outreach profile (fill-only): the ticked offer, sent from the business's own Instagram
+    const op = m.business.outreachProfile;
+    if (op?.creatorOffer !== "Free meal for 2" || op.sendFrom !== `@smoke_pre_${stamp}` || op.sendFromKind !== "instagram") throw new Error(`outreach profile not prefilled from the form: ${JSON.stringify(op)}`);
     const notes = m.business.notes ?? "";
     if (!notes.includes(`/clients/${id}/intake`)) throw new Error("notes have no pointer to the form");
     if (!notes.includes("Check with me first") || !notes.includes("the owner confirmed them")) throw new Error("notes miss the closed-choice summary");
@@ -2264,8 +2294,947 @@ async function v8Flows(browser) {
   await step("clean up: Test Bistro set inactive", async () => {
     await tool("set_business_status", { client_id: bistroId, active: false });
   });
-  if (errors.length) fail(`v8 console errors: ${errors.slice(0, 3).join(" | ")}`);
+  const v8Errors = errors.filter((e) => !DEV_BLIP.test(e)); // a dev-server restart isn't an app error
+  if (v8Errors.length) fail(`v8 console errors: ${v8Errors.slice(0, 3).join(" | ")}`);
   await context.close();
+}
+
+/* ───────────────────────── v10: enhancements 2–12 ───────────────────────── */
+
+const nyDay = (d = new Date()) => new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York" }).format(d);
+const plusDays = (ymd, n) => { const d = new Date(`${ymd}T12:00:00Z`); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
+const flat = (s) => String(s ?? "").replace(/\s+/g, " ").trim();
+
+/** One new screen: no sideways scroll, inputs ≥16px and taps ≥40px on touch, nothing hidden under the phone tab bar. */
+async function v10Audit(page, label, { touch = true, tabbar = true } = {}) {
+  await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+  await page.waitForTimeout(150);
+  const a = await page.evaluate(auditPage, touch);
+  await page.evaluate(() => window.scrollTo(0, 0));
+  const probs = [];
+  if (a.overflow) probs.push(`overflow ${a.overflow}`);
+  for (const f of a.smallFonts) probs.push(`input font < 16px: ${f}`);
+  for (const t of a.smallTargets) probs.push(`tap target < 40px: ${t}`);
+  if (tabbar && a.covered) probs.push(`tab bar covers content: ${a.covered}`);
+  if (probs.length) throw new Error(`${label}: ${probs.join("; ")}`);
+}
+
+/** Puts an element near the top of the viewport (below the sticky header) for a viewport-only screenshot. */
+async function toTop(loc, offset = 72) {
+  await loc.evaluate((el, off) => window.scrollTo(0, Math.max(0, el.getBoundingClientRect().top + window.scrollY - off)), offset);
+  await loc.page().waitForTimeout(200);
+}
+
+/**
+ * Enhancements 2–12. Needs MCP_TOKEN (the data is set up through /api/mcp, the way Claude would).
+ * #2's "prefilled from the onboarding form" is checked in the v7 flows (after the 'Yes' submit).
+ * The reminder wording (#5) is read from /api/cron/reminders?preview=1, which needs CRON_SECRET on the dev server
+ * (CRON_SECRET=test here, or the same value in this shell); without it that one check is skipped with a note.
+ * V10_SHOTS=/path saves the screenshots (device scale 2; phone ones are viewport-only 390x844).
+ */
+async function v10Flows(browser) {
+  console.log("\n== v10: outreach profile, Google status per business, plan subsections, schedule reminders, creator check, payment text, launch kit, owner drop link, send mode, client health, make it a deal");
+  if (!process.env.MCP_TOKEN) { console.log("  skip (set MCP_TOKEN: these flows set their data up through /api/mcp)"); return; }
+  const SHOTS = process.env.V10_SHOTS;
+  const fs = await import("node:fs");
+  if (SHOTS) fs.mkdirSync(SHOTS, { recursive: true });
+  const dsf = SHOTS ? 2 : 1;
+  const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: dsf });
+  await login(context);
+  const page = await context.newPage();
+  const { errors } = watch(page);
+  page.setDefaultTimeout(30000);
+  page.on("dialog", (d) => d.accept().catch(() => {}));
+  const phone = { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, deviceScaleFactor: dsf };
+  /** A signed-in phone. `dialogs` counts confirm() boxes (all accepted). */
+  const phonePage = async () => {
+    const ctx = await browser.newContext({ ...phone, storageState: await context.storageState(), permissions: ["clipboard-read", "clipboard-write"] });
+    const p = await ctx.newPage();
+    p.setDefaultTimeout(30000);
+    const state = { dialogs: 0, errors: watch(p).errors };
+    p.on("dialog", (d) => { state.dialogs++; d.accept().catch(() => {}); });
+    return { ctx, p, state };
+  };
+  const noErrors = (errs, label) => { const real = errs.filter((e) => !DEV_BLIP.test(e)); if (real.length) throw new Error(`${label}: ${real.slice(0, 2).join(" | ")}`); };
+  const card = (p, title) => p.locator("main section", { has: p.locator(":scope > header h2", { hasText: title }) }).first();
+  const saveDetails = async () => {
+    await page.locator("button", { hasText: "Save details" }).click();
+    await page.waitForLoadState("networkidle");
+    await page.waitForTimeout(800);
+  };
+  const approve = async (draftId) => {
+    await page.goto(`${BASE}/review?draft=${draftId}`, { waitUntil: "networkidle" });
+    await page.locator(`#d-${draftId} button:has-text('Approve')`).first().click();
+    await page.waitForLoadState("networkidle");
+    await page.waitForTimeout(1200);
+  };
+
+  const stamp = Date.now().toString(36);
+  const SECRET = "Hunter2!!x";
+  const today = nyDay();
+  const depot = `Launch Depot ${stamp}`, grill = `Send Grill ${stamp}`;
+  const depotHandle = `launchdepot_${stamp}`;
+  const grillSender = `hello@sendgrill-${stamp}.example.com`;
+  const OFFER = `Free seafood boil for 2 (smoke ${stamp})`;
+  let depotId = null, grillId = null;
+
+  await step("setup: two test businesses through MCP create_business", async () => {
+    const a = await tool("create_business", { name: depot, location: "Colonial Heights", services: ["instagram", "tiktok", "google", "creators"], instagram: `@${depotHandle}` });
+    const b = await tool("create_business", { name: grill, location: "Henrico", services: ["instagram", "creators"] });
+    depotId = a.id; grillId = b.id;
+    if (!depotId || !grillId) throw new Error(`no ids: ${JSON.stringify([a, b]).slice(0, 300)}`);
+  });
+
+  /* ── #2 Outreach profile ── */
+  await step("#2 Settings → Outreach profile: a password is refused (never echoed); sender + standing offer save, the handle tidied to @x", async () => {
+    await page.goto(`${BASE}/clients/${depotId}/settings`, { waitUntil: "networkidle" });
+    const form = page.locator("form[aria-label='Outreach profile']");
+    const status = form.locator("p[role='status']");
+    await form.locator("#op-kind").selectOption("other");
+    await form.locator("#op-from").fill(`login pw: ${SECRET}`);
+    await form.locator("button[type='submit']").click();
+    await status.filter({ hasText: /password or login/ }).waitFor({ timeout: 20000 });
+    if ((await status.innerText()).includes(SECRET)) throw new Error("the refusal echoed the password");
+    await form.locator("#op-kind").selectOption("instagram");
+    await form.locator("#op-from").fill(`instagram.com/${depotHandle}`);
+    await form.locator("#op-offer").fill(OFFER);
+    await form.locator("button[type='submit']").click();
+    await status.filter({ hasText: /^Saved:/ }).waitFor({ timeout: 20000 });
+    await page.reload({ waitUntil: "networkidle" });
+    const got = { from: await page.inputValue("#op-from"), kind: await page.inputValue("#op-kind"), offer: await page.inputValue("#op-offer") };
+    if (got.from !== `@${depotHandle}` || got.kind !== "instagram" || got.offer !== OFFER) throw new Error(`saved profile: ${JSON.stringify(got)}`);
+  });
+  await step("#2 MCP: list_clients / get_client_month return outreachProfile (and say what isn't saved); update_business saves one, a password is refused", async () => {
+    const lc = await tool("list_clients", {});
+    const d = lc.find((c) => c.id === depotId)?.outreachProfile;
+    if (d?.writeAs !== depot || d.sendFrom !== `@${depotHandle}` || d.sendFromKind !== "instagram" || d.creatorOffer !== OFFER || d.notSaved) throw new Error(`list_clients profile: ${JSON.stringify(d)}`);
+    const g0 = lc.find((c) => c.id === grillId)?.outreachProfile;
+    if (!g0?.notSaved?.includes("sender account") || !g0.notSaved.includes("standing creator offer")) throw new Error(`empty profile doesn't say what's missing: ${JSON.stringify(g0)}`);
+    if (lc.find((c) => c.kind === "creator")?.outreachProfile) throw new Error("Nora's own workspace has an outreach profile");
+    const bad = await toolRaw("update_business", { client_id: grillId, send_from: `account login pw: ${SECRET}` });
+    if (!bad.isError || bad.text.includes(SECRET)) throw new Error(`password as sender: ${bad.text.slice(0, 200)}`);
+    const r = await tool("update_business", { client_id: grillId, send_from: grillSender.replace("hello", "Hello"), creator_offer: "Dinner for two on the house" });
+    if (!JSON.stringify(r.changed ?? []).includes("→")) throw new Error(`no before → after: ${JSON.stringify(r).slice(0, 300)}`);
+    const m = (await tool("get_client_month", { client_id: grillId })).business.outreachProfile;
+    if (m?.sendFrom !== grillSender || m.sendFromKind !== "email" || m.creatorOffer !== "Dinner for two on the house") throw new Error(`get_client_month profile: ${JSON.stringify(m)}`);
+  });
+
+  /* ── #3 Google review status per business ── */
+  await step("#3 Settings → Google: one line per business ('Not linked'), no global 'Connected' badge; the business page and its Settings show the same; a picked listing without a Google account is not 'Connected'", async () => {
+    await page.goto(`${BASE}/settings`, { waitUntil: "networkidle" });
+    const g = page.locator("#google");
+    if ((await g.innerText()).split("\n").some((l) => l.trim() === "Connected")) throw new Error("the Google card still carries a global 'Connected' badge");
+    const active = (await tool("list_clients", {})).filter((c) => c.kind === "business").length;
+    const lines = await g.locator("ul > li").count();
+    if (lines !== active) throw new Error(`${lines} lines for ${active} businesses`);
+    if (!/Not linked/.test(await g.locator("ul > li", { hasText: depot }).innerText())) throw new Error("no 'Not linked' line for the new business");
+    await page.goto(`${BASE}/clients/${depotId}`, { waitUntil: "networkidle" });
+    const line = page.locator("main p", { hasText: "Google reviews" }).filter({ hasText: "Not linked" }).first();
+    await line.waitFor({ timeout: 15000 });
+    if (!(await line.locator("a[href='/settings#google-locations']").count())) throw new Error("the business page line has no 'Link it'");
+    await page.goto(`${BASE}/clients/${grillId}/settings`, { waitUntil: "networkidle" });
+    const sync = page.locator("main p", { hasText: "Review sync" }).first();
+    if (!/Not linked/.test(await sync.innerText())) throw new Error(`Settings line: ${await sync.innerText()}`);
+    await page.fill("#s-gloc", "accounts/111/locations/222");
+    await saveDetails();
+    await page.goto(`${BASE}/clients/${grillId}/settings`, { waitUntil: "networkidle" });
+    const now = flat(await page.locator("main p", { hasText: "Review sync" }).first().innerText());
+    if (!/Google not connected/.test(now) || /\d+ reviews?|Synced/.test(now)) throw new Error(`a listing with no Google account reads: ${now}`);
+  });
+  await step("#3 MCP: list_clients carries googleReviewSync per business; get_briefing raises it (no account → one account-level note)", async () => {
+    const lc = await tool("list_clients", {});
+    const d = lc.find((c) => c.id === depotId)?.googleReviewSync;
+    if (d?.status !== "unlinked" || !/not linked/i.test(d.summary ?? "") || !d.whatToDo) throw new Error(`depot: ${JSON.stringify(d)}`);
+    const g = lc.find((c) => c.id === grillId)?.googleReviewSync;
+    if (g?.status !== "disconnected") throw new Error(`grill: ${JSON.stringify(g)}`);
+    const cm = await tool("get_client_month", { client_id: depotId });
+    if (cm.business.googleReviewSync?.status !== "unlinked") throw new Error("get_client_month has no googleReviewSync");
+    const b = await tool("get_briefing", {});
+    if (b.businesses.find((x) => x.id === depotId)?.googleReviewSync !== "unlinked") throw new Error("briefing business has no googleReviewSync state");
+    const top = b.googleReviewSync;
+    if (!top || (top.accountConnected !== false && !(top.businesses ?? []).some((x) => x.businessId === depotId))) throw new Error(`briefing googleReviewSync: ${JSON.stringify(top).slice(0, 300)}`);
+    // put the test business back to "no listing"
+    await page.goto(`${BASE}/clients/${grillId}/settings`, { waitUntil: "networkidle" });
+    await page.fill("#s-gloc", "");
+    await saveDetails();
+  });
+
+  /* ── #6 Creator check + already-posted guard, #2 chip on the draft ── */
+  const cA = { name: `V10 Ana ${stamp}`, ig: `v10ana_${stamp}` };
+  const cB = { name: `V10 Ben ${stamp}`, tt: `v10ben_${stamp}` };
+  const cC = { name: `V10 Cy ${stamp}`, ig: `v10cy_${stamp}` };
+  const cD = { name: `V10 Dee ${stamp}`, ig: `v10dee_${stamp}`, email: `dee-${stamp}@example.com` };
+  const BODY_A = `Hi Ana! We're ${depot} in Colonial Heights and we loved your seafood reels. Come see us: ${OFFER}. If you post, please tag it as gifted/#ad. Interested?`;
+  const BODY_B = `Hi Ben! We're ${depot}. We'd love to have you in: ${OFFER}. If you post, please tag it as gifted/#ad.`;
+  const BODY_D = `Hi Dee,\n\nWe're ${grill} in Henrico. Dinner for two on the house, whenever suits you. If you post, please tag it as gifted/#ad.\n\n${grill}`;
+  const SUBJECT_D = `Dinner at ${grill}?`;
+  const ids = {}, out = {}, drafts = {};
+  await step("#6 creator check: numbers saved with stats_source read 'checked today'; without one 'never checked'; stats_source without the counts is refused", async () => {
+    const src = `https://www.instagram.com/${cA.ig}/`;
+    const a = await tool("upsert_creator", { name: cA.name, instagram_handle: cA.ig, instagram_followers: 10500, stats_source: src, city: "Richmond" });
+    ids.a = a.creator.id;
+    if (a.creator.statsCheck !== "checked today" || !a.creator.statsCheckedAt || a.creator.statsSource !== src) throw new Error(`with a source: ${JSON.stringify(a.creator).slice(0, 300)}`);
+    const b = await tool("upsert_creator", { name: cB.name, tiktok_handle: cB.tt, tiktok_followers: 8200 });
+    ids.b = b.creator.id;
+    if (!/^never checked/.test(b.creator.statsCheck) || b.creator.statsCheckedAt) throw new Error(`without a source: ${JSON.stringify(b.creator).slice(0, 300)}`);
+    const bad = await toolRaw("upsert_creator", { id: ids.b, name: cB.name, stats_source: `https://www.tiktok.com/@${cB.tt}` });
+    if (!bad.isError || !/counts/.test(bad.text)) throw new Error(`stats_source alone: ${bad.text.slice(0, 200)}`);
+    const notUrl = await toolRaw("upsert_creator", { id: ids.b, name: cB.name, tiktok_followers: 8200, stats_source: "I looked on my phone" });
+    if (!notUrl.isError) throw new Error("a stats_source that isn't a link was accepted");
+    ids.c = (await tool("upsert_creator", { name: cC.name, instagram_handle: cC.ig, instagram_followers: 3200, stats_source: `https://www.instagram.com/${cC.ig}/` })).creator.id;
+    ids.d = (await tool("upsert_creator", { name: cD.name, instagram_handle: cD.ig, email: cD.email, instagram_followers: 21000, stats_source: `https://www.instagram.com/${cD.ig}/` })).creator.id;
+  });
+  await step("#2 + #6 outreach draft written as the business: no warnings when sender, offer and a fresh check are saved; the review card shows 'Send from @x (Instagram, not Nora) · Offer: …' and '10.5K IG · checked today · no prior posts'", async () => {
+    const o = await tool("upsert_outreach", { client_id: depotId, creator_id: ids.a, stage: "shortlisted", comp_type: "gifted" });
+    out.a = o.outreachId;
+    if (o.outreach.channel !== "instagram_dm") throw new Error(`channel not defaulted from the creator's handles: ${o.outreach.channel}`);
+    const d = await tool("create_draft", { client_id: depotId, kind: "outreach_dm", title: `DM ${cA.name}`, body: BODY_A, meta: { outreachId: out.a, channel: "instagram_dm" } });
+    drafts.a = d.draftId;
+    if (d.warnings) throw new Error(`unexpected warnings: ${JSON.stringify(d.warnings)}`);
+    await page.goto(`${BASE}/review?draft=${drafts.a}`, { waitUntil: "networkidle" });
+    const t = flat(await page.locator(`#d-${drafts.a}`).innerText());
+    if (!t.includes(`Send from @${depotHandle}`) || !/\(Instagram, not Nora\)/.test(t) || !t.includes(`Offer: ${OFFER}`)) throw new Error(`no sender chip: ${t.slice(0, 300)}`);
+    if (!/10\.5K IG · checked today · no prior posts/.test(t)) throw new Error(`no creator check line: ${t.slice(0, 400)}`);
+    if (/Reads as Nora|Already featured|No sender saved/.test(t)) throw new Error("a clean draft carries a warning badge");
+  });
+  await step("#6 warnings on a draft: never-checked numbers, a channel that isn't the saved sender, text that reads as Nora, no sender/offer saved", async () => {
+    const o = await tool("upsert_outreach", { client_id: depotId, creator_id: ids.b, stage: "shortlisted" });
+    out.b = o.outreachId;
+    if (o.outreach.channel !== "tiktok_dm") throw new Error(`channel: ${o.outreach.channel}`);
+    const d = await tool("create_draft", { client_id: depotId, kind: "outreach_dm", title: `DM ${cB.name}`, body: BODY_B, meta: { outreachId: out.b, channel: "tiktok_dm" } });
+    drafts.b = d.draftId;
+    const w = (d.warnings ?? []).join(" | ");
+    if (!/never checked/.test(w) || !/This is a TikTok DM, but/.test(w)) throw new Error(`warnings: ${w}`);
+    // a business with nothing saved, and a message that sounds like Nora
+    const none = await tool("create_business", { name: `Bare Cafe ${stamp}`, location: "Richmond", services: ["instagram", "creators"] });
+    const o2 = await tool("upsert_outreach", { client_id: none.id, creator_id: ids.c, stage: "shortlisted" });
+    const d2 = await tool("create_draft", { client_id: none.id, kind: "outreach_dm", title: `DM ${cC.name}`, body: "Hi! I'm Nora from @noraeatsgood and I'd love to have you in. If you post, tag it #gifted.", meta: { outreachId: o2.outreachId, channel: "instagram_dm" } });
+    const w2 = (d2.warnings ?? []).join(" | ");
+    if (!/No sender account is saved/.test(w2) || !/No standing creator offer/.test(w2) || !/reads as if Nora/.test(w2)) throw new Error(`warnings: ${w2}`);
+    await page.goto(`${BASE}/review?draft=${d2.draftId}`, { waitUntil: "networkidle" });
+    const t = flat(await page.locator(`#d-${d2.draftId}`).innerText());
+    if (!/No sender saved for Bare Cafe/.test(t) || !/Reads as Nora/.test(t)) throw new Error(`card: ${t.slice(0, 300)}`);
+    await tool("set_business_status", { client_id: none.id, active: false });
+  });
+  await step("#6 already featured: a prior post is recorded without contact → search_creators says alreadyPostedAbout, create_draft refuses the pitch (meta.alreadyPostedOk overrides, with a warning), the creator page shows 'Already featured'", async () => {
+    const post = `https://www.instagram.com/reel/prior${stamp}/`;
+    const notLink = await toolRaw("upsert_outreach", { client_id: depotId, creator_id: ids.c, prior_post_url: "they posted last week" });
+    if (!notLink.isError) throw new Error("a prior post that isn't a link was accepted");
+    const o = await tool("upsert_outreach", { client_id: depotId, creator_id: ids.c, prior_post_url: post });
+    out.c = o.outreachId;
+    if (!/already posted about this business/.test(o.alreadyPosted ?? "") || o.outreach.alreadyPosted !== true || o.outreach.priorPostUrl !== post) throw new Error(`upsert_outreach: ${JSON.stringify(o).slice(0, 300)}`);
+    if (!["sourced", "shortlisted"].includes(o.outreach.stage)) throw new Error(`recording a prior post moved the stage to ${o.outreach.stage}`);
+    const found = (await tool("search_creators", { q: cC.ig })).find((c) => c.id === ids.c);
+    const about = found?.alreadyPostedAbout ?? [];
+    if (!about.some((x) => x.businessId === depotId && x.postUrl === post)) throw new Error(`alreadyPostedAbout: ${JSON.stringify(about)}`);
+    const body = `Hi Cy! We're ${depot}: ${OFFER}. If you post, please tag it as gifted/#ad.`;
+    const no = await toolRaw("create_draft", { client_id: depotId, kind: "outreach_dm", title: `DM ${cC.name}`, body, meta: { outreachId: out.c, channel: "instagram_dm" } });
+    if (!no.isError || !/already posted about/.test(no.text)) throw new Error(`pitch to an already-featured creator: ${no.text.slice(0, 200)}`);
+    const yes = await tool("create_draft", { client_id: depotId, kind: "outreach_dm", title: `Thank you ${cC.name}`, body, meta: { outreachId: out.c, channel: "instagram_dm", alreadyPostedOk: true } });
+    if (!(yes.warnings ?? []).some((w) => /drafted anyway because a person asked/.test(w))) throw new Error(`override warnings: ${JSON.stringify(yes.warnings)}`);
+    await page.goto(`${BASE}/review?draft=${yes.draftId}`, { waitUntil: "networkidle" });
+    const t = flat(await page.locator(`#d-${yes.draftId}`).innerText());
+    if (!/Already featured/.test(t) || !new RegExp(`already posted about ${depot}`).test(t)) throw new Error(`card: ${t.slice(0, 300)}`);
+    await page.goto(`${BASE}/creators/${ids.c}`, { waitUntil: "networkidle" });
+    if (!/Already featured/.test(await page.locator("main").innerText())) throw new Error("creator page has no 'Already featured'");
+  });
+
+  /* ── #10 Phone send mode ── */
+  await step("#10 approve three messages; an email for a business with a saved sender is NOT sent by Nora's inbox", async () => {
+    const o = await tool("upsert_outreach", { client_id: grillId, creator_id: ids.d, channel: "email", stage: "shortlisted" });
+    out.d = o.outreachId;
+    const d = await tool("create_draft", { client_id: grillId, kind: "outreach_email", title: `Email ${cD.name}`, body: BODY_D, meta: { outreachId: out.d, subject: SUBJECT_D } });
+    drafts.d = d.draftId;
+    await approve(drafts.a);
+    await approve(drafts.b);
+    await page.goto(`${BASE}/review?draft=${drafts.d}`, { waitUntil: "networkidle" });
+    const before = flat(await page.locator(`#d-${drafts.d}`).innerText());
+    if (!before.includes(`Send from ${grillSender}`) || !/Approving doesn.t email it/.test(before)) throw new Error(`email card before approving: ${before.slice(0, 300)}`);
+    await page.locator(`#d-${drafts.d} button:has-text('Approve')`).first().click();
+    await page.locator("text=Not emailed automatically").first().waitFor({ timeout: 30000 });
+    const st = await tool("list_drafts", { client_id: grillId, kind: "outreach_email", status: "approved" });
+    if (!JSON.stringify(st).includes(drafts.d)) throw new Error("the email draft isn't 'approved' (was it sent?)");
+  });
+  await step("#10 phone send mode: banner on /review → grouped by sender ('Send as @x' 2, 'Send as hello@…' 1); one card at a time with Copy text, Open DM, Skip and Sent ✓ (creator → Contacted); email opens the mail app; an uncopied Sent asks first", async () => {
+    const { ctx, p, state } = await phonePage();
+    await p.goto(`${BASE}/review`, { waitUntil: "networkidle" });
+    const banner = p.locator("main a[href*='send=1']").first();
+    await banner.waitFor({ timeout: 15000 });
+    if (!/outreach messages? (is|are) ready to send/.test(await banner.innerText())) throw new Error(`banner: ${await banner.innerText()}`);
+    await Promise.all([p.waitForURL(/send=1/, { timeout: 30000 }), banner.tap()]);
+    await p.waitForLoadState("networkidle");
+    const pick = (label) => p.locator("main button", { hasText: `Send as ${label}` });
+    await pick(`@${depotHandle}`).waitFor({ timeout: 15000 });
+    const count = async (label) => flat(await pick(label).innerText()).match(/(\d+)$/)?.[1];
+    if ((await count(`@${depotHandle}`)) !== "2" || (await count(grillSender)) !== "1") throw new Error(`group counts: ${await count(`@${depotHandle}`)} / ${await count(grillSender)}`);
+    if (!new RegExp(`${depot} · Instagram`).test(flat(await pick(`@${depotHandle}`).innerText()))) throw new Error("the group doesn't say which business / account type");
+    await v10Audit(p, "send mode: pick an account (390)");
+    await pick(`@${depotHandle}`).tap();
+    await p.locator("main h2", { hasText: `Send as @${depotHandle}` }).waitFor({ timeout: 15000 });
+    let t = flat(await p.locator("main").innerText());
+    if (!/2 left/.test(t) || !t.includes(cA.name) || !t.includes(`Offer: ${OFFER}`) || !/not Nora/.test(t) || !t.includes("10.5K IG · checked today · no prior posts")) throw new Error(`first card: ${t.slice(0, 500)}`);
+    const dm = p.locator("main a", { hasText: "Open DM" });
+    if ((await dm.getAttribute("href")) !== `https://ig.me/m/${cA.ig}`) throw new Error(`DM link: ${await dm.getAttribute("href")}`);
+    await v10Audit(p, "send mode: one message (390)");
+    if (SHOTS) await p.screenshot({ path: `${SHOTS}/ready-to-send-390.png` });
+    await p.locator("main button", { hasText: "Copy text" }).tap();
+    await p.locator("main button", { hasText: "Copied ✓" }).waitFor({ timeout: 10000 });
+    const clip = await p.evaluate(() => navigator.clipboard.readText()).catch(() => null);
+    if (clip !== null && clip !== BODY_A) throw new Error("the clipboard doesn't hold the message");
+    await p.locator("main button", { hasText: "Sent ✓" }).tap();
+    await p.locator("main article", { hasText: cB.name }).waitFor({ timeout: 30000 });
+    if (state.dialogs) throw new Error("Sent ✓ asked for confirmation although the text was copied");
+    t = flat(await p.locator("main").innerText());
+    if (!/1 left/.test(t) || !/never checked/.test(t) || !/This is a TikTok DM, but/.test(t)) throw new Error(`second card: ${t.slice(0, 500)}`);
+    if ((await p.locator("main a", { hasText: "Open TikTok" }).getAttribute("href")) !== `https://www.tiktok.com/@${cB.tt}`) throw new Error("no TikTok profile link");
+    const sent = (await tool("search_creators", { q: cA.ig })).find((c) => c.id === ids.a)?.outreach?.find((o) => o.businessId === depotId);
+    if (sent?.stage !== "contacted") throw new Error(`after Sent ✓ the outreach stage is ${sent?.stage}`);
+    // Skip keeps it approved
+    await p.locator("main button", { hasText: /^Skip$/ }).tap();
+    await p.locator("main", { hasText: "You skipped 1 for" }).waitFor({ timeout: 10000 });
+    if (!/1 marked sent/.test(await p.locator("main").innerText())) throw new Error("no '1 marked sent' note");
+    const still = (await tool("search_creators", { q: cB.tt })).find((c) => c.id === ids.b)?.outreach?.find((o) => o.businessId === depotId);
+    if (still?.stage === "contacted") throw new Error("a skipped message was marked sent");
+    // the email account
+    await pick(grillSender).tap();
+    await p.locator("main h2", { hasText: `Send as ${grillSender}` }).waitFor({ timeout: 15000 });
+    const mail = await p.locator("main a", { hasText: "Open email" }).getAttribute("href");
+    if (!mail?.startsWith(`mailto:${encodeURIComponent(cD.email)}?subject=${encodeURIComponent(SUBJECT_D)}&body=`)) throw new Error(`mailto: ${mail?.slice(0, 160)}`);
+    if (!flat(await p.locator("main").innerText()).includes(`Subject: ${SUBJECT_D}`)) throw new Error("no subject line on the email card");
+    await p.locator("main button", { hasText: "Sent ✓" }).tap();
+    await p.locator("main", { hasText: "2 marked sent" }).waitFor({ timeout: 30000 });
+    if (state.dialogs !== 1) throw new Error(`Sent ✓ on a message that wasn't copied or opened asked ${state.dialogs} times (expected once)`);
+    // go back through the skipped one, so nothing is left behind
+    await pick(`@${depotHandle}`).tap();
+    await p.locator("main article", { hasText: cB.name }).waitFor({ timeout: 15000 });
+    await p.locator("main button", { hasText: "Copy text" }).tap();
+    await p.locator("main button", { hasText: "Copied ✓" }).waitFor({ timeout: 10000 });
+    await p.locator("main button", { hasText: "Sent ✓" }).tap();
+    await p.locator("main", { hasText: "3 marked sent" }).waitFor({ timeout: 30000 });
+    if (await pick(`@${depotHandle}`).count()) throw new Error("the account is still listed after everything was sent");
+    const left = await tool("list_drafts", { client_id: depotId, kind: "outreach_dm", status: "approved" });
+    if (JSON.stringify(left).includes(drafts.a) || JSON.stringify(left).includes(drafts.b)) throw new Error("a sent message is still 'approved'");
+    noErrors(state.errors, "send mode console");
+    await ctx.close();
+  });
+
+  /* ── #4 Plan tasks condensed into subsections ── */
+  const realTask = `V10 real task ${stamp}`;
+  await step("#4 /tasks on a phone: real tasks are listed as they are; the monthly plan sits below in collapsed 'Plan item · N of M ▸' rows that open on tap", async () => {
+    await tool("generate_month_tasks", { client_id: "crab-o-clock" });
+    await tool("create_task", { client_id: "crab-o-clock", title: realTask, assignee: "claude", due_date: today });
+    const { ctx, p, state } = await phonePage();
+    await p.goto(`${BASE}/tasks?client=crab-o-clock&scope=all&view=list`, { waitUntil: "networkidle" });
+    const groups = p.locator("main details.group");
+    if ((await groups.count()) < 3) throw new Error(`${await groups.count()} plan groups`);
+    if (await p.locator("main details.group[open]").count()) throw new Error("a plan group is open by default");
+    const first = groups.filter({ hasText: "Instagram feed posts / reels" }).first();
+    const sum = flat(await first.locator("summary").innerText());
+    if (!/^Instagram feed posts \/ reels · \d+ of 8/.test(sum)) throw new Error(`group summary: ${sum}`);
+    const slot = first.locator("a", { hasText: /Instagram feed posts \/ reels — \d+ of 8/ }).first();
+    const shown = () => slot.evaluate((el) => (el.checkVisibility ? el.checkVisibility() : el.getClientRects().length > 0));
+    if (await shown()) throw new Error("the plan's slots show while the group is collapsed");
+    const real = p.locator("main a", { hasText: realTask }).first();
+    if (!(await real.isVisible())) throw new Error("the real task isn't listed");
+    const ry = (await real.boundingBox()).y, gy = (await first.boundingBox()).y;
+    if (ry > gy) throw new Error("the real task sits below the monthly plan");
+    if (!/Monthly plan · Crab O Clock/.test(await p.locator("main").innerText())) throw new Error("no 'Monthly plan · <business>' card");
+    await v10Audit(p, "/tasks with plan subsections (390)");
+    if (SHOTS) { await toTop(card(p, "Monthly plan · Crab O Clock"), 150); await p.screenshot({ path: `${SHOTS}/tasks-subsections-390.png` }); }
+    await first.locator("summary").tap();
+    await p.waitForTimeout(300);
+    if (!(await shown())) throw new Error("tapping the row didn't open it");
+    // grouped by business: the plan sits under that business's own tasks, labelled
+    await p.goto(`${BASE}/tasks?client=crab-o-clock&scope=all&view=list&group=business`, { waitUntil: "networkidle" });
+    const biz = flat(await p.locator("main").innerText());
+    if (biz.indexOf(realTask) < 0 || biz.toLowerCase().lastIndexOf("monthly plan") < biz.indexOf(realTask)) throw new Error("group=business: the plan isn't under the business's own tasks");
+    if (await p.locator("main details.group[open]").count()) throw new Error("group=business: a plan group is open by default");
+    noErrors(state.errors, "/tasks console");
+    await ctx.close();
+  });
+  await step("#4 business page Outstanding: Ad hoc first, then 'This month's checklist · N left' as collapsed plan rows", async () => {
+    await page.goto(`${BASE}/clients/crab-o-clock`, { waitUntil: "networkidle" });
+    const c = card(page, /^Outstanding/);
+    const t = flat(await c.innerText());
+    const iAd = t.search(/Ad hoc/i), iPlan = t.search(/checklist · \d+ left/i);
+    if (iAd < 0 || iPlan < 0 || iAd > iPlan || !t.includes(realTask)) throw new Error(`order: ad hoc @${iAd}, checklist @${iPlan}`);
+    if (!(await c.locator("details.group").count()) || (await c.locator("details.group[open]").count())) throw new Error("plan rows missing or open by default");
+  });
+  /** A generated checklist slot nobody dated or wrote on (those are counted in monthlyPlanSlots, never listed). */
+  const bareSlot = (t) => !!t.deliverableId && !t.dueDate && !t.details && String(t.id).startsWith("tsk_gen_");
+  await step("#4 get_briefing isn't crowded by plan slots: tasksForClaude holds real tasks (never a bare plan slot), the plan is counted per item in monthlyPlanSlots", async () => {
+    const b = await tool("get_briefing", {});
+    const mine = b.tasksForClaude ?? [];
+    if (mine.some(bareSlot)) throw new Error("a bare plan slot is in tasksForClaude");
+    if (!mine.some((t) => t.title === realTask)) throw new Error("the real task isn't in tasksForClaude");
+    if ((b.monthlyPlanSlots?.items ?? []).some((s) => s.month !== b.month)) throw new Error("monthlyPlanSlots.items lists an earlier month line by line");
+    const crab = (b.monthlyPlanSlots?.items ?? []).filter((s) => s.businessId === "crab-o-clock");
+    const ig = crab.find((s) => /Instagram feed posts/.test(s.deliverable));
+    if (!ig || ig.target !== 8 || !(ig.openForYou >= 1) || typeof ig.done !== "number") throw new Error(`monthlyPlanSlots: ${JSON.stringify(crab).slice(0, 300)}`);
+    if (!/list_tasks/.test(b.monthlyPlanSlots.note ?? "")) throw new Error("no hint on how to get the slot ids");
+    const biz = b.businesses.find((x) => x.id === "crab-o-clock");
+    if (!(biz.openPlanSlots >= 1) || typeof biz.openTasks !== "number") throw new Error(`business counts: ${JSON.stringify({ openTasks: biz.openTasks, openPlanSlots: biz.openPlanSlots })}`);
+    const plan = await tool("list_tasks", { client_id: "crab-o-clock", scope: "plan", limit: 5 });
+    if (!plan.length || !plan.every((t) => t.deliverableId)) throw new Error("list_tasks scope plan doesn't return the slots");
+  });
+  await step("#4 dated plan work isn't hidden: a slot a person dated (now overdue) is back in tasksForClaude, and its plan line says overdue + nextDue", async () => {
+    const b0 = await tool("get_briefing", {});
+    const slots = await tool("list_tasks", { client_id: "crab-o-clock", scope: "plan", month: b0.month, status: "todo", limit: 100 });
+    const slot = slots.find((t) => bareSlot(t) && t.assignee === "unassigned");
+    if (!slot) throw new Error("no open plan slot to date");
+    const lineOf = (b) => b.monthlyPlanSlots.items.find((i) => i.businessId === "crab-o-clock" && i.deliverableId === slot.deliverableId);
+    const was = lineOf(b0)?.overdue ?? 0;
+    const due = plusDays(today, -2);
+    await tool("update_task", { task_id: slot.id, due_date: due });
+    try {
+      const b = await tool("get_briefing", {});
+      if (!(b.tasksForClaude ?? []).some((t) => t.id === slot.id && t.dueDate === due)) throw new Error("an overdue, dated plan task isn't in tasksForClaude");
+      if ((b.tasksForClaude ?? []).some(bareSlot)) throw new Error("a bare plan slot is in tasksForClaude");
+      const line = lineOf(b);
+      if (line?.overdue !== was + 1 || !(line.nextDue <= due)) throw new Error(`plan line: ${JSON.stringify(line)}`);
+    } finally {
+      await tool("update_task", { task_id: slot.id, due_date: null }); // a bare slot again, so nothing here is overdue for the later steps
+    }
+  });
+
+  /* ── #5 Schedule in Nora's reminders + calendar feed ── */
+  await step("#5 schedule → Nora's 8am reminder: 'Tomorrow: <business>' · '📸 reel owed' (a free job says Free), Mondays add 'N reels owed'; no money", async () => {
+    // A far-off week nobody else uses, so "tomorrow" there holds only this run's job. 6 Jan 2031 is a Monday.
+    const monday = plusDays("2031-01-06", (Math.floor(Date.now() / 60000) % 1500) * 7);
+    const tue = plusDays(monday, 1), wed = plusDays(monday, 2);
+    const reelCafe = `V10 Reel Cafe ${stamp}`, freeCafe = `V10 Free Cafe ${stamp}`;
+    await tool("add_to_schedule", { items: [{ business: reelCafe, date: tue, reel: true }, { business: freeCafe, date: wed, free: true }] });
+    const preview = async (ymd) => {
+      const r = await fetch(`${BASE}/api/cron/reminders?preview=1&at=${ymd}T14:00:00Z`, { headers: { authorization: `Bearer ${process.env.CRON_SECRET ?? "test"}` } });
+      return { status: r.status, body: await r.json().catch(() => null) };
+    };
+    const mon = await preview(monday);
+    if (mon.status === 503) { console.log("       (CRON_SECRET isn't set on the dev server, so the reminder wording wasn't checked: start it with CRON_SECRET=test)"); return; }
+    if (mon.status !== 200 || !mon.body?.preview) throw new Error(`preview: HTTP ${mon.status} ${JSON.stringify(mon.body).slice(0, 200)}`);
+    const msgs = mon.body.messages;
+    const m = msgs.find((x) => x.title === `Tomorrow: ${reelCafe}`);
+    if (!m || m.body !== "📸 reel owed" || m.topic !== "visit_reminder" || m.url !== `/calendar?month=${tue.slice(0, 7)}`) throw new Error(`reel job: ${JSON.stringify(m ?? msgs).slice(0, 300)}`);
+    const weekly = msgs.find((x) => /^\d+ reels? owed$/.test(x.title));
+    if (!weekly || weekly.url !== "/calendar?show=reels" || mon.body.scheduleTomorrow !== 1 || !(mon.body.reelsOwed >= 1)) throw new Error(`weekly line: ${JSON.stringify(weekly ?? mon.body).slice(0, 300)}`);
+    const tu = await preview(tue);
+    const f = tu.body.messages.find((x) => x.title === `Tomorrow: ${freeCafe}`);
+    if (!f || f.body !== "Free") throw new Error(`free job: ${JSON.stringify(f ?? tu.body.messages).slice(0, 300)}`);
+    if (tu.body.messages.some((x) => /reels? owed$/.test(x.title))) throw new Error("the weekly reels line went out on a Tuesday");
+    for (const x of [...msgs, ...tu.body.messages].filter((x) => x.topic === "visit_reminder" && !String(x.url).startsWith("/deals"))) {
+      if (/\$\s?\d|Zelle|Venmo/i.test(`${x.title} ${x.body}`)) throw new Error(`money in a schedule reminder: ${x.title} · ${x.body}`);
+    }
+  });
+  await step("#5 calendar feed: tomorrow's job is an all-day 'Nora: <business> · 📸 reel to post' and the coming Monday carries '📸 N reels to post'; no money", async () => {
+    const tomorrow = plusDays(today, 1);
+    const feedCafe = `V10 Feed Cafe ${stamp}`;
+    await tool("add_to_schedule", { items: [{ business: feedCafe, date: tomorrow, reel: true }] });
+    await page.goto(`${BASE}/settings/notifications`, { waitUntil: "networkidle" });
+    await page.locator("button", { hasText: /Make my calendar link|Make a new link/ }).click();
+    await page.locator("#cal-new-link").waitFor({ timeout: 15000 });
+    const url = await page.inputValue("#cal-new-link");
+    const ics = (await (await fetch(BASE + new URL(url).pathname)).text()).replace(/\r\n[ \t]/g, "");
+    const events = ics.split("BEGIN:VEVENT").slice(1);
+    const ev = events.find((e) => e.includes(`SUMMARY:Nora: ${feedCafe}`));
+    if (!ev || !/· 📸 reel to post/.test(ev) || !ev.includes(`DTSTART;VALUE=DATE:${tomorrow.replace(/-/g, "")}`)) throw new Error(`tomorrow's job: ${ev?.slice(0, 300)}`);
+    const weekly = events.find((e) => /SUMMARY:Nora: 📸 \d+ reels? to post/.test(e));
+    const day = weekly?.match(/DTSTART;VALUE=DATE:(\d{4})(\d{2})(\d{2})/);
+    if (!day || new Date(`${day[1]}-${day[2]}-${day[3]}T12:00:00Z`).getUTCDay() !== 1) throw new Error(`weekly reels event: ${weekly?.slice(0, 300)}`);
+    if (!weekly.includes(feedCafe.replace(/,/g, "\\,")) && !/more/.test(weekly)) throw new Error("the weekly event doesn't list the businesses");
+    if (/\$\s?\d|Zelle/.test(events.filter((e) => /SUMMARY:Nora: /.test(e)).join("\n"))) throw new Error("money in the feed's schedule events");
+  });
+
+  /* ── #12 Make it a deal, #7 Request payment ── */
+  const jobBiz = `V10 Job Bistro ${stamp}`, giftBiz = `V10 Gift Cafe ${stamp}`;
+  const jobDay = plusDays(today, 2), jobMonth = jobDay.slice(0, 7);
+  const PAY = `Zelle: 555-010-0199 (smoke ${stamp})`;
+  const POST = `https://www.instagram.com/reel/v10${stamp}/`;
+  let dealId = null;
+  await step("#12 schedule on a phone: a paid job's sheet offers 'Make it a deal' (a Free job's doesn't) → the deal opens prefilled and linked; the row then shows 'Not paid'", async () => {
+    await tool("add_to_schedule", { items: [{ business: jobBiz, date: jobDay, reel: true }, { business: giftBiz, date: jobDay, free: true }] });
+    const { ctx, p, state } = await phonePage();
+    await p.goto(`${BASE}/calendar?month=${jobMonth}`, { waitUntil: "networkidle" });
+    await p.locator(`button[aria-label='Edit ${giftBiz}']`).tap();
+    const sheet = p.locator("dialog[open]");
+    await sheet.locator("button", { hasText: /^Save$/ }).waitFor({ timeout: 15000 });
+    if (await sheet.locator("button", { hasText: "Make it a deal" }).count()) throw new Error("a Free job offers 'Make it a deal'");
+    await sheet.locator("button", { hasText: "Close" }).tap();
+    await p.locator(`button[aria-label='Edit ${jobBiz}']`).tap();
+    const make = p.locator("dialog[open] button", { hasText: "Make it a deal" });
+    await make.waitFor({ timeout: 15000 });
+    await p.waitForTimeout(500);
+    await v10Audit(p, "schedule sheet with Make it a deal (390)", { tabbar: false });
+    if (SHOTS) await p.screenshot({ path: `${SHOTS}/schedule-make-deal-390.png` });
+    await Promise.all([p.waitForURL(/\/deals\/[^/?]+\?from=schedule/, { timeout: 60000 }), make.tap()]);
+    dealId = new URL(p.url()).pathname.split("/")[2];
+    await p.waitForLoadState("networkidle");
+    if (!/Deal made from Nora.s schedule/.test(await p.locator("main").innerText())) throw new Error("no 'made from the schedule' note on the deal");
+    const vals = await p.evaluate(() => ({ name: document.querySelector("#businessName")?.value, comp: document.querySelector("#compType")?.value, amount: document.querySelector("#amount")?.value }));
+    if (vals.name !== jobBiz || vals.comp !== "paid" || vals.amount) throw new Error(`deal not prefilled (or a fee was set): ${JSON.stringify(vals)}`);
+    if ((await p.locator("main select[aria-label='Type']").first().inputValue().catch(() => null)) !== "ig_reel") throw new Error("the 📸 job didn't get a Reel deliverable");
+    if (!(await p.locator(`main a[href='/calendar?month=${jobMonth}']`).count())) throw new Error("the deal doesn't link back to the schedule");
+    await p.goto(`${BASE}/calendar?month=${jobMonth}`, { waitUntil: "networkidle" });
+    const row = p.locator("main li", { hasText: jobBiz }).first();
+    const badge = row.locator(`a[href='/deals/${dealId}']`);
+    if (flat(await badge.innerText()) !== "Not paid") throw new Error(`row badge: ${await badge.innerText()}`);
+    await v10Audit(p, "schedule with a deal badge (390)");
+    if (SHOTS) { await toTop(row, 220); await p.screenshot({ path: `${SHOTS}/schedule-deal-badge-390.png` }); }
+    // tapping it twice never makes a second deal: the sheet now links the deal instead
+    await p.locator(`button[aria-label='Edit ${jobBiz}']`).tap();
+    await p.locator(`dialog[open] a[href='/deals/${dealId}']`, { hasText: "Open the deal" }).waitFor({ timeout: 15000 });
+    if (await p.locator("dialog[open] button", { hasText: "Make it a deal" }).count()) throw new Error("'Make it a deal' still offered after the deal exists");
+    noErrors(state.errors, "schedule console");
+    await ctx.close();
+  });
+  await step("#7 Settings → 'How Nora gets paid': one line saved once; a password is refused and never echoed", async () => {
+    await page.goto(`${BASE}/settings`, { waitUntil: "networkidle" });
+    const form = page.locator("#payment form");
+    const status = form.locator("p[role='status']");
+    await form.locator("#payment-line").fill(`venmo password: ${SECRET}`);
+    await form.locator("button[type='submit']").click();
+    await status.filter({ hasText: /password or login/ }).waitFor({ timeout: 20000 });
+    if ((await status.innerText()).includes(SECRET)) throw new Error("the refusal echoed the password");
+    await form.locator("#payment-line").fill(PAY);
+    await form.locator("button[type='submit']").click();
+    await status.filter({ hasText: /^Saved\.$/ }).waitFor({ timeout: 20000 });
+    await page.reload({ waitUntil: "networkidle" });
+    if ((await page.inputValue("#payment-line")) !== PAY) throw new Error(`payment line: ${await page.inputValue("#payment-line")}`);
+    const act = await (await page.goto(`${BASE}/activity`, { waitUntil: "networkidle" })).text();
+    if (act.includes("555-010-0199")) throw new Error("the payment line is in the activity log");
+  });
+  await step("#7 deal → Request payment: the invoice has the amount, the deliverable with its post link, the due date and the payment line; so does the friendly reminder; Copy + mailto; nothing is sent", async () => {
+    await page.goto(`${BASE}/deals/${dealId}`, { waitUntil: "networkidle" });
+    await page.fill("#amount", "450");
+    await page.fill("input[name='contactName']", "Pat Sample");
+    await page.fill("input[name='contactEmail']", `pat-${stamp}@example.com`);
+    await page.locator("form:has(#businessName) button[type='submit']").first().click();
+    await page.waitForTimeout(1500);
+    await page.reload({ waitUntil: "networkidle" });
+    if ((await page.inputValue("#amount")) !== "450") throw new Error(`fee not saved: ${await page.inputValue("#amount")}`);
+    const row = page.locator("form", { has: page.locator("input[name='postUrl']") }).first();
+    await row.locator("input[name='postUrl']").fill(POST);
+    await row.locator("input[name='posted']").check();
+    await row.locator("button[type='submit']", { hasText: "Save" }).click();
+    await page.waitForTimeout(1500);
+    const { ctx, p, state } = await phonePage();
+    await p.goto(`${BASE}/deals/${dealId}`, { waitUntil: "networkidle" });
+    const panel = p.locator("main details", { has: p.locator("summary", { hasText: "Request payment" }) });
+    await panel.locator("summary").tap();
+    const ta = p.locator("#payment-request-text");
+    await ta.waitFor({ timeout: 10000 });
+    const inv = await ta.inputValue();
+    for (const s of ["Hi Pat,", "INVOICE", `For: ${jobBiz}`, "Amount due: $450", `- Instagram Reel: ${POST}`, "Due by: ", `How to pay: ${PAY}`]) if (!inv.includes(s)) throw new Error(`invoice misses "${s}":\n${inv}`);
+    if (/\[amount\]|\[how you'd like to be paid\]/.test(inv) || (await panel.locator("text=Still missing").count())) throw new Error("placeholders left in a complete invoice");
+    const mailto = await panel.locator("a", { hasText: "Email it" }).getAttribute("href");
+    if (!mailto?.startsWith(`mailto:pat-${stamp}@example.com?subject=`) || !mailto.includes(encodeURIComponent("Amount due: $450")) || !mailto.includes(encodeURIComponent(POST))) throw new Error(`mailto: ${mailto?.slice(0, 200)}`);
+    await panel.locator("button", { hasText: "Copy text" }).tap();
+    const clip = await p.evaluate(() => navigator.clipboard.readText()).catch(() => null);
+    if (clip !== null && clip.replace(/\r\n/g, "\n") !== inv) throw new Error("Copy text didn't copy the invoice");
+    await toTop(panel, 80);
+    await v10Audit(p, "deal → Request payment (390)");
+    if (SHOTS) { await toTop(panel, 80); await p.screenshot({ path: `${SHOTS}/deal-request-payment-390.png` }); }
+    await panel.locator("button", { hasText: "Friendly reminder" }).tap();
+    const rem = await ta.inputValue();
+    for (const s of ["friendly reminder", "$450", POST, `How to pay: ${PAY}`, "Everything is posted:"]) if (!rem.includes(s)) throw new Error(`reminder misses "${s}":\n${rem}`);
+    if (!/Nothing is sent from Nora HQ/.test(await panel.innerText())) throw new Error("the panel doesn't say nothing is sent");
+    noErrors(state.errors, "deal console");
+    await ctx.close();
+    // "Invoice sent" still does the tracking; the panel then opens on the reminder
+    await page.reload({ waitUntil: "networkidle" });
+    await page.locator("main button", { hasText: "Invoice sent" }).click();
+    await page.locator("main summary", { hasText: "Send a reminder" }).waitFor({ timeout: 20000 });
+  });
+  await step("#12 the fee stays on the deal: marked paid → the schedule row says 'Paid'; no amount on the schedule page, in list_schedule or get_reels_to_post", async () => {
+    await page.goto(`${BASE}/deals/${dealId}`, { waitUntil: "networkidle" });
+    await page.locator("main button", { hasText: "Mark paid" }).click();
+    await page.locator("main button", { hasText: "Not paid after all" }).waitFor({ timeout: 20000 });
+    if (await page.locator("main summary", { hasText: /Request payment|Send a reminder/ }).count()) throw new Error("a paid deal still offers a payment request");
+    const { ctx, p } = await phonePage();
+    await p.goto(`${BASE}/calendar?month=${jobMonth}`, { waitUntil: "networkidle" });
+    const row = p.locator("main li", { hasText: jobBiz }).first();
+    if (flat(await row.locator(`a[href='/deals/${dealId}']`).innerText()) !== "Paid") throw new Error("row badge isn't 'Paid'");
+    const text = (await p.locator("main").innerText()).replace(/V10 [A-Za-z ]+ [a-z0-9]+/g, "");
+    if (/\$\s?\d|\b450\b|Zelle/.test(text)) throw new Error("money on the schedule page");
+    await ctx.close();
+    const item = (await tool("list_schedule", { month: jobMonth })).items.find((i) => JSON.stringify(i).includes(jobBiz));
+    if (item?.dealId !== dealId) throw new Error(`list_schedule dealId: ${JSON.stringify(item)}`);
+    if (Object.keys(item).some((k) => /pay|amount|cents|fee/i.test(k)) || /\$\s?\d/.test(JSON.stringify(item))) throw new Error(`money / payment in list_schedule: ${JSON.stringify(item)}`);
+    if (/\$\s?\d|amountCents|paymentStatus/.test(JSON.stringify(await tool("get_reels_to_post", {})))) throw new Error("money in get_reels_to_post");
+  });
+
+  await step("#12 a job and its deal are one job: the Reel posted on the deal ticks the schedule's 📸 (and back); a new day on the schedule moves the deal's visit; a new visit on the deal moves the job; one reminder, on the right day", async () => {
+    const job = async () => (await tool("list_schedule", { month: jobMonth })).items.find((i) => i.dealId === dealId);
+    const reelPosted = async () => (await tool("get_deal", { id: dealId })).deliverables.find((x) => x.kind === "Instagram Reel")?.posted;
+    // #7 marked the deal's Reel posted with its link: the schedule no longer owes it
+    if (!/^posted /.test((await job())?.reel ?? "")) throw new Error(`the schedule says reel: ${(await job())?.reel}`);
+    if (JSON.stringify(await tool("get_reels_to_post", {})).includes(jobBiz)) throw new Error("a reel posted on the deal is still owed on the schedule");
+    // untick it on the schedule → the deal's Reel isn't posted; tick it → posted again
+    await page.goto(`${BASE}/calendar?month=${jobMonth}`, { waitUntil: "networkidle" });
+    const tick = (label) => page.locator(`main input[type='checkbox'][aria-label^='${label} for ${jobBiz}']`).first();
+    const until = async (fn, what) => { for (let i = 0; i < 40; i++) { if (await fn()) return; await page.waitForTimeout(500); } throw new Error(what); };
+    await tick("Reel posted").click();
+    await tick("Reel to post").waitFor({ timeout: 20000 });
+    await until(async () => (await reelPosted()) === false, "unticking the reel on the schedule left the deal's Reel posted");
+    await tick("Reel to post").click();
+    await tick("Reel posted").waitFor({ timeout: 20000 });
+    await until(async () => (await reelPosted()) === true, "ticking the reel on the schedule didn't mark the deal's Reel posted");
+    // schedule → deal: the job gets a new day (the way a re-paste or Claude would give it one); the visit follows, still at the noon placeholder
+    const dayA = plusDays(jobDay, 1).slice(0, 7) === jobMonth ? plusDays(jobDay, 1) : plusDays(jobDay, -1);
+    await tool("add_to_schedule", { items: [{ business: jobBiz, date: dayA }] });
+    const d = await tool("get_deal", { id: dealId });
+    if (d.visit !== `${dayA} 12:00 (New York time)`) throw new Error(`the deal's visit after the schedule moved to ${dayA}: ${d.visit}`);
+    // deal → schedule: a real time on another day
+    const dayB = plusDays(jobDay, 2).slice(0, 7) === jobMonth ? plusDays(jobDay, 2) : plusDays(jobDay, -2);
+    await page.goto(`${BASE}/deals/${dealId}`, { waitUntil: "networkidle" });
+    await page.fill("#visitAt", `${dayB}T15:30`);
+    await page.locator("form:has(#businessName) button[type='submit']").first().click();
+    await until(async () => (await tool("get_deal", { id: dealId })).visit === `${dayB} 15:30 (New York time)`, "the new visit time wasn't saved");
+    await until(async () => (await job())?.date === dayB, `the job on the schedule didn't follow the visit to ${dayB}`);
+    // the reminder goes out once, the day before the new day, with the real time
+    const preview = async (ymd) => {
+      const r = await fetch(`${BASE}/api/cron/reminders?preview=1&at=${ymd}T14:00:00Z`, { headers: { authorization: `Bearer ${process.env.CRON_SECRET ?? "test"}` } });
+      return { status: r.status, mine: ((await r.json().catch(() => null))?.messages ?? []).filter((m) => `${m.title} ${m.body}`.includes(jobBiz)) };
+    };
+    const before = await preview(plusDays(dayB, -1));
+    if (before.status === 503) { console.log("       (CRON_SECRET isn't set on the dev server, so the reminder wasn't checked: start it with CRON_SECRET=test)"); return; }
+    if (before.mine.length !== 1 || !/^Tomorrow 3:30\s?PM: /.test(before.mine[0].title) || before.mine[0].url !== `/deals/${dealId}`) throw new Error(`the day before the visit: ${JSON.stringify(before.mine)}`);
+    for (const old of [jobDay, dayA]) {
+      const m = (await preview(plusDays(old, -1))).mine;
+      if (m.length) throw new Error(`a reminder still goes out for the old day ${old}: ${JSON.stringify(m)}`);
+    }
+  });
+
+  /* ── #8 Launch kit for a business that isn't open yet ── */
+  const openDay = plusDays(today, 12);
+  let launchSteps = [];
+  const planTasks = async () => tool("list_tasks", { client_id: depotId, scope: "plan", limit: 100 });
+  await step("#8 Settings → Pre-launch with an opening day: the launch checklist is added and untouched monthly-plan slots are cleared", async () => {
+    await tool("generate_month_tasks", { client_id: depotId });
+    if (!(await planTasks()).length) throw new Error("no monthly-plan tasks before switching Pre-launch on");
+    await page.goto(`${BASE}/clients/${depotId}/settings`, { waitUntil: "networkidle" });
+    const form = page.locator("form[aria-label='Pre-launch']");
+    await form.locator("input[name='prelaunch']").check();
+    await form.locator("#s-opening").fill(openDay);
+    await form.locator("button[type='submit']").click();
+    const status = form.locator("p[role='status']");
+    await status.filter({ hasText: /Pre-launch · Opens/ }).waitFor({ timeout: 30000 });
+    const msg = await status.innerText();
+    if (!/in 12 days/.test(msg) || !/Added the launch checklist \(6 steps\)/.test(msg) || !/Cleared \d+ untouched monthly checklist tasks?/.test(msg)) throw new Error(`message: ${msg}`);
+    if (SHOTS) {
+      // one shot with the Google status line (left) and the Outreach profile card (right) both in view
+      await page.setViewportSize({ width: 1440, height: 1150 });
+      await page.reload({ waitUntil: "networkidle" });
+      await toTop(page.locator("main p", { hasText: "Review sync" }).first(), 330);
+      await page.screenshot({ path: `${SHOTS}/settings-outreach-google-1440.png` });
+      await page.setViewportSize({ width: 1440, height: 900 });
+    }
+  });
+  await step("#8 no monthly-plan tasks before opening day: generate_month_tasks adds none (onHold); the business page shows the launch checklist + days to opening instead of 'Create checklist'; the briefing lists it under prelaunchBusinesses", async () => {
+    const g = await tool("generate_month_tasks", { client_id: depotId });
+    if (g.tasksCreated !== 0 || !/isn't open yet/.test(g.onHold ?? "")) throw new Error(`generate_month_tasks: ${JSON.stringify(g)}`);
+    const left = await planTasks();
+    if (left.length) throw new Error(`${left.length} monthly-plan tasks exist before opening day`);
+    await page.goto(`${BASE}/clients/${depotId}`, { waitUntil: "networkidle" });
+    const t = flat(await page.locator("main").innerText());
+    for (const s of ["Pre-launch", "Launch checklist", "in 12 days", "0 of 6 done", "Verify the Google Business Profile", "Instagram bio", "TikTok bio", "Google Business description", "3 coming-soon posts", "Opening-day creator shortlist", "the monthly plan starts on opening day"]) {
+      if (!t.includes(s)) throw new Error(`business page misses "${s}"`);
+    }
+    if (await page.locator("button:has-text(\"Create this month's checklist\")").count()) throw new Error("'Create this month's checklist' is offered before opening day");
+    await v10Audit(page, "pre-launch business page (1440)", { touch: false });
+    if (SHOTS) { await toTop(card(page, /^Launch checklist$/), 90); await page.screenshot({ path: `${SHOTS}/prelaunch-checklist-1440.png` }); }
+    const b = await tool("get_briefing", {});
+    const pre = b.prelaunchBusinesses?.businesses?.find((x) => x.businessId === depotId);
+    if (!pre || pre.daysToOpening !== 12 || pre.openingDate !== openDay || pre.launchChecklist?.total !== 6) throw new Error(`prelaunchBusinesses: ${JSON.stringify(pre).slice(0, 300)}`);
+    launchSteps = pre.launchChecklist.open;
+    const biz = b.businesses.find((x) => x.id === depotId);
+    if (biz.needsMonthTasks !== false || biz.prelaunch?.notOpenYet !== true || biz.prelaunch.daysToOpening !== 12) throw new Error(`briefing business: ${JSON.stringify({ needsMonthTasks: biz.needsMonthTasks, prelaunch: biz.prelaunch })}`);
+    const lc = (await tool("list_clients", {})).find((c) => c.id === depotId);
+    if (lc.prelaunch?.daysToOpening !== 12) throw new Error("list_clients has no prelaunch field");
+    const { ctx, p } = await phonePage();
+    await p.goto(`${BASE}/clients/${depotId}`, { waitUntil: "networkidle" });
+    await v10Audit(p, "pre-launch business page (390)");
+    await p.goto(`${BASE}/clients/${depotId}/settings`, { waitUntil: "networkidle" });
+    await v10Audit(p, "business Settings with outreach profile + pre-launch (390)");
+    await ctx.close();
+  });
+  await step("#8 profile_copy drafts: meta.surface required; IG bio 150 / TikTok bio 80 / Google description 750 enforced (create and revise); one pending per surface; approve → 'Mark done (pasted it in)' ticks the launch step", async () => {
+    const mk = (body, surface, extra = {}) => ({ client_id: depotId, kind: "profile_copy", title: "Profile text", body, ...(surface ? { meta: { surface } } : {}), ...extra });
+    const none = await toolRaw("create_draft", mk("A discount store opening soon.", null));
+    if (!none.isError || !/meta\.surface/.test(none.text)) throw new Error(`no surface: ${none.text.slice(0, 200)}`);
+    for (const [surface, max] of [["instagram_bio", 150], ["tiktok_bio", 80], ["google_description", 750]]) {
+      const over = await toolRaw("create_draft", mk("x".repeat(max + 1), surface));
+      if (!over.isError || !over.text.includes(String(max))) throw new Error(`${surface} over the limit: ${over.text.slice(0, 200)}`);
+    }
+    const igStep = launchSteps.find((s) => s.title === "Instagram bio");
+    const bio = `Opening soon in Colonial Heights 🛒 New deals every week. (smoke ${stamp})`;
+    const d = await tool("create_draft", mk(bio, "instagram_bio", { title: "Instagram bio", task_id: igStep?.taskId }));
+    const dup = await toolRaw("create_draft", mk("Another bio.", "instagram_bio"));
+    if (!dup.isError) throw new Error("a second pending Instagram bio was accepted");
+    const rev = await toolRaw("revise_draft", { draft_id: d.draftId, body: "x".repeat(151) });
+    if (!rev.isError || !/150/.test(rev.text)) throw new Error(`revise over the limit: ${rev.text.slice(0, 200)}`);
+    const tt = await tool("create_draft", mk("t".repeat(80), "tiktok_bio", { title: "TikTok bio" }));
+    if (!tt.draftId) throw new Error("a TikTok bio of exactly 80 characters was refused");
+    await page.goto(`${BASE}/review?draft=${d.draftId}`, { waitUntil: "networkidle" });
+    const c = page.locator(`#d-${d.draftId}`);
+    const t = flat(await c.innerText());
+    if (!/Instagram bio/.test(t) || !/150 characters max/.test(t) || !/Nothing is changed on the profile until you paste it in/.test(t)) throw new Error(`review card: ${t.slice(0, 300)}`);
+    await c.locator("button:has-text('Approve')").first().click();
+    await page.locator("text=paste it into").first().waitFor({ timeout: 30000 });
+    await page.goto(`${BASE}/review?draft=${d.draftId}`, { waitUntil: "networkidle" });
+    await page.locator(`#d-${d.draftId} button`, { hasText: "Mark done (pasted it in)" }).click();
+    await page.locator("text=Marked done").first().waitFor({ timeout: 30000 });
+    await page.goto(`${BASE}/clients/${depotId}`, { waitUntil: "networkidle" });
+    if (!/1 of 6 done/.test(await card(page, /^Launch checklist$/).innerText())) throw new Error("the Instagram bio step wasn't ticked");
+  });
+
+  /* ── #9 Owner drop link ── */
+  let dropPath = null;
+  const NOTE = `Buy one get one boba all week, ends Sunday (smoke ${stamp})`;
+  const dropAsks = async () => (await tool("list_asks", { client_id: depotId, limit: 100 })).filter((a) => String(a.body ?? "").startsWith("Turn this flyer into a post + Story"));
+  await step("#9 business page → Owner drop link: 'Make drop link' gives a private /drop/<token> and ready-to-text messages in English, 简体 and 繁體; MCP get_drop_link hands back the same link and sends nothing", async () => {
+    await page.goto(`${BASE}/clients/${depotId}`, { waitUntil: "networkidle" });
+    const c = card(page, /^Owner drop link$/);
+    await c.locator("button", { hasText: "Make drop link" }).click();
+    const input = c.locator("input[aria-label='Owner drop link']");
+    await input.waitFor({ timeout: 30000 });
+    const url = await input.inputValue();
+    if (!/\/drop\/[A-Za-z0-9_-]{40,60}$/.test(url)) throw new Error(`link: ${url}`);
+    dropPath = new URL(url).pathname;
+    await c.locator("button", { hasText: "Turn off" }).waitFor({ timeout: 20000 }); // the card refreshes once the link exists
+    const t = await c.innerText();
+    for (const s of ["English", "简体中文", "繁體中文", "Copy link", "New link"]) if (!t.includes(s)) throw new Error(`card misses ${s}`);
+    const m = await tool("get_drop_link", { client_id: depotId });
+    if (new URL(m.url).pathname !== dropPath || m.newLink) throw new Error("get_drop_link didn't return the link that already works");
+    if (Object.keys(m.messages ?? {}).length !== 3 || !Object.values(m.messages).every((x) => x.includes(m.url))) throw new Error("no three ready-to-text messages with the link");
+    if (!/Not sent/.test(m.howToSend ?? "")) throw new Error("doesn't say it wasn't sent");
+    const nora = await toolRaw("get_drop_link", { client_id: "noraeatsgood" });
+    if (!nora.isError) throw new Error("a drop link for Nora's own workspace");
+  });
+  const pub = await browser.newContext({ ...phone });
+  const dp = await pub.newPage();
+  dp.setDefaultTimeout(30000);
+  const dropErrors = watch(dp).errors;
+  await step("#9 /drop/<token> on a phone, signed out: the business's name and one short screen, in English, 简体 and 繁體; no overflow, inputs ≥16px; an empty send and a typed password are refused", async () => {
+    for (const [lang, title, shot] of [["en", "Got a new deal or flyer?", "drop-en-390"], ["zh-Hans", "有新的优惠或传单吗？", "drop-zh-Hans-390"], ["zh-Hant", "有新的優惠或傳單嗎？", null]]) {
+      const res = await dp.goto(`${BASE}${dropPath}?lang=${lang}`, { waitUntil: "networkidle" });
+      if (res?.status() !== 200) throw new Error(`${lang}: HTTP ${res?.status()}`);
+      const t = await dp.locator("body").innerText();
+      if (!t.includes(depot) || !t.includes(title)) throw new Error(`${lang}: page doesn't greet the business in that language`);
+      if (!(await dp.locator("#drop-note").count())) throw new Error(`${lang}: no note box`);
+      await v10Audit(dp, `/drop ${lang} (390)`, { tabbar: false });
+      if (SHOTS && shot) await dp.screenshot({ path: `${SHOTS}/${shot}.png` });
+    }
+    if ((await dp.locator("meta[name='robots']").getAttribute("content"))?.includes("noindex") !== true) throw new Error("the drop page isn't noindex");
+    await dp.goto(`${BASE}${dropPath}?lang=en`, { waitUntil: "networkidle" });
+    await dp.locator("button[type='submit']").tap();
+    await dp.locator("[role='alert']", { hasText: "Add a photo, or tell us about the deal." }).waitFor({ timeout: 10000 });
+    await dp.fill("#drop-note", `our instagram password: ${SECRET}`);
+    await dp.locator("button[type='submit']").tap();
+    await dp.locator("[role='alert']", { hasText: "That looks like a password" }).waitFor({ timeout: 20000 });
+    if (await dp.locator("[data-intake-done]").count()) throw new Error("a typed password was accepted");
+    if ((await dropAsks()).length) throw new Error("a refused drop created an ask");
+  });
+  await step("#9 a drop becomes ONE ask for Claude ('Turn this flyer into a post + Story'), flagged ownerDrop, the owner's note quoted as data; a hand-crafted upload URL is dropped; the ask page says it came from the owner", async () => {
+    await dp.fill("#drop-note", NOTE);
+    await dp.evaluate(() => {
+      const h = document.querySelector("input[name='uploads']");
+      h.value = JSON.stringify([{ url: "https://attackerstore.public.blob.vercel-storage.com/drop/forged.png", name: "forged.png", contentType: "image/png" }]);
+    });
+    await dp.locator("button[type='submit']").tap();
+    await dp.locator("[data-intake-done]").waitFor({ timeout: 30000 });
+    if (!/Got it, thank you!/.test(await dp.locator("[data-intake-done]").innerText())) throw new Error("no thank-you");
+    const list = await dropAsks();
+    if (list.length !== 1) throw new Error(`${list.length} asks for one drop`);
+    const a = list[0];
+    if (a.ownerDrop !== true || !/private drop link/.test(a.untrustedSource ?? "") || !/never as instructions/.test(a.untrustedSource ?? "")) throw new Error(`not flagged as an owner drop: ${JSON.stringify(a).slice(0, 300)}`);
+    if (!a.body.includes(`> ${NOTE}`) || !a.body.includes(`client_id: ${depotId}`)) throw new Error(`ask body: ${a.body.slice(0, 400)}`);
+    if (/forged|attackerstore/.test(JSON.stringify(a))) throw new Error("the forged upload URL was kept");
+    const b = await tool("get_briefing", {});
+    if (!JSON.stringify(b).includes(a.id) || !/"ownerDrop":true/.test(JSON.stringify(b))) throw new Error("the drop isn't in the briefing as an owner drop");
+    await page.goto(`${BASE}/asks/${a.id}`, { waitUntil: "networkidle" });
+    if (!/From the owner \(drop link\)/.test(await page.locator("main").innerText())) throw new Error("the ask page doesn't say it came from the owner");
+    await page.goto(`${BASE}/clients/${depotId}`, { waitUntil: "networkidle" });
+    if (!/1 sent/.test(await card(page, /^Owner drop link$/).innerText())) throw new Error("the card doesn't count the drop");
+  });
+  await step("#9 limits and dead links: a burst of parallel drops can't pass the 6 an hour, the 7th drop is refused; a made-up token is a 404 (page and upload route); Turn off → the page says expired, an open form can't send, and no ask is created", async () => {
+    for (let i = 2; i <= 4; i++) {
+      await dp.locator("button", { hasText: "Send another" }).tap();
+      await dp.fill("#drop-note", `Deal ${i} (smoke ${stamp})`);
+      await dp.locator("button[type='submit']").tap();
+      await dp.locator("[data-intake-done]").waitFor({ timeout: 30000 });
+    }
+    // A burst: six forms sent at the same moment with two drops left this hour. Exactly two get through.
+    if ((await dropAsks()).length === 4) {
+      const burst = [];
+      for (let i = 0; i < 6; i++) {
+        const bp = await pub.newPage();
+        await bp.goto(`${BASE}${dropPath}?lang=en`, { waitUntil: "networkidle" });
+        await bp.fill("#drop-note", `Burst deal ${i} (smoke ${stamp})`);
+        burst.push(bp);
+      }
+      const sent = await Promise.all(burst.map(async (bp) => {
+        await bp.locator("button[type='submit']").tap();
+        const done = bp.locator("[data-intake-done]"), wait = bp.locator("[role='alert']", { hasText: "Please wait a little" });
+        await done.or(wait).first().waitFor({ timeout: 60000 });
+        return (await done.count()) > 0;
+      }));
+      for (const bp of burst) await bp.close();
+      if (sent.filter(Boolean).length !== 2) throw new Error(`a burst of 6 with 2 drops left: ${sent.filter(Boolean).length} got through`);
+    } else console.log("       (the burst wasn't sent: the link didn't have exactly 4 drops at this point, e.g. this step ran twice)");
+    await dp.locator("button", { hasText: "Send another" }).tap();
+    await dp.fill("#drop-note", `Deal 7 (smoke ${stamp})`);
+    await dp.locator("button[type='submit']").tap();
+    await dp.locator("[role='alert']", { hasText: "Please wait a little" }).waitFor({ timeout: 20000 });
+    if ((await dropAsks()).length !== 6) throw new Error(`${(await dropAsks()).length} asks after 7 tries (limit is 6 an hour)`);
+    const fake = "A".repeat(43);
+    for (const bad of [`/drop/${fake}`, "/drop/abc", "/drop"]) {
+      const r = await fetch(BASE + bad, { redirect: "manual" });
+      if (r.status !== 404) throw new Error(`${bad} → HTTP ${r.status}`);
+    }
+    const up = await fetch(`${BASE}/drop/${fake}/upload`, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
+    if (up.status !== 404) throw new Error(`upload route on a made-up token → HTTP ${up.status}`);
+    // a form that is already open, then the link is turned off on the business page
+    const open = await pub.newPage();
+    await open.goto(`${BASE}${dropPath}?lang=en`, { waitUntil: "networkidle" });
+    await open.fill("#drop-note", `Sent after the link was turned off (smoke ${stamp})`);
+    await page.goto(`${BASE}/clients/${depotId}`, { waitUntil: "networkidle" });
+    const c = card(page, /^Owner drop link$/);
+    await c.locator("button", { hasText: "Turn off" }).click();
+    await c.locator("text=The last link was turned off.").waitFor({ timeout: 20000 });
+    const res = await dp.goto(`${BASE}${dropPath}?lang=en`, { waitUntil: "networkidle" });
+    if (res?.status() !== 200 || !/This link has expired/.test(await dp.locator("body").innerText()) || (await dp.locator("#drop-note").count())) throw new Error("a turned-off link still shows the form");
+    await open.locator("button[type='submit']").tap();
+    await open.locator("text=This link has expired").first().waitFor({ timeout: 20000 });
+    const up2 = await fetch(`${BASE}${dropPath}/upload`, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
+    if (up2.status < 400) throw new Error(`upload route on a turned-off link → HTTP ${up2.status}`);
+    if ((await dropAsks()).length !== 6) throw new Error("a turned-off link created an ask");
+    noErrors(dropErrors.filter((e) => !/404/.test(e)), "/drop console");
+  });
+  await pub.close();
+
+  /* ── #11 Client health strip on Home ── */
+  await step("#11 Home → Client health: one row per active business with its single worst issue ('Opening in 12 days', 'N reviews unanswered', 'All good'); an overdue task outranks the opening and the row opens the right page; Nora's workspace isn't listed", async () => {
+    await page.goto(`${BASE}/`, { waitUntil: "networkidle" });
+    const c = card(page, /^Client health$/);
+    await c.waitFor({ timeout: 15000 });
+    const active = (await tool("list_clients", {})).filter((x) => x.kind === "business").length;
+    if ((await c.locator("li").count()) !== active) throw new Error(`${await c.locator("li").count()} rows for ${active} active businesses`);
+    if (await c.locator("li", { hasText: "noraeatsgood" }).count()) throw new Error("Nora's own workspace is on the strip");
+    const row = (name) => c.locator("li", { hasText: name }).first();
+    let t = flat(await row(depot).innerText());
+    if (!/Heads-up: Opening in 12 days/.test(t) || /more/.test(t)) throw new Error(`pre-launch row: ${t}`);
+    if ((await row(depot).locator("a").getAttribute("href")) !== `/clients/${depotId}`) throw new Error("the opening row doesn't open the business page");
+    if (!/OK: All good/.test(flat(await row(grill).innerText()))) throw new Error(`a business with nothing wrong reads: ${flat(await row(grill).innerText())}`);
+    // Crab O Clock has sample reviews: while any is unanswered, that is its worst issue and the row opens its reviews
+    const unanswered = (await tool("list_reviews", { client_id: "crab-o-clock", unreplied_only: true, limit: 50 })).length;
+    if (unanswered) {
+      const crab = flat(await row("Crab O Clock").innerText());
+      if (!new RegExp(`Needs attention: ${unanswered} reviews? unanswered`).test(crab)) throw new Error(`Crab O Clock with ${unanswered} unanswered reviews reads: ${crab}`);
+      if ((await row("Crab O Clock").locator("a").getAttribute("href")) !== "/reviews?client=crab-o-clock") throw new Error("the reviews row doesn't open the reviews");
+    }
+    await v10Audit(page, "Home with the health strip (1440)", { touch: false });
+    if (SHOTS) { await toTop(c, 90); await page.screenshot({ path: `${SHOTS}/home-health-1440.png` }); }
+    const { ctx, p } = await phonePage();
+    await p.goto(`${BASE}/`, { waitUntil: "networkidle" });
+    await v10Audit(p, "Home with the health strip (390)");
+    if (SHOTS) { await toTop(card(p, /^Client health$/), 70); await p.screenshot({ path: `${SHOTS}/home-health-390.png` }); }
+    await ctx.close();
+    // a worse issue takes the row; the opening is counted behind it
+    const late = await tool("create_task", { client_id: depotId, title: `V10 overdue ${stamp}`, assignee: "nora", due_date: plusDays(today, -2) });
+    await page.goto(`${BASE}/`, { waitUntil: "networkidle" });
+    t = flat(await row(depot).innerText());
+    if (!/Needs attention: 1 task overdue · \+1 more/.test(t)) throw new Error(`with an overdue task: ${t}`);
+    await Promise.all([page.waitForURL(new RegExp(`/tasks\\?client=${depotId}&scope=all`), { timeout: 30000 }), row(depot).locator("a").click()]);
+    await page.waitForLoadState("networkidle");
+    if (!(await page.locator("main a", { hasText: `V10 overdue ${stamp}` }).count())) throw new Error("the row didn't open that business's tasks");
+    await tool("update_task", { task_id: late.taskId, status: "done" });
+  });
+
+  /* ── #8 again: opening day ── */
+  await step("#8 on opening day the normal plan applies again: generate_month_tasks adds the monthly tasks, and 'They're open' takes the business out of pre-launch", async () => {
+    await page.goto(`${BASE}/clients/${depotId}/settings`, { waitUntil: "networkidle" });
+    const form = page.locator("form[aria-label='Pre-launch']");
+    await form.locator("#s-opening").fill(today);
+    await form.locator("button[type='submit']").click();
+    await form.locator("p[role='status']").filter({ hasText: /Opening day is today/ }).waitFor({ timeout: 30000 });
+    const g = await tool("generate_month_tasks", { client_id: depotId });
+    if (!(g.tasksCreated > 0) || g.onHold) throw new Error(`generate_month_tasks on opening day: ${JSON.stringify(g)}`);
+    await page.goto(`${BASE}/clients/${depotId}`, { waitUntil: "networkidle" });
+    const open = page.locator("main button", { hasText: "They're open" });
+    await open.click();
+    await open.waitFor({ state: "detached", timeout: 30000 });
+    await page.reload({ waitUntil: "networkidle" });
+    if (await card(page, /^Launch checklist$/).count()) throw new Error("still showing the launch checklist after 'They're open'");
+    if ((await tool("list_clients", {})).find((x) => x.id === depotId)?.prelaunch) throw new Error("list_clients still says pre-launch");
+  });
+
+  await step("#4 earlier months never crowd a business out: slots left over from two earlier months are ONE 'left over' line for that business, and it keeps its lines for this month", async () => {
+    const b0 = await tool("get_briefing", {});
+    const back = (n) => { const [y, m] = b0.month.split("-").map(Number); const d = new Date(Date.UTC(y, m - 1 - n, 1)); return d.toISOString().slice(0, 7); };
+    for (const m of [b0.month, back(1), back(2)]) await tool("generate_month_tasks", { client_id: grillId, month: m });
+    const b = await tool("get_briefing", {});
+    const items = b.monthlyPlanSlots?.items ?? [];
+    if (items.some((i) => i.month !== b.month)) throw new Error("an earlier month is listed line by line");
+    if (!items.some((i) => i.businessId === grillId)) throw new Error("the business has no line for this month");
+    const seen = new Set(items.map((i) => `${i.businessId}|${i.deliverableId}`));
+    if (seen.size !== items.length) throw new Error("a plan item is listed twice");
+    const left = b.monthlyPlanSlots.leftOverFromEarlierMonths ?? [];
+    const mine = left.filter((l) => l.businessId === grillId);
+    if (mine.length !== 1 || mine[0].fromMonth !== back(2) || mine[0].toMonth !== back(1) || !(mine[0].openForYou >= 2) || !(mine[0].planItems >= 1)) throw new Error(`left over: ${JSON.stringify(mine)}`);
+    if (new Set(left.map((l) => l.businessId)).size !== left.length) throw new Error("more than one left-over line for a business");
+    if (b.monthlyPlanSlots.truncated && !(b.monthlyPlanSlots.totalItems > items.length)) throw new Error("truncated without a total");
+  });
+
+  await step("clean up: drop asks closed, test businesses set inactive", async () => {
+    for (const a of await dropAsks()) await tool("update_ask", { ask_id: a.id, status: "done", note: "Smoke test drop." });
+    for (const id of [depotId, grillId]) await tool("set_business_status", { client_id: id, active: false });
+  });
+  noErrors(errors, "v10 console");
+  await context.close();
+}
+
+/**
+ * A pre-launch sample business with an outreach profile, one approved outreach message and a live owner drop link,
+ * so the responsive audit sees the new screens with something on them. Made once (reused on later runs) through
+ * MCP + the app, like a person would. Returns the extra routes; nothing without MCP_TOKEN.
+ */
+async function v10Routes(browser) {
+  if (!process.env.MCP_TOKEN) return { app: [], pub: [] };
+  try {
+    const name = "Sample Launch Depot";
+    const b = await tool("create_business", { name, location: "Sampleton", services: ["instagram", "tiktok", "google", "creators"], instagram: "@sample_launch_depot" });
+    const id = b.id;
+    await tool("update_business", { client_id: id, send_from: "@sample_launch_depot", send_from_kind: "instagram", creator_offer: "SAMPLE free gift bag for you and a guest" });
+    const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+    await login(context);
+    const page = await context.newPage();
+    page.setDefaultTimeout(30000);
+    await page.goto(`${BASE}/clients/${id}/settings`, { waitUntil: "networkidle" });
+    const form = page.locator("form[aria-label='Pre-launch']");
+    // always saved: keeps the opening day three weeks out however old the sample database is
+    await form.locator("input[name='prelaunch']").check();
+    await form.locator("#s-opening").fill(plusDays(nyDay(), 21));
+    await form.locator("button[type='submit']").click();
+    await form.locator("p[role='status']").filter({ hasText: /Pre-launch/ }).waitFor({ timeout: 30000 });
+    const c = await tool("upsert_creator", { name: "Sample Send Creator", instagram_handle: "sample_send_creator", instagram_followers: 10500, stats_source: "https://www.instagram.com/sample_send_creator/" });
+    const o = await tool("upsert_outreach", { client_id: id, creator_id: c.creator.id });
+    const d = await toolRaw("create_draft", { client_id: id, kind: "outreach_dm", title: "DM Sample Send Creator", body: "Hi! We're Sample Launch Depot (SAMPLE). We open soon and would love to have you in: a free gift bag for you and a guest. If you post, please tag it as gifted/#ad.", meta: { outreachId: o.outreachId, channel: "instagram_dm" } });
+    const draftId = d.isError ? null : JSON.parse(d.text).draftId; // refused when one is already waiting (an earlier run)
+    if (draftId) {
+      await page.goto(`${BASE}/review?draft=${draftId}`, { waitUntil: "networkidle" });
+      await page.locator(`#d-${draftId} button:has-text('Approve')`).first().click();
+      await page.waitForLoadState("networkidle");
+      await page.waitForTimeout(1200);
+    }
+    await context.close();
+    const drop = new URL((await tool("get_drop_link", { client_id: id })).url).pathname;
+    return {
+      app: [`/clients/${id}`, `/clients/${id}/settings`, `/review?tab=approved&send=1&client=${id}`],
+      pub: [drop, `${drop}?lang=zh-Hans`, `${drop}?lang=zh-Hant`],
+    };
+  } catch (e) {
+    console.log(`  (v10 sample screens not set up: ${e.message.split("\n")[0]})`);
+    return { app: [], pub: [] };
+  }
 }
 
 async function detailRoutes(browser) {
@@ -2364,8 +3333,9 @@ function auditPage(touch) {
 }
 
 // "network error" on its own is Chrome's page error when a response stream is cut off mid-flight, which is what an
-// in-flight RSC / server-action response looks like when `next dev` restarts itself (see below).
-const DEV_BLIP = /ERR_CONNECTION_REFUSED|ERR_CONNECTION_RESET|ERR_INCOMPLETE_CHUNKED_ENCODING|ERR_EMPTY_RESPONSE|webpack-hmr|Failed to fetch RSC payload|interrupted by another navigation|chrome-error:|^(pageerror: )?network error$/;
+// in-flight RSC / server-action response looks like when `next dev` restarts itself (see below). "Failed to fetch" on
+// its own is the same restart seen a moment earlier: a server action posted while the server was down never connected.
+const DEV_BLIP = /ERR_CONNECTION_REFUSED|ERR_CONNECTION_RESET|ERR_INCOMPLETE_CHUNKED_ENCODING|ERR_EMPTY_RESPONSE|webpack-hmr|Failed to fetch RSC payload|interrupted by another navigation|chrome-error:|^(pageerror: )?network error$|^(pageerror: )?Failed to fetch$/;
 async function waitForServer() {
   for (let i = 0; i < 90; i++) {
     try { if ((await fetch(`${BASE}/login`)).ok) return; } catch {}
@@ -2375,7 +3345,9 @@ async function waitForServer() {
 
 async function responsive(browser) {
   console.log("\n== responsive");
-  const routes = [...ROUTES, ...(await detailRoutes(browser))];
+  const v10 = await v10Routes(browser);
+  const routes = [...ROUTES, ...(await detailRoutes(browser)), ...v10.app];
+  const publicRoutes = [...PUBLIC_ROUTES, ...v10.pub];
   const kitLive = (await fetch(`${BASE}/kit`)).status === 200;
   const found = new Map(); // message -> Set(viewport)
   const note = (msg, where) => { if (!found.has(msg)) found.set(msg, new Set()); found.get(msg).add(where); };
@@ -2391,7 +3363,7 @@ async function responsive(browser) {
       isMobile: !!vp.touch, hasTouch: !!vp.touch,
     });
     await login(context);
-    for (const [ctx, list] of [[context, routes], [pub, [...PUBLIC_ROUTES, ...(kitLive ? ["/kit"] : [])]]]) {
+    for (const [ctx, list] of [[context, routes], [pub, [...publicRoutes, ...(kitLive ? ["/kit"] : [])]]]) {
     const page = await ctx.newPage();
     const errs = [];
     page.on("console", (m) => { if (m.type() === "error") errs.push(m.text().slice(0, 200)); });
@@ -2429,10 +3401,19 @@ async function responsive(browser) {
   const queue = [...combos];
   await Promise.all(Array.from({ length: 4 }, async () => { while (queue.length) await runCombo(queue.shift()); }));
   for (const [msg, where] of found) fail(`responsive ${msg} [${[...where].join(",")}]`);
-  console.log(`  checked ${pages} page loads (${routes.length} routes + ${PUBLIC_ROUTES.length} logged-out × ${combos.length} viewport/scheme combos)`);
+  console.log(`  checked ${pages} page loads (${routes.length} routes + ${publicRoutes.length} logged-out × ${combos.length} viewport/scheme combos)`);
 }
 
 const browser = await chromium.launch();
+{
+  // every page of every context: note when the dev server drops a connection (see step())
+  const newContext = browser.newContext.bind(browser);
+  browser.newContext = async (...args) => {
+    const ctx = await newContext(...args);
+    ctx.on("requestfailed", (r) => noteBlip(r.failure()?.errorText));
+    return ctx;
+  };
+}
 try {
   if (MODE === "crawl" || MODE === "all") await crawl(browser);
   if (MODE === "flows" || MODE === "all") await flows(browser);
@@ -2440,6 +3421,7 @@ try {
   if (MODE === "flows" || MODE === "all" || MODE === "v6") await v6Flows(browser);
   if (MODE === "flows" || MODE === "all" || MODE === "v7") await v7Flows(browser);
   if (MODE === "flows" || MODE === "all" || MODE === "v8") await v8Flows(browser);
+  if (MODE === "flows" || MODE === "all" || MODE === "v10") await v10Flows(browser);
   if (MODE === "responsive") await responsive(browser);
   if (process.env.SHOTS_DIR) await shots(browser, process.env.SHOTS_DIR);
 } finally {
