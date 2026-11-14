@@ -16,7 +16,7 @@ const one = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v) 
 
 /**
  * /calendar — two tabs:
- *  - Schedule (default): Nora's jobs by month, pasted from her notes or added by hand / by Claude. No money.
+ *  - Schedule (default): Nora's jobs by month, pasted from her notes or added by hand / by Claude. No amount.
  *  - Posts (?tab=posts): the content calendar of scheduled Instagram/TikTok posts. Old links that filter
  *    by business or platform (?client=… / ?platform=…) still open Posts.
  */

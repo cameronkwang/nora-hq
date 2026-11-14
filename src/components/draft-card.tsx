@@ -340,9 +340,12 @@ export function DraftCard({
           )}
           {mode === "approved" && (
             <p className="rounded-lg bg-warn-soft px-3 py-2 text-sm text-warn">
-              {profile?.sendFrom
-                ? `Copy it, send it from ${sendFromText(profile, draftChannel(draft.kind, draft.meta))} (not Nora's), then click “Mark sent”.`
-                : draft.kind === "outreach_email" || draft.kind === "lead_email"
+              {profile
+                ? // Outreach always goes out from the business's own account: the saved sender, or (none saved) its own account on that channel.
+                  `Copy it, send it from ${sendFromText(profile, draftChannel(draft.kind, draft.meta))} (not Nora's), then click “Mark sent”.`
+                : draft.kind === "outreach_email"
+                ? "Approved but not sent. Send it from the business's own email (not Nora's), then click “Mark sent”."
+                : draft.kind === "lead_email"
                 ? gmailConnected
                   ? "Approved but not sent. Send it from your email, then click “Mark sent”."
                   : "Gmail isn't connected — send this from your email, then click “Mark sent”."

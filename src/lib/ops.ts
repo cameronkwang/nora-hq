@@ -568,11 +568,12 @@ export async function approveDraft(id: string, actor: string, opts: { body?: str
     case "outreach_email": {
       const [o] = await db.select().from(schema.outreach).where(eq(schema.outreach.id, String(draft.meta.outreachId)));
       // Outreach goes out from the business's own account, never Nora's. The connected Gmail inbox only sends it
-      // when that inbox IS the business's saved sender (or no sender is saved yet); otherwise a person sends it.
+      // when a sender is saved for the business AND that inbox is it. In every other case (no sender saved yet
+      // included) nothing is emailed: it waits under "Approved — send manually" for a person to send and mark sent.
       const { outreachEmailPlan } = await import("./ops-outreach");
       const plan = await outreachEmailPlan(draft.clientId ?? o?.clientId ?? null);
-      if (!plan.auto && plan.sendFrom) {
-        return { status: "approved", message: `Approved. Not emailed automatically: send it from ${plan.sendFrom} (not Nora's), then tap “Mark sent”.` };
+      if (!plan.auto) {
+        return { status: "approved", message: `Approved. Not emailed automatically: send it from ${plan.sendFrom ?? "the business's own email"} (not Nora's), then tap “Mark sent”.` };
       }
       return finish(
         await sendOutreachEmail({ to: String(draft.meta.to), subject: String(draft.meta.subject), body: draft.body, threadId: o?.gmailThreadId }),

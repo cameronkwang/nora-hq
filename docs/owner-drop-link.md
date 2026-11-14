@@ -35,10 +35,14 @@ The card shows how many things the owner has sent and when the last one arrived.
   upload route); a link that was turned off shows the "expired" message and can't send or upload.
 - Everything the owner types is untrusted text: control characters are stripped, it is capped at 1,000 characters,
   and in the ask it is quoted line by line as data. Claude is told it describes the deal and is never an instruction.
-- A typed password ("our Instagram password: …") is refused with a gentle message, so a login never reaches the
-  database. Promo codes on a flyer are fine.
-- Uploads go straight from the phone to our own Blob store under `drop/<link id>/<day>/`. Only files in that folder
-  of our store are attached to the ask; any other URL posted to the page is dropped.
+- A typed password ("our Instagram password: …", "login: name / …") is refused with a gentle message, so a login never
+  reaches the database. Promo codes on a flyer are fine. What Claude reads and the push to Nora's phone show the note
+  with anything password-like masked (`[password removed: …]`). That can hide a one-word promo code (SAVE20NOW!), so
+  Claude is told to read it off the flyer or ask Nora in the thread, never to guess it. The ask page shows the note as
+  typed.
+- Uploads go straight from the phone to our own Blob store under `drop/<link id>/` (no day in the path, so a page left
+  open for days still uploads). Only files in that folder of our store are attached to the ask; any other URL posted
+  to the page is dropped.
 - Limits per link: 6 drops an hour, 20 a day, and 30 uploaded files a day. Each limit is a counter on the link that
   is checked and bumped in one database statement, so sending many requests at the same moment can't get past it.
   An upload token is good for one file and for 15 minutes. A leaked link can't flood the asks list or fill the

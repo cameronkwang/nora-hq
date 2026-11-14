@@ -9,7 +9,8 @@ import { importSchedule, listSchedule, reelsToPost, type ScheduleRow } from "@/l
 /**
  * Nora's schedule tools: which businesses she's working with each month (day or "no set day"), free or
  * not, and reels (📸) she still has to post. Claude can read it and add/update items (actor "claude");
- * removing items and ticking reels as posted are for Nora/Cameron in the app. No money, ever.
+ * removing items and ticking reels as posted are for Nora/Cameron in the app. No amount or payment method, ever;
+ * the Paid / Not paid badge the app shows on a job with a deal is never returned here.
  */
 
 const ACTOR = "claude";
@@ -45,7 +46,7 @@ const shape = (r: ScheduleRow) => ({
   clientName: r.clientName,
   free: r.isFree || undefined,
   reel: r.needsReel ? (r.reelPostedAt ? `posted ${r.reelPostedAt.toISOString().slice(0, 10)}` : "to post") : undefined,
-  dealId: r.dealId, // set when Nora made this job a collab deal (get_deal for the visit and shot list); payment stays out
+  dealId: r.dealId, // set when Nora made this job a collab deal (get_deal for the visit and shot list); the amount and Paid / Not paid stay out
 });
 
 export function registerScheduleTools(server: McpServer) {
@@ -53,7 +54,7 @@ export function registerScheduleTools(server: McpServer) {
     title: "List Nora's schedule",
     description:
       "Nora's jobs for one month (default: this month): business, day (or \"no set day\"), free, and reel status " +
-      "(\"to post\" = she still owes a reel). Linked businesses carry clientId; a job Nora made into a collab deal carries dealId (see get_deal). The schedule never includes money — don't ask for or add amounts.",
+      "(\"to post\" = she still owes a reel). Linked businesses carry clientId; a job Nora made into a collab deal carries dealId (see get_deal). The schedule never has an amount or a payment method — don't ask for or add them. Whether a job was paid isn't returned either: Paid / Not paid shows in the app only, on a job with a deal.",
     inputSchema: { month: z.string().optional().describe("YYYY-MM, e.g. \"2026-11\". Defaults to the current month (Eastern).") },
     annotations: READ,
   }, async ({ month }) => run(async () => {
@@ -70,7 +71,7 @@ export function registerScheduleTools(server: McpServer) {
       "\"11/XX | Bloom\" for no set day; amounts and 🚩 are ignored) or items[]. Re-adding is safe: items match by month + business name, " +
       "a newly known date fills in \"no set day\", 📸 is only ever added, Free follows the latest paste (in items[], leaving free out keeps it as it is). Set dry_run to preview first. " +
       "A job that has a deal (dealId) shares its day with the deal: giving it a new date also moves the deal's visit to that day. " +
-      "You can't remove items or mark reels posted — Nora or Cameron do that in the app. Never include money.",
+      "You can't remove items or mark reels posted — Nora or Cameron do that in the app. Never include an amount, a payment method or a paid/unpaid note.",
     inputSchema: {
       raw_text: z.string().max(50_000).optional().describe("Nora's list pasted as-is. One job per line: MM/DD | Business [- FREE] [📸]."),
       items: z

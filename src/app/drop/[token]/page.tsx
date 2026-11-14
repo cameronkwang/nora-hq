@@ -58,8 +58,9 @@ export default async function DropPage({ params, searchParams }: Props) {
           token={token}
           lang={lang}
           businessName={link.client.name}
-          // Uploads go under this link's own folder, one sub-folder per day (the upload route caps files per day).
-          folder={`${dropFolder(link.link.id)}${new Date().toISOString().slice(0, 10)}`}
+          // Uploads go straight under this link's own folder. No day in the path: the page may stay open on the
+          // owner's phone for days, and the per-day cap is a counter on the link (the upload route), not the folder.
+          folder={dropFolder(link.link.id).slice(0, -1)}
           uploadsEnabled={blobEnabled()}
         />
       ) : (

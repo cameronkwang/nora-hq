@@ -12,7 +12,7 @@ import { cleanBlock, cleanLine } from "./ops-collab";
 import { intakeBaseUrl, intakeTokenHash } from "./ops-intake";
 import { personEmail, sendToUser } from "./notify";
 import { decryptJson, encryptJson } from "./crypto";
-import { looksLikeTypedSecret } from "./credential-guard";
+import { looksLikeTypedSecret, redactSecrets } from "./credential-guard";
 import { isOwnBlobUrl } from "./uploads";
 import { INTAKE_LANG_TAG, isIntakeLang, type IntakeLangCode } from "./intake-copy";
 import { DROP_MAX_FILES, DROP_NOTE_MAX } from "./drop-copy";
@@ -28,7 +28,8 @@ import { DROP_MAX_FILES, DROP_NOTE_MAX } from "./drop-copy";
  *   copy (lib/crypto) lets the team re-copy the link. There is no expiry: it works until it's turned off.
  * - getDropLinkUrl / revokeDropLink (people only, via the app).
  * - submitDrop (actor "public"): validates, keeps only files this link uploaded to OUR store (drop/<link id>/),
- *   refuses a typed password, rate-limits per link, then creates the ask and pings Nora.
+ *   refuses a typed password, rate-limits per link, then creates the ask and pings Nora (the push shows the note
+ *   with anything password-like masked: dropPushText).
  * - Limits (drops per hour and day, upload tokens per day) are counters on the link's row, each taken with ONE
  *   conditional UPDATE (claimDropSlot / claimDropUpload), so a burst of parallel requests can't get past them.
  *
@@ -267,8 +268,9 @@ const uploads = z.preprocess(
 );
 
 /**
- * What the owner sent. A typed password ("our ig password: …") is refused so a credential never reaches the
- * database; a promo code on a flyer ("SAVE20NOW!") is fine (the calm check, as on the onboarding form's deal box).
+ * What the owner sent. A typed password ("our ig password: …", "login: name / …") is refused so a credential never
+ * reaches the database; a promo code on a flyer ("SAVE20NOW!") is fine (the calm check, as on the onboarding form's
+ * deal box).
  */
 export const DropInput = z.object({
   note: z.preprocess(cleanBlock, z.string().max(DROP_NOTE_MAX, "tooLong" satisfies DropErrorKey)),
@@ -352,14 +354,24 @@ export async function submitDrop(token: unknown, input: Record<string, unknown>,
   return { askId: ask.id, clientId: client.id };
 }
 
+/**
+ * What the push to Nora's phone says the owner sent: the start of their note, or how many photos. The note is masked
+ * with the strict password check first (before it is cut), so a password the calm form check let through never
+ * lands on a lock screen.
+ */
+export function dropPushText(note: string, files: number): string {
+  if (!note) return `${files} photo${files === 1 ? "" : "s"}`;
+  const safe = redactSecrets(note) ?? "";
+  return (safe.length > 120 ? `${safe.slice(0, 119)}…` : safe).replace(/\s*\n\s*/g, " ");
+}
+
 function notifyNora(name: string, askId: string, files: number, note: string) {
   const run = async () => {
     const nora = personEmail("nora");
     if (!nora) return;
-    const what = note ? (note.length > 120 ? `${note.slice(0, 119)}…` : note).replace(/\s*\n\s*/g, " ") : `${files} photo${files === 1 ? "" : "s"}`;
     await sendToUser(nora, "ask_for_me", {
       title: `${name} sent a flyer`,
-      body: `${what} · Claude will draft a post + Story`,
+      body: `${dropPushText(note, files)} · Claude will draft a post + Story`,
       url: `/asks/${askId}`,
       tag: `drop-${askId}`,
     });

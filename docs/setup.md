@@ -107,9 +107,9 @@ Google keeps every Business Profile API at **0 requests per minute** until it ap
 
 ## 7. Gmail outreach inbox
 
-1. Pick the mailbox that creator outreach goes out from. It can be a different Google account from the Business Profile one.
+1. Pick the mailbox that lead pitches (written as Nora) go out from. It can be a different Google account from the Business Profile one. Creator outreach goes out from each business's own account: an approved creator email is only sent from this mailbox when it is that business's saved sender (business Settings → Outreach profile); otherwise approving leaves it for a person to send and mark sent.
 2. Go to **Settings → Gmail outreach inbox → Connect** and log in with that mailbox.
-3. Each approved outreach email is sent from this mailbox with a footer. The default footer is:
+3. Each email sent from this mailbox (approved lead pitches, and creator emails for a business whose saved sender is this mailbox) gets a footer. The default footer is:
    ```
    --
    <OUTREACH_FROM_NAME>

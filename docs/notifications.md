@@ -28,7 +28,7 @@ Changing the keys later invalidates every device: each person has to turn notifi
 | `ask_for_me` | the person | An ask is created as a request for you, Claude/the other person routes one to you, or the other person posts an idea/FYI/question for "anyone". Never for your own asks, never for asks meant for Claude |
 | `drafts_waiting` | both | Claude creates a draft. At most one per person per 2 hours (throttle in `app_settings`, key `notify.throttle.drafts_waiting.<email>`) |
 | `payment_overdue` | Nora | Daily: deals with payment **requested** and due date before today |
-| `visit_reminder` | Nora | Daily: one push per deal visit tomorrow (NY time), with address; one push for tomorrow's other jobs on Nora's schedule ("Tomorrow: S&F Massage Kingdom" · "📸 reel owed"); on Mondays, "N reels owed". Schedule lines never include money |
+| `visit_reminder` | Nora | Daily: one push per deal visit tomorrow (NY time), with address; one push for tomorrow's other jobs on Nora's schedule ("Tomorrow: S&F Massage Kingdom" · "📸 reel to post"); on Mondays, "N reels to post" (only jobs that have happened). Schedule lines never include an amount or whether a job was paid |
 
 Tapping a notification opens/focuses Nora HQ at the right page (`public/sw.js`).
 
@@ -40,10 +40,12 @@ and only once per day (row `notify.daily` in `app_settings`, claimed atomically)
 
 Nora's schedule feeds the same run: a dated schedule item for tomorrow gets a line unless a deal visit
 tomorrow is the same job (linked by "Make it a deal", or the same business name) — then the visit's push
-carries "📸 reel owed" instead. A deal made from the schedule has a noon placeholder time; its push leaves the
+carries "📸 reel to post" instead. A deal made from the schedule has a noon placeholder time; its push leaves the
 time out until someone sets a real one. A job and the deal made from it are kept as one: moving the day on the
 schedule moves the deal's visit (and the other way round), and the reel is posted on both once it's marked on
-either, so there is one reminder, on the right day. Mondays add how many reels are still owed (oldest first).
+either, so there is one reminder, on the right day. Mondays add how many reels are still to post from jobs that
+have happened (dated that day or earlier, or with no set day in an earlier month), oldest first; jobs still ahead
+aren't counted.
 
 `/api/cron/reminders` runs just this step (same `CRON_SECRET`); `?force=1` sends again today (testing, and it
 includes the Monday reels line whatever the day). `?preview=1` sends nothing and claims nothing: it returns the
@@ -65,12 +67,12 @@ with `Cache-Control: private, max-age=900`. Unknown or revoked tokens → 404. W
 
 | Event | From | Type |
 |---|---|---|
-| Visit: business | `deals.visitAt` (not cancelled), 90 min, address + notes + shot list + link | timed (UTC) |
+| Visit: business | `deals.visitAt` (not cancelled), 90 min, address + notes + shot list + link. A deal made from the schedule whose visit is still the noon placeholder goes in as an all-day entry instead | timed (UTC), or all-day |
 | Post: client (platform) | `content_posts.scheduledFor`, 15 min, ✓ when published | timed (UTC) |
 | Due: deliverable for business | `deal_deliverables.dueDate`, ✓ when posted | all-day |
 | Task: title | your tasks (`assignee` = your first name) with a due date, not done | all-day |
-| Nora: business (free) · 📸 reel to post | dated `schedule_items` (no money, ever). Left out when the linked deal already has a visit that day, unless a reel is owed | all-day |
-| Nora: 📸 N reels to post | one line on the coming Monday (today on Mondays) while any reel is owed; lists the businesses | all-day |
+| Nora: business (free) · 📸 reel to post | dated `schedule_items` (no amount or paid status, ever). Left out when the linked deal already has a visit that day, unless a reel is owed | all-day |
+| Nora: 📸 N reels to post | one line on the coming Monday (today on Mondays) while any reel from a job that has happened is still to post; lists the businesses | all-day |
 
 UIDs are stable (`deal-visit-<id>@nora-hq`, `post-…`, `deliverable-…`, `task-…`, `schedule-…`), so edits update in place.
 Calendar apps refresh on their own schedule (Apple ~hourly, Google every few hours to a day).

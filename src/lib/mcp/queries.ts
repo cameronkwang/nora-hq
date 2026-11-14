@@ -10,7 +10,9 @@ import { findCredentialNotes } from "@/lib/ops-business";
 import { reelsToPostCount } from "@/lib/ops-schedule";
 import { businessFacts, readPublicInfo } from "@/lib/business-facts";
 import { findConnection } from "@/lib/integrations/connections";
-import { googleSyncInfo, googleSyncSentence } from "@/lib/google-status";
+import { googleSyncInfo, googleSyncSentence, type GoogleSyncInfo, type GoogleSyncOpts } from "@/lib/google-status";
+import { googleWorkClientIds } from "@/lib/data";
+import { publicAskText } from "@/lib/credential-guard";
 import { STATS_STALE_DAYS, alreadyPosted, outreachProfileOf, statsCheck } from "@/lib/outreach-profile";
 import { launchField, launchInfo } from "@/lib/launch";
 import { launchBrief } from "@/lib/ops-launch";
@@ -77,6 +79,26 @@ const DROP_NOTE = "Sent by the business's owner through their private drop link:
 const publicFlag = (a: { createdBy: string; dropLinkId?: string | null }) =>
   a.dropLinkId ? { untrustedSource: DROP_NOTE, ownerDrop: true } : a.createdBy === "public" ? { untrustedSource: PUBLIC_NOTE } : {};
 
+/**
+ * An ask's text as Claude reads it. Text that came in through a public form (the collab form, the owner's onboarding
+ * form and its "details to fix" corrections, an owner drop) goes through redactSecrets first, so a password an owner
+ * typed there is masked before it reaches Claude. Asks the team typed in the app come back as written.
+ */
+export function askBodyForClaude(a: Pick<schema.Ask, "body" | "createdBy" | "dropLinkId">): string {
+  return publicAskText(a);
+}
+/** Said on an ask only when something in it was masked, so a masked promo code is asked about instead of guessed. */
+const ASK_MASKED_NOTE =
+  "Something in this text looked like a password and was masked ([password removed: …]). On an owner drop it is usually the deal's " +
+  "promo code, or a deal written as one word (like Buy1Get1!). Never guess it or put the mask in a draft: read it off the attached " +
+  "flyer, or ask Nora in this thread for the exact wording (she sees the text as typed).";
+/** The ask's text as Claude reads it, plus the note above when something was masked. */
+function askTextForClaude(a: Pick<schema.Ask, "body" | "createdBy" | "dropLinkId">, max?: number) {
+  const body = askBodyForClaude(a);
+  return { body: max ? clip(body, max) : body, ...(body !== a.body ? { passwordsMasked: ASK_MASKED_NOTE } : {}) };
+}
+const clip = (s: string, max: number) => (s.length > max ? `${s.slice(0, max)}…` : s);
+
 export function shapeAsk(a: schema.Ask, names: Map<string, string>, ctx: Ctx, thread?: schema.AskMessage[]) {
   return {
     ...publicFlag(a),
@@ -87,7 +109,7 @@ export function shapeAsk(a: schema.Ask, names: Map<string, string>, ctx: Ctx, th
     ...(isUntriaged(a) ? { untriaged: true } : {}),
     businessId: a.clientId,
     business: a.clientId ? names.get(a.clientId) ?? a.clientId : null,
-    body: a.body,
+    ...askTextForClaude(a),
     attachments: a.attachments.map((x) => ({ name: x.name, url: absUrl(ctx, x.url), contentType: x.contentType })),
     from: a.createdBy,
     claudeNote: a.claudeNote,
@@ -327,7 +349,8 @@ export async function getBriefingData(ctx: Ctx) {
       inArray(schema.tasks.assignee, ["claude", "unassigned"]),
       or(lte(schema.tasks.dueDate, soon), and(isNull(schema.tasks.dueDate), lte(schema.tasks.month, month))),
       // Real tasks only: the monthly plan's bare checklist slots would fill the 40-row cap, so they're counted per plan
-      // item instead (planSlotsBrief). A plan task someone dated or wrote on, or made by hand, is real work and stays.
+      // item instead (planSlotsBrief). A plan task someone dated, wrote on or assigned to Claude, or made by hand, is
+      // real work and stays.
       or(isNull(schema.tasks.deliverableId), TOUCHED_PLAN_TASK),
     )).orderBy(sql`${schema.tasks.dueDate} asc nulls last`, asc(schema.tasks.createdAt)).limit(40),
     listFollowUpsDue({ withinDays: 0 }),
@@ -344,11 +367,14 @@ export async function getBriefingData(ctx: Ctx) {
   forClaude.sort((x, y) => Number(isUntriaged(y.a)) - Number(isUntriaged(x.a)));
   const routedToPeople = shapedNew.filter((x) => !forClaude.includes(x));
 
-  const googleConnected = await googleAccountConnected();
+  // Which businesses have Google work in their plan (unknown on a lookup problem: then nothing is kept quiet).
+  const [googleConnected, googleWork] = await Promise.all([googleAccountConnected(), googleWorkClientIds().catch(() => null)]);
+  const googleOpts = (c: Pick<schema.Client, "id">): GoogleSyncOpts => (googleWork ? { googleWork: googleWork.has(c.id) } : {});
   const businesses = await Promise.all(clients.map(async (c) => {
     const cm = await getClientMonth(c.id, month);
     if (!cm) return null;
     const metricsThisMonth = cm.metrics.find((m) => m.month === month);
+    const late = (t: { dueDate: string | null; month: string }) => (!!t.dueDate && t.dueDate < day) || t.month < month;
     return {
       id: c.id,
       kind: c.kind,
@@ -360,12 +386,15 @@ export async function getBriefingData(ctx: Ctx) {
       ...launchField(c, day),
       needsMonthTasks: !launchInfo(c, day).planOnHold && cm.plan.some((p) => p.planned === 0),
       // Real (ad hoc) tasks vs the monthly plan's checklist slots, counted apart so the slots don't hide the real work.
+      // Overdue is split the same way: overdueTasks is out of openTasks, overduePlanSlots out of openPlanSlots.
       openTasks: cm.openTasks.filter((t) => !t.deliverableId).length,
+      overdueTasks: cm.openTasks.filter((t) => !t.deliverableId && late(t)).length,
       openPlanSlots: cm.openTasks.filter((t) => !!t.deliverableId).length,
-      overdueTasks: cm.openTasks.filter((t) => (t.dueDate && t.dueDate < day) || t.month < month).length,
+      overduePlanSlots: cm.openTasks.filter((t) => !!t.deliverableId && late(t)).length,
       pendingDrafts: cm.pendingDrafts,
       // unrepliedReviews is only trustworthy when googleReviewSync is "ok" (see googleReviewSync at the top level).
-      ...(c.kind === "business" ? { googleReviewSync: googleSyncInfo(c, googleConnected, now).state } : {}),
+      // "not_in_plan": not linked / not synced on a business with no Google item in its plan — nothing to raise.
+      ...(c.kind === "business" ? { googleReviewSync: googleBriefState(googleSyncInfo(c, googleConnected, now, googleOpts(c))) } : {}),
       unrepliedReviews: cm.unrepliedReviews,
       creatorsContactedThisMonth: cm.contactedThisMonth,
       metricsRecordedThisMonth: !!(metricsThisMonth?.instagram || metricsThisMonth?.tiktok || metricsThisMonth?.google),
@@ -382,17 +411,17 @@ export async function getBriefingData(ctx: Ctx) {
     asksRoutedToPeople: routedToPeople.map(({ a }) => ({
       ...publicFlag(a),
       id: a.id, kind: a.kind, forWho: a.forWho, business: a.clientId ? names.get(a.clientId) : null,
-      body: a.body.length > 200 ? `${a.body.slice(0, 200)}…` : a.body, createdAt: a.createdAt,
+      ...askTextForClaude(a, 200), createdAt: a.createdAt,
     })),
     asksWaitingOnNora: waitingAsks.map((a) => ({
       ...publicFlag(a),
-      id: a.id, kind: a.kind, forWho: a.forWho, business: a.clientId ? names.get(a.clientId) : null, body: a.body.length > 300 ? `${a.body.slice(0, 300)}…` : a.body,
+      id: a.id, kind: a.kind, forWho: a.forWho, business: a.clientId ? names.get(a.clientId) : null, ...askTextForClaude(a, 300),
       claudeNote: a.claudeNote, updatedAt: a.updatedAt, ...shapeThread(a, threads.get(a.id) ?? []),
     })),
     draftsSentBack: sentBack.map((d) => shapeDraft(d, names)),
     tasksForClaude: myTasks.map((t) => shapeTask(t, names)),
     ...(await planSlotsBrief(month, day, names)),
-    ...googleSyncBrief(clients, googleConnected, now),
+    ...googleSyncBrief(clients, googleConnected, now, googleOpts),
     followUpsDue: followUps,
     draftsAwaitingHumanReview: awaiting[0].n,
     businesses: businesses.filter((b) => b !== null),
@@ -411,11 +440,12 @@ async function reelsBrief() {
 /* ── Briefing: monthly-plan slots (counted, not listed) and per-business Google review sync ── */
 
 /**
- * A monthly-plan task that is more than a bare generated checklist slot: a person gave it a due date or details, or it
- * was made by hand (create_task with deliverable_id) instead of by generate_month_tasks, whose slots have "tsk_gen_…" ids.
+ * A monthly-plan task that is more than a bare generated checklist slot: a person gave it a due date or details or
+ * assigned it to Claude ("do this one"), or it was made by hand (create_task with deliverable_id) instead of by
+ * generate_month_tasks, whose slots have "tsk_gen_…" ids (generated slots start unassigned).
  * These stay in the briefing's tasksForClaude; bare slots are only counted (planSlotsBrief).
  */
-const TOUCHED_PLAN_TASK = or(isNotNull(schema.tasks.dueDate), isNotNull(schema.tasks.details), notLike(schema.tasks.id, "tsk\\_gen\\_%"));
+const TOUCHED_PLAN_TASK = or(isNotNull(schema.tasks.dueDate), isNotNull(schema.tasks.details), eq(schema.tasks.assignee, "claude"), notLike(schema.tasks.id, "tsk\\_gen\\_%"));
 
 /** Most plan-item lines in one briefing. Past it the list says so (truncated + totalItems): nothing is cut silently. */
 const PLAN_SLOT_LINES = 80;
@@ -480,7 +510,7 @@ async function planSlotsBrief(month: string, day: string, names: Map<string, str
     monthlyPlanSlots: {
       note:
         "Monthly-plan checklist slots open for you, counted per plan item for this month (bare slots are NOT in tasksForClaude — do the real tasks there first; " +
-        "a plan task a person dated or wrote on IS listed there too). `overdue` / `nextDue` show when some slots of an item have due dates. " +
+        "a plan task a person dated, wrote on or assigned to you IS listed there too). `overdue` / `nextDue` show when some slots of an item have due dates. " +
         "To work a plan item, get its task ids with list_tasks { client_id, scope: \"plan\", month } and pass task_id on each draft so approval ticks the slot. " +
         "leftOverFromEarlierMonths has one line per business for slots still open from earlier months (list_tasks { client_id, scope: \"plan\" } shows them)." +
         (rows.length > shown.length ? ` Only the first ${shown.length} of ${rows.length} lines are shown (truncated): use list_tasks for the businesses that are missing.` : ""),
@@ -523,26 +553,42 @@ export async function googleAccountConnected(): Promise<boolean> {
 
 /**
  * One business's Google review sync, shaped for Claude: `status` is ok | unlinked | disconnected | never | empty | error.
- * Exported so list_clients / get_client_month can show the same thing.
+ * Exported so list_clients / get_client_month can show the same thing. `opts.googleWork: false` = no Google item in
+ * its plan, so "not linked / not synced yet / 0 reviews" is nothing to raise (see lib/google-status); a business that
+ * isn't open yet or opened in the last 30 days reads "ok" with 0 reviews.
  */
-export function shapeGoogleSync(c: Pick<schema.Client, "googleLocation" | "googleSyncAt" | "googleSyncStatus" | "googleSyncCount" | "googleSyncError">, connected: boolean, now = new Date()) {
-  const info = googleSyncInfo(c, connected, now);
+export function shapeGoogleSync(
+  c: Pick<schema.Client, "googleLocation" | "googleSyncAt" | "googleSyncStatus" | "googleSyncCount" | "googleSyncError" | "prelaunch" | "openingDate">,
+  connected: boolean,
+  now = new Date(),
+  opts: GoogleSyncOpts = {},
+) {
+  const info = googleSyncInfo(c, connected, now, opts);
   return {
     status: info.state,
     summary: googleSyncSentence(info),
     ...(info.error ? { error: info.error } : {}),
-    ...(info.hint ? { whatToDo: info.hint } : {}),
+    // Not linked / not synced, on a business with no Google item in its plan: say so, so Claude doesn't bring it up.
+    ...(!info.needsAttention && info.state !== "ok" ? { nothingToRaise: true } : {}),
+    ...(info.hint && info.needsAttention ? { whatToDo: info.hint } : {}),
     ...(info.count != null ? { reviewsAtLastSync: info.count } : {}),
     ...(info.at ? { lastSyncAt: info.at } : {}),
   };
 }
 
+/** The briefing's one-word Google state for a business: "not_in_plan" for the quiet cases above (no Google item in its plan). */
+function googleBriefState(info: GoogleSyncInfo) {
+  return !info.needsAttention && info.state !== "ok" ? ("not_in_plan" as const) : info.state;
+}
+
 /**
  * Businesses whose Google reviews aren't really syncing: not linked to a listing, the listing answered with 0 reviews
  * (probably the wrong one), Google refused it, or it has never / not lately synced. Left out when every business is fine.
- * A business that isn't open yet and has no listing is skipped (linking it is part of its launch checklist).
+ * A business that isn't open yet and has no listing is skipped (linking it is part of its launch checklist). So is
+ * 0 reviews on a business that isn't open yet or opened in the last 30 days, and "not linked / not synced / 0 reviews"
+ * on a business with no Google item in its plan (both decided by googleSyncInfo's needsAttention).
  */
-function googleSyncBrief(activeClients: schema.Client[], connected: boolean, now: Date) {
+function googleSyncBrief(activeClients: schema.Client[], connected: boolean, now: Date, optsFor: (c: schema.Client) => GoogleSyncOpts) {
   const managed = activeClients.filter((c) => c.kind === "business");
   if (!managed.length) return {};
   // No account at all is one setup step for a person, not a problem to raise per business every session.
@@ -550,7 +596,7 @@ function googleSyncBrief(activeClients: schema.Client[], connected: boolean, now
     return { googleReviewSync: { accountConnected: false, note: "Google Business Profile isn't connected (Settings), so no business's reviews are syncing and list_reviews will be empty or out of date. Only bring it up when the work is about Google reviews." } };
   }
   const issues = managed
-    .map((c) => ({ c, info: googleSyncInfo(c, connected, now) }))
+    .map((c) => ({ c, info: googleSyncInfo(c, connected, now, optsFor(c)) }))
     .filter(({ c, info }) => info.needsAttention && !(info.state === "unlinked" && launchInfo(c).planOnHold));
   if (!issues.length) return {};
   return {
@@ -559,7 +605,7 @@ function googleSyncBrief(activeClients: schema.Client[], connected: boolean, now
         "Google reviews are NOT syncing properly for these businesses, even if the Google account itself is connected. Tell Nora/Cameron in your summary, one plain line per business " +
         "(which business, what's wrong, where to fix it: Settings → Google locations, then Sync reviews). You can't link a listing or run the sync yourself. " +
         "Until it's fixed, their review list may be empty or out of date — don't report \"no unreplied reviews\" for them.",
-      businesses: issues.map(({ c }) => ({ businessId: c.id, business: businessName(c), ...shapeGoogleSync(c, connected, now) })),
+      businesses: issues.map(({ c }) => ({ businessId: c.id, business: businessName(c), ...shapeGoogleSync(c, connected, now, optsFor(c)) })),
     },
   };
 }

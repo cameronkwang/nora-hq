@@ -129,11 +129,12 @@ export function registerBusinessTools(server: McpServer, ctx: Ctx) {
     title: "Update a business's details",
     description:
       ONLY_WHEN_ASKED +
-      "Changes only the fields you pass; an empty string clears a field (not name). notes are ADDED as a new dated paragraph — you can't replace or delete notes. " +
+      "Changes only the fields you pass; an empty string clears a field (not name, and not a saved outreach sender or offer). notes are ADDED as a new dated paragraph — you can't replace or delete notes. " +
       "brand_voice replaces the whole brand voice: read the current one first (list_clients) and send the full new text. " +
       "You can't change the Google location or the owner email that receives reports (a person sets those in Settings). Returns each change as before → after. " +
       "Outreach profile (send_from, send_from_kind, creator_offer): the account creator outreach is sent from — the business's own, never Nora's — and the standing offer for creators. " +
-      "Save these only with the exact account and offer Nora or Cameron gave you; never guess a sender or make up an offer. " +
+      "They are fill-only for you: while one is empty you may save the exact account or offer Nora or Cameron gave you; never guess a sender or make up an offer. " +
+      "Once a sender or an offer is saved, only a person can change or clear it (Settings → Outreach profile): a call that tries is refused and saves nothing, so say what you were given in the ask thread. " +
       NO_PASSWORDS,
     inputSchema: {
       client_id: clientId,
@@ -146,9 +147,9 @@ export function registerBusinessTools(server: McpServer, ctx: Ctx) {
       outreach_areas: areas.optional(),
       brand_voice: z.string().max(8000).optional(),
       add_note: z.string().max(5000).optional().describe("Appended to the business notes."),
-      send_from: z.string().max(200).optional().describe("Outreach profile: the business's own account that creator outreach goes out from, e.g. \"@craboclockfredericksburg\" or an email address. Not a password or login."),
-      send_from_kind: z.enum(schema.SEND_FROM_KINDS).optional().describe("What send_from is: instagram, tiktok, email or other. Left out, it's worked out from the value."),
-      creator_offer: z.string().max(300).optional().describe("Outreach profile: the standing offer for creators, exactly as the owner agreed it, e.g. \"Free all-you-can-eat seafood boil for 2\"."),
+      send_from: z.string().max(200).optional().describe("Outreach profile: the business's own account that creator outreach goes out from, e.g. \"@craboclockfredericksburg\" or an email address. Only while no sender is saved. Not a password or login."),
+      send_from_kind: z.enum(schema.SEND_FROM_KINDS).optional().describe("What send_from is: instagram, tiktok, email or other. Left out, it's worked out from the value. Only while no sender is saved."),
+      creator_offer: z.string().max(300).optional().describe("Outreach profile: the standing offer for creators, exactly as the owner agreed it, e.g. \"Free all-you-can-eat seafood boil for 2\". Only while no offer is saved."),
     },
     annotations: WRITE,
   }, async (a) => run(async () => {
@@ -170,8 +171,9 @@ export function registerBusinessTools(server: McpServer, ctx: Ctx) {
       "Use it when Nora or Cameron asked, or when a \"New client …\" research ask, an \"Onboarding form received\" ask or a \"Business details to fix\" ask tells you to (those asks are your go-ahead). " +
       "Public facts only — what anyone can see on Google Maps, the business's own website or its social profiles. Every value needs `source`: the web address where you found it. Never guess. " +
       "Looked and couldn't find one? Send it with not_found: true (that never removes a value that's already saved). You can't clear a fact; a wrong name is changed by a person in Settings. " +
-      "Only when working a \"Business details to fix\" ask, and the owner's own correction is the best source (new hours, a new phone number), use source \"owner\". " +
-      "Returns each change as before → after, plus what is still missing before the form can go out. " +
+      "You fill empty facts and replace only your own earlier research (a fact saved with a web address as its source). A fact Nora or Cameron typed, or one the owner gave, is kept and listed under `kept`: tell them in the ask thread what you found. Saving a fact never changes the business's notes. " +
+      "Only when working a \"Business details to fix\" ask, and the owner's own correction is the best source (new hours, a new phone number), use source \"owner\" — that is the one case where a fact a person or the owner saved is replaced. " +
+      "Returns each change as before → after, what was kept, plus what is still missing before the form can go out. " +
       NO_PASSWORDS,
     inputSchema: {
       client_id: clientId,

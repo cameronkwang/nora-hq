@@ -10,7 +10,7 @@ import {
   STATS_STALE_DAYS, alreadyPosted, draftChannel, emailSendPlan, guessSendFromKind, outreachProfileOf, publicUrl, readsAsNora, sendFromText,
   senderMismatch, senderWithKind, statsCheck,
 } from "../src/lib/outreach-profile";
-import { GOOGLE_SYNC_STALE_HOURS, googleSyncInfo, googleSyncSentence } from "../src/lib/google-status";
+import { GOOGLE_NEW_LISTING_DAYS, GOOGLE_SYNC_STALE_HOURS, googleSyncInfo, googleSyncSentence, isNewListing } from "../src/lib/google-status";
 
 const now = new Date("2026-11-14T15:00:00Z");
 const daysAgo = (n: number) => new Date(now.getTime() - n * 86_400_000);
@@ -31,6 +31,9 @@ const daysAgo = (n: number) => new Date(now.getTime() - n * 86_400_000);
   assert.equal(senderWithKind(none), null);
   assert.equal(senderMismatch(none, "email"), null);
   assert.equal(sendFromText(none, "tiktok_dm"), "S&F Massage Kingdom's own TikTok");
+  assert.equal(sendFromText(none, "email"), "S&F Massage Kingdom's own email");
+  // A name that already ends in 's doesn't get a second one.
+  assert.equal(sendFromText(outreachProfileOf({ id: "m", name: "Max's", sendFromKind: null, sendFrom: null, creatorOffer: null }), "email"), "Max's own email");
 }
 assert.equal(guessSendFromKind("@craboclock"), "instagram");
 assert.equal(guessSendFromKind("hello@craboclock.com"), "email");
@@ -40,8 +43,11 @@ assert.equal(draftChannel("outreach_email", {}), "email");
 assert.equal(draftChannel("outreach_dm", { channel: "tiktok_dm" }), "tiktok_dm");
 assert.equal(draftChannel("outreach_dm", {}), "instagram_dm");
 
-/* ── approving an outreach email: the connected Gmail only sends it when it IS the business's sender ── */
-assert.deepEqual(emailSendPlan(null, "nora@example.com"), { auto: true, from: "nora@example.com" }); // no sender saved: as before
+/* ── approving an outreach email: the connected Gmail only sends it when a sender is saved AND it IS that sender ── */
+// No sender saved: never sent from the shared inbox (it would arrive from Nora's address in the business's voice).
+assert.deepEqual(emailSendPlan(null, "nora@example.com"), { auto: false, from: null });
+assert.deepEqual(emailSendPlan({ sendFrom: null, sendFromKind: null }, "nora@example.com"), { auto: false, from: null });
+assert.deepEqual(emailSendPlan({ sendFrom: "  ", sendFromKind: "email" }, "nora@example.com"), { auto: false, from: null });
 assert.deepEqual(emailSendPlan(null, null), { auto: false, from: null });
 assert.deepEqual(emailSendPlan({ sendFrom: "@craboclock", sendFromKind: "instagram" }, "nora@example.com"), { auto: false, from: "@craboclock" });
 assert.deepEqual(emailSendPlan({ sendFrom: "Hello@CrabOClock.com", sendFromKind: "email" }, "hello@craboclock.com"), { auto: true, from: "Hello@CrabOClock.com" });
@@ -105,6 +111,52 @@ const base = { googleLocation: "accounts/1/locations/2", googleSyncAt: daysAgo(0
   const stale = googleSyncInfo({ ...base, googleSyncStatus: "ok", googleSyncCount: 40, googleSyncAt: new Date(now.getTime() - (GOOGLE_SYNC_STALE_HOURS + 1) * 3_600_000) }, true, now);
   assert.deepEqual([stale.state, stale.stale, stale.tone, stale.needsAttention], ["ok", true, "warn", true]);
   assert.equal(googleSyncSentence(stale), "Google reviews haven't synced lately");
+}
+
+/* ── Google reviews: 0 reviews is normal before opening day and for 30 days after ── */
+{
+  const day = (n: number) => new Date(now.getTime() + n * 86_400_000).toISOString().slice(0, 10); // n days from "today" (2026-11-14)
+  const zero = { ...base, googleSyncStatus: "empty" as const, googleSyncCount: 0 };
+  assert.equal(GOOGLE_NEW_LISTING_DAYS, 30);
+  assert.equal(isNewListing({ prelaunch: true, openingDate: day(21) }, now), true); // not open yet
+  assert.equal(isNewListing({ prelaunch: true, openingDate: null }, now), true); // pre-launch, no date yet
+  assert.equal(isNewListing({ prelaunch: false, openingDate: day(-10) }, now), true); // opened 10 days ago
+  assert.equal(isNewListing({ prelaunch: true, openingDate: day(-10) }, now), true); // opened, switch still on
+  assert.equal(isNewListing({ prelaunch: false, openingDate: day(-29) }, now), true);
+  assert.equal(isNewListing({ prelaunch: false, openingDate: day(-30) }, now), false); // a month in: 0 reviews is worth a look
+  assert.equal(isNewListing({ prelaunch: true, openingDate: day(-45) }, now), false);
+  assert.equal(isNewListing({ prelaunch: false, openingDate: null }, now), false); // an ordinary open business
+  assert.equal(isNewListing({}, now), false);
+
+  // The launch checklist has Nora link the listing before opening: 0 reviews then is a quiet success.
+  const pre = googleSyncInfo({ ...zero, prelaunch: true, openingDate: day(21) }, true, now);
+  assert.deepEqual([pre.state, pre.tone, pre.label, pre.count, pre.hint, pre.needsAttention], ["ok", "ok", "0 reviews", 0, null, false]);
+  assert.equal(googleSyncSentence(pre), "0 reviews synced");
+  assert.equal(googleSyncInfo({ ...zero, prelaunch: false, openingDate: day(-10) }, true, now).needsAttention, false);
+  // ...but a stalled sync on that listing is still raised.
+  const preStale = googleSyncInfo({ ...zero, prelaunch: true, openingDate: day(21), googleSyncAt: new Date(now.getTime() - (GOOGLE_SYNC_STALE_HOURS + 1) * 3_600_000) }, true, now);
+  assert.deepEqual([preStale.state, preStale.stale, preStale.needsAttention], ["ok", true, true]);
+  // A month after opening, and for a business with no opening date, 0 reviews is the warning it always was.
+  assert.deepEqual([googleSyncInfo({ ...zero, openingDate: day(-45) }, true, now).state, googleSyncInfo({ ...zero, prelaunch: false, openingDate: null }, true, now).needsAttention], ["empty", true]);
+}
+
+/* ── Google reviews: a business with no Google item in its plan isn't expected to have a listing ── */
+{
+  const quiet = { googleWork: false };
+  const unlinked = googleSyncInfo({ ...base, googleLocation: null }, true, now, quiet);
+  assert.deepEqual([unlinked.state, unlinked.tone, unlinked.label, unlinked.needsAttention], ["unlinked", "neutral", "Not linked", false]);
+  assert.equal(unlinked.hint, "Google isn't in its plan.");
+  assert.equal(googleSyncSentence(unlinked), "Google not linked (Google isn't in its plan)");
+  const never = googleSyncInfo({ ...base, googleSyncAt: null }, true, now, quiet);
+  assert.deepEqual([never.state, never.needsAttention], ["never", false]);
+  const zero = googleSyncInfo({ ...base, googleSyncStatus: "empty", googleSyncCount: 0 }, true, now, quiet);
+  assert.deepEqual([zero.state, zero.label, zero.needsAttention], ["ok", "0 reviews", false]);
+  // A listing someone linked anyway that Google refuses is still a problem worth showing.
+  const err = googleSyncInfo({ ...base, googleSyncStatus: "error", googleSyncError: "Google said no (403)." }, true, now, quiet);
+  assert.deepEqual([err.state, err.needsAttention], ["error", true]);
+  // googleWork: true (or left out) changes nothing.
+  assert.equal(googleSyncInfo({ ...base, googleLocation: null }, true, now, { googleWork: true }).needsAttention, true);
+  assert.equal(googleSyncInfo({ ...base, googleSyncAt: null }, true, now, {}).needsAttention, true);
 }
 
 console.log("outreach-profile + google-status: all checks passed");

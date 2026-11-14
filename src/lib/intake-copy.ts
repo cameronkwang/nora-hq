@@ -148,7 +148,8 @@ const en = {
     oneMoreMinute: "Got one more minute?",
     thatsAll: "That's all we need! Tap “Send now” — or tap Next if you've got one more minute for a few optional questions.",
     stepOf: (n: number, total: number) => `Step ${n} of ${total}`,
-    example: "Example:",
+    /** Sits right before the example itself. English ends with a space; the Chinese full-width colon needs none. */
+    example: "Example: ",
     restored: "Welcome back! We kept your answers on this phone, so you can pick up where you left off.",
     startOver: "Start over",
     autosave: "Your answers save on this device as you go.",
@@ -172,10 +173,10 @@ const en = {
   aboutYou: { title: "About you", blurb: "How we can reach you." },
   contactTitle: "How do we reach you?",
   /** Page 2: accounts we couldn't find ourselves. */
-  handles: { title: "Your accounts", intro: "We couldn't find these. Add them if you have them — or skip." },
+  handles: { title: "Your accounts", intro: "We couldn't find these. Add any you have." },
   steps: [
     { title: "Is this right?", blurb: "Check what we found, then tell us how to reach you." },
-    { title: "Accounts & photos", blurb: "Let us into your accounts (no passwords), and share a few photos." },
+    { title: "Accounts & photos", blurb: "Give Nora access to your accounts and share a few photos." },
     { title: "How we'll work together", blurb: "What to show off, plus a few quick choices." },
   ],
   fields: {
@@ -255,7 +256,7 @@ const en = {
     },
     tiktok: {
       title: "TikTok",
-      body: "We'll set this up together on our call — please don't type passwords here.",
+      body: "We'll set this up together on our call.",
     },
     tip: "Stuck on a step? That's totally normal. Pick \"I'll need help\" and we'll do it together.",
   },
@@ -327,13 +328,13 @@ const zhHans: IntakeCopy = {
     submit: "提交",
     sendNow: "现在提交",
     sending: "正在提交…",
-    oneMoreMinute: "还有一分钟吗？",
+    oneMoreMinute: "还有一分钟时间吗？",
     thatsAll: "这样就可以了！点“现在提交”即可；如果还有一分钟，可以点“下一步”，再回答几个选填的小问题。",
     stepOf: (n, total) => `第 ${n} 步，共 ${total} 步`,
     example: "例如：",
     restored: "欢迎回来！您之前填的内容已保存在这部手机上，可以接着填。",
     startOver: "重新填写",
-    autosave: "您填写的内容会自动保存在这部设备上。",
+    autosave: "您填写的内容会自动保存在这台设备上。",
     neverPasswords: "请不要在表格里填写任何密码，我们也绝不会向您要密码。",
     language: "语言",
     privacy: "这个链接是专门发给您的，请不要转发给别人。",
@@ -351,10 +352,10 @@ const zhHans: IntakeCopy = {
   },
   aboutYou: { title: "关于您", blurb: "怎么联系您最方便。" },
   contactTitle: "怎么联系您？",
-  handles: { title: "您的账号", intro: "这几个我们没找到。有的话请填一下，没有可以跳过。" },
+  handles: { title: "您的账号", intro: "这几个我们没找到，有的话请填一下。" },
   steps: [
     { title: "这些信息对吗？", blurb: "看一下我们查到的信息，再告诉我们怎么联系您。" },
-    { title: "账号和照片", blurb: "让我们协助管理账号（不需要密码），再分享几张照片。" },
+    { title: "账号和照片", blurb: "让我们协助管理账号，再分享几张照片。" },
     { title: "我们怎么合作", blurb: "想重点推什么，再做几个简单选择。" },
   ],
   fields: {
@@ -369,7 +370,7 @@ const zhHans: IntakeCopy = {
 
     instagram: { label: "Instagram", placeholder: "@yourplace" },
     tiktok: { label: "TikTok", placeholder: "@yourplace" },
-    facebook: { label: "Facebook 专页", hint: "贴链接，或写专页名称都可以。", placeholder: "facebook.com/yourplace" },
+    facebook: { label: "Facebook 公共主页", hint: "贴链接，或写主页名称都可以。", placeholder: "facebook.com/yourplace" },
     accessMeta: { label: "Instagram + Facebook 权限" },
     accessGoogle: { label: "Google 商家资料权限" },
     mediaLink: {
@@ -381,11 +382,11 @@ const zhHans: IntakeCopy = {
 
     promote: {
       label: "想重点推什么？",
-      hint: "招牌菜或拿手产品、优惠、近期活动，您觉得自豪的都可以写。",
+      hint: "招牌菜或主打产品、优惠、近期活动，您最想让客人知道的都可以写。",
       placeholder: "红烧牛肉面、小笼包；周一到周五午餐特价；二月有春节套餐",
     },
     postLangs: { label: "帖子用什么语言发？" },
-    creatorsOk: { label: "可以邀请本地美食博主来店里探店、发帖吗？" },
+    creatorsOk: { label: "可以邀请本地美食博主来探店、发帖吗？" },
     creatorOffer: { label: "博主来探店，您可以提供什么？", hint: "可以多选。您同意之前，我们不会答应博主任何事。" },
     complaints: { label: "遇到差评时，我们应该…" },
     anythingElse: { label: "还有什么想告诉我们的吗？", placeholder: "问题、顾虑、想法，什么都可以。" },
@@ -398,7 +399,7 @@ const zhHans: IntakeCopy = {
     accessMeta: { done: "已完成 ✓", help: "需要你们帮忙" },
     accessGoogle: { done: "已完成 ✓", help: "需要你们帮忙" },
     postLangs: { en: "英文", zh: "中文", both: "中英文都要" },
-    creatorsOk: { yes: "可以！", maybe: "也许，想先多了解一下", no: "暂时不用" },
+    creatorsOk: { yes: "可以！", maybe: "再看看，想先多了解一下", no: "暂时不用" },
     creatorOffer: { meal1: "招待 1 人用餐", meal2: "招待 2 人用餐", drinks: "饮料", setMenu: "套餐或试吃", dessert: "甜品" },
     complaints: {
       contact: "请客人直接联系我们店",
@@ -410,7 +411,7 @@ const zhHans: IntakeCopy = {
     title: "怎样给我们管理权限",
     intro: "把 Nora 加为账号的协助管理员就可以。账号还是您的，随时可以把她移除。不需要给我们密码。",
     emailLabel: "请添加 Nora 的邮箱：",
-    emailFallback: "Nora 的邮箱（我们会发短信告诉您）",
+    emailFallback: "Nora 的邮箱（我们会发消息告诉您）",
     showHow: "查看步骤",
     meta: {
       title: "Instagram + Facebook（在同一个地方设置）",
@@ -419,7 +420,7 @@ const zhHans: IntakeCopy = {
         "点“设置”（齿轮图标 ⚙️，英文叫 Settings）。",
         "点“人员”（英文 People，有时显示为“用户”或“企业用户”）。",
         "点“邀请人员”或“添加人员”（Invite people / Add people），输入 {email}，再点“下一步”（Next）。",
-        "勾选您的 Facebook 专页和 Instagram 账号，然后点“邀请”（Invite）。",
+        "勾选您的 Facebook 公共主页和 Instagram 账号，然后点“邀请”（Invite）。",
       ],
     },
     google: {
@@ -434,7 +435,7 @@ const zhHans: IntakeCopy = {
     },
     tiktok: {
       title: "TikTok",
-      body: "TikTok 我们通电话时一起设置。请不要在这里填写密码。",
+      body: "我们通电话时一起设置。",
     },
     tip: "哪一步卡住了很正常，选“需要你们帮忙”，我们一起设置。",
   },
@@ -467,12 +468,12 @@ const zhHans: IntakeCopy = {
       "Nora 会联系您约一个简短的电话，把您跳过的问题一起补上。",
       "每篇帖子发布前都会先给您过目，没有您同意不会发布。",
     ],
-    foot: "有任何问题，随时发短信给 Nora。",
+    foot: "有任何问题，随时发消息给 Nora。",
   },
   already: {
     title: "谢谢，我们已经收到您的资料",
     body: "您的资料表已经提交，我们正在准备中！",
-    change: "需要修改什么吗？直接发短信给 Nora，她会帮您更新。",
+    change: "需要修改什么吗？直接发消息给 Nora，她会帮您更新。",
   },
   expired: {
     title: "这个链接已经失效",
@@ -481,7 +482,7 @@ const zhHans: IntakeCopy = {
   share: {
     label: "简体中文",
     message: (business, url) =>
-      `您好！我是 Nora 😊 很高兴开始跟 ${business} 合作。这是一份简短的新客户资料表，大约一分钟就能填完：我们已经先把查到的信息填好了，您看一下对不对就行。表格有中英文版本。\n\n${url}\n\n这个链接是专门给您的，请不要转发。有任何问题随时联系我！`,
+      `您好！我是 Nora 😊 很高兴能和 ${business} 合作！这里有个小表格，大约一分钟就能填完。店里的信息我们已经先查好填上了，您看看对不对就行。中文、英文都可以填。\n\n${url}\n\n这个链接是专门给您的，请不要转发。有问题随时找我！`,
   },
 };
 
@@ -504,11 +505,11 @@ const zhHant: IntakeCopy = {
     submit: "送出",
     sendNow: "現在送出",
     sending: "正在送出…",
-    oneMoreMinute: "還有一分鐘嗎？",
+    oneMoreMinute: "還有一分鐘時間嗎？",
     thatsAll: "這樣就可以了！點「現在送出」即可；如果還有一分鐘，可以點「下一步」，再回答幾個選填的小問題。",
     stepOf: (n, total) => `第 ${n} 步，共 ${total} 步`,
     example: "例如：",
-    restored: "歡迎回來！您之前填的內容已存在這支手機上，可以接著填。",
+    restored: "歡迎回來！您之前填的內容已儲存在這支手機上，可以接著填。",
     startOver: "重新填寫",
     autosave: "您填寫的內容會自動儲存在這個裝置上。",
     neverPasswords: "請不要在表格裡填寫任何密碼，我們也絕對不會跟您要密碼。",
@@ -528,10 +529,10 @@ const zhHant: IntakeCopy = {
   },
   aboutYou: { title: "關於您", blurb: "怎麼聯絡您最方便。" },
   contactTitle: "怎麼聯絡您？",
-  handles: { title: "您的帳號", intro: "這幾個我們沒找到。有的話請填一下，沒有可以跳過。" },
+  handles: { title: "您的帳號", intro: "這幾個我們沒找到，有的話請填一下。" },
   steps: [
     { title: "這些資訊對嗎？", blurb: "看一下我們查到的資訊，再告訴我們怎麼聯絡您。" },
-    { title: "帳號和照片", blurb: "讓我們協助管理帳號（不需要密碼），再分享幾張照片。" },
+    { title: "帳號和照片", blurb: "讓我們協助管理帳號，再分享幾張照片。" },
     { title: "我們怎麼合作", blurb: "想主打什麼，再做幾個簡單選擇。" },
   ],
   fields: {
@@ -558,7 +559,7 @@ const zhHant: IntakeCopy = {
 
     promote: {
       label: "想主打什麼？",
-      hint: "招牌菜或拿手商品、優惠、近期活動，您覺得自豪的都可以寫。",
+      hint: "招牌菜或主打商品、優惠、近期活動，您最想讓客人知道的都可以寫。",
       placeholder: "紅燒牛肉麵、小籠包；週一到週五午餐特價；二月有農曆新年套餐",
     },
     postLangs: { label: "貼文用什麼語言發？" },
@@ -575,7 +576,7 @@ const zhHant: IntakeCopy = {
     accessMeta: { done: "已完成 ✓", help: "需要你們幫忙" },
     accessGoogle: { done: "已完成 ✓", help: "需要你們幫忙" },
     postLangs: { en: "英文", zh: "中文", both: "中英文都要" },
-    creatorsOk: { yes: "可以！", maybe: "也許，想先多了解一下", no: "暫時不用" },
+    creatorsOk: { yes: "可以！", maybe: "再看看，想先多了解一下", no: "暫時不用" },
     creatorOffer: { meal1: "招待 1 人用餐", meal2: "招待 2 人用餐", drinks: "飲料", setMenu: "套餐或試吃", dessert: "甜點" },
     complaints: {
       contact: "請客人直接聯絡我們店",
@@ -587,7 +588,7 @@ const zhHant: IntakeCopy = {
     title: "怎麼給我們管理權限",
     intro: "把 Nora 加為帳號的協助管理員就可以。帳號還是您的，隨時可以把她移除。不需要給我們密碼。",
     emailLabel: "請新增 Nora 的 Email：",
-    emailFallback: "Nora 的 Email（我們會傳簡訊告訴您）",
+    emailFallback: "Nora 的 Email（我們會傳訊息告訴您）",
     showHow: "查看步驟",
     meta: {
       title: "Instagram + Facebook（在同一個地方設定）",
@@ -611,7 +612,7 @@ const zhHant: IntakeCopy = {
     },
     tiktok: {
       title: "TikTok",
-      body: "TikTok 我們通電話時一起設定。請不要在這裡填寫密碼。",
+      body: "我們通電話時一起設定。",
     },
     tip: "哪一步卡住了很正常，選「需要你們幫忙」，我們一起設定。",
   },
@@ -644,12 +645,12 @@ const zhHant: IntakeCopy = {
       "Nora 會聯絡您約一個簡短的電話，把您跳過的問題一起補上。",
       "每篇貼文發布前都會先給您過目，沒有您同意不會發布。",
     ],
-    foot: "有任何問題，隨時傳簡訊給 Nora。",
+    foot: "有任何問題，隨時傳訊息給 Nora。",
   },
   already: {
     title: "謝謝，我們已經收到您的資料",
     body: "您的資料表已經送出，我們正在準備中！",
-    change: "需要修改什麼嗎？直接傳簡訊給 Nora，她會幫您更新。",
+    change: "需要修改什麼嗎？直接傳訊息給 Nora，她會幫您更新。",
   },
   expired: {
     title: "這個連結已經失效",
@@ -658,7 +659,7 @@ const zhHant: IntakeCopy = {
   share: {
     label: "繁體中文",
     message: (business, url) =>
-      `您好！我是 Nora 😊 很開心開始跟 ${business} 合作。這是一份簡短的新客戶資料表，大約一分鐘就能填完：我們已經先把查到的資訊填好了，您看一下對不對就好。表格有中英文版本。\n\n${url}\n\n這個連結是專門給您的，請不要轉傳。有任何問題隨時聯絡我！`,
+      `您好！我是 Nora 😊 很開心能和 ${business} 合作！這裡有個小表單，大約一分鐘就能填完。店裡的資料我們已經先查好填上了，您看看對不對就好。中文、英文都可以填。\n\n${url}\n\n這個連結是專門給您的，請不要轉傳。有問題隨時找我！`,
   },
 };
 

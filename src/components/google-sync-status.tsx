@@ -1,7 +1,8 @@
 import Link from "next/link";
-import type { ReactNode } from "react";
+import { cache, type ReactNode } from "react";
+import { googleWorkClientIds } from "@/lib/data";
 import { relativeTime } from "@/lib/dates";
-import { googleSyncInfo, type GoogleSyncInfo } from "@/lib/google-status";
+import { googleSyncInfo, type GoogleSyncInfo, type GoogleSyncOpts } from "@/lib/google-status";
 import { findConnection } from "@/lib/integrations/connections";
 import type { Client } from "@/lib/schema";
 import { Badge, clientLabel, cx } from "./ui";
@@ -11,7 +12,14 @@ import { Badge, clientLabel, cx } from "./ui";
  * ("124 reviews · synced 2h ago", "0 reviews · check it's the right listing", "Sync failed", "Not linked").
  * Replaces the single account-wide "Connected" badge, which said nothing about any one business.
  * Server-component safe (no hooks).
+ *
+ * Quiet where nothing is wrong (rules in lib/google-status): 0 reviews on a business that isn't open yet or opened in
+ * the last 30 days, and "not linked / not synced / 0 reviews" on a business with no Google item in its plan.
  */
+
+/** Which businesses have Google work in their plan, looked up once per page. Null if that can't be read: then nothing is kept quiet. */
+const googleWork = cache(async (): Promise<Set<string> | null> => googleWorkClientIds().catch(() => null));
+const optsFor = (work: Set<string> | null, clientId: string): GoogleSyncOpts => (work ? { googleWork: work.has(clientId) } : {});
 
 /** Where to fix each state. `onSettings`: already on Settings' Google card, so links that only lead there are left out. */
 export function googleSyncFixHref(info: GoogleSyncInfo, clientId: string, onSettings = false): { href: string; label: string } | null {
@@ -56,7 +64,8 @@ export function GoogleSyncLine({
   );
 }
 
-type SyncClient = Pick<Client, "id" | "name" | "location" | "googleLocation" | "googleSyncAt" | "googleSyncStatus" | "googleSyncCount" | "googleSyncError">;
+type SyncClient = Pick<Client, "id" | "name" | "location" | "googleLocation" | "googleSyncAt" | "googleSyncStatus" | "googleSyncCount" | "googleSyncError"> &
+  Partial<Pick<Client, "prelaunch" | "openingDate">>;
 
 /**
  * Self-contained line for one business (looks up whether Google is connected itself):
@@ -65,34 +74,38 @@ type SyncClient = Pick<Client, "id" | "name" | "location" | "googleLocation" | "
  */
 export async function ClientGoogleSync({ client, ...rest }: { client: SyncClient & Pick<Client, "kind"> } & Omit<Parameters<typeof GoogleSyncLine>[0], "info" | "clientId">) {
   if (client.kind === "creator") return null;
-  const connected = await findConnection("google", null).then((c) => !!c, () => false);
-  return <GoogleSyncLine info={googleSyncInfo(client, connected)} clientId={client.id} {...rest} />;
+  const [connected, work] = await Promise.all([findConnection("google", null).then((c) => !!c, () => false), googleWork()]);
+  return <GoogleSyncLine info={googleSyncInfo(client, connected, undefined, optsFor(work, client.id))} clientId={client.id} {...rest} />;
 }
 
 /**
  * Account-level badge for the Google card in Settings. With a working connection it counts businesses that are
- * really syncing ("2 of 3 businesses syncing") instead of claiming "Connected".
+ * really syncing ("2 of 3 businesses syncing") instead of claiming "Connected". A business that has no listing and
+ * no Google item in its plan isn't meant to sync, so it is left out of the count.
  */
-export function GoogleSyncSummaryBadge({ clients, connection }: { clients: SyncClient[]; connection: { status: string } | null | undefined }) {
+export async function GoogleSyncSummaryBadge({ clients, connection }: { clients: SyncClient[]; connection: { status: string } | null | undefined }) {
   if (!connection) return <Badge>Not connected</Badge>;
   if (connection.status === "expired") return <Badge tone="warn">Expired — reconnect</Badge>;
   if (connection.status !== "ok") return <Badge tone="danger">Problem</Badge>;
-  const n = clients.length;
-  const good = clients.filter((c) => !googleSyncInfo(c, true).needsAttention).length;
+  const work = await googleWork();
+  const counted = clients.map((c) => googleSyncInfo(c, true, undefined, optsFor(work, c.id))).filter((i) => i.state !== "unlinked" || i.needsAttention);
+  const n = counted.length;
+  const good = counted.filter((i) => !i.needsAttention).length;
   if (n === 0) return <Badge tone="ok">Signed in</Badge>;
   if (good === n) return <Badge tone="ok">{n === 1 ? "Syncing" : `All ${n} businesses syncing`}</Badge>;
   return <Badge tone="warn">{good} of {n} {n === 1 ? "business" : "businesses"} syncing</Badge>;
 }
 
 /** Every business with its own status line (Settings → Google Business Profile). */
-export function GoogleSyncList({ clients, connected }: { clients: SyncClient[]; connected: boolean }) {
+export async function GoogleSyncList({ clients, connected }: { clients: SyncClient[]; connected: boolean }) {
   if (clients.length === 0) return null;
+  const work = await googleWork();
   return (
     <ul className="divide-y divide-border rounded-lg border border-border">
       {clients.map((c) => (
         <li key={c.id} className="flex flex-col gap-1 px-3 py-2.5">
           <Link href={`/clients/${c.id}`} className="self-start text-sm font-medium hover:underline">{clientLabel(c)}</Link>
-          <GoogleSyncLine info={googleSyncInfo(c, connected)} clientId={c.id} onSettings />
+          <GoogleSyncLine info={googleSyncInfo(c, connected, undefined, optsFor(work, c.id))} clientId={c.id} onSettings />
         </li>
       ))}
     </ul>

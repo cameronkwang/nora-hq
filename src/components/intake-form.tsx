@@ -250,11 +250,10 @@ export function IntakeForm({
 
   const p = { C, v, errors, clearLocal };
   const firstStep = hasFacts ? { title: C.steps[0].title, blurb: C.facts.intro } : C.aboutYou;
-  const stepTitle = (i: number) => (i === 0 ? firstStep.title : C.steps[i].title);
 
   return (
     <div ref={topRef} className="scroll-mt-4">
-      <Progress C={C} step={step} title={stepTitle(step)} />
+      <Progress C={C} step={step} />
 
       {restored && (
         <div className="intake-js mb-5 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-xl bg-info-soft px-4 py-3 text-[15px] text-info">
@@ -455,13 +454,11 @@ export function IntakeForm({
 
 /* ───────────────────────── Pieces ───────────────────────── */
 
-function Progress({ C, step, title }: { C: IntakeCopy; step: number; title: string }) {
+/** "Step 2 of 3" over the bar. The page's title is the h2 inside each step, so it shows once. */
+function Progress({ C, step }: { C: IntakeCopy; step: number }) {
   return (
     <div className="intake-js mb-6" aria-live="polite">
-      <div className="mb-2 flex items-baseline justify-between gap-3">
-        <span className="text-[16px] font-semibold">{title}</span>
-        <span className="text-sm text-muted">{C.common.stepOf(step + 1, INTAKE_STEP_COUNT)}</span>
-      </div>
+      <p className="mb-2 text-sm text-muted">{C.common.stepOf(step + 1, INTAKE_STEP_COUNT)}</p>
       <div className="grid grid-cols-3 gap-1.5" aria-hidden>
         {C.steps.map((s, i) => (
           <span key={i} className={cx("h-2 rounded-full transition-colors", i <= step ? "bg-accent" : "bg-surface-2")} />
@@ -585,7 +582,7 @@ function FieldHead({ C, name, htmlFor, required }: { C: IntakeCopy; name: Intake
       {f.hint && <p className="mt-0.5 text-[15px] leading-snug text-muted">{f.hint}</p>}
       {f.placeholder && (
         <p className="mt-0.5 text-[15px] leading-snug text-muted">
-          <span className="font-medium">{C.common.example}</span> {f.placeholder}
+          <span className="font-medium">{C.common.example}</span>{f.placeholder}
         </p>
       )}
     </div>

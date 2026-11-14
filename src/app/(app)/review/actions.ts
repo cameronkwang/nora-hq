@@ -117,7 +117,7 @@ export async function markSentAction(formData: FormData) {
   refresh();
   const msg =
     kind === "outreach_email" || kind === "outreach_dm"
-      ? "Marked sent. Outreach stage updated and a follow-up is due in 5 days."
+      ? "Marked sent. First messages and nudges get a follow-up in 5 days."
       : kind === "lead_email" || kind === "lead_dm"
         ? "Marked sent. The lead is now Contacted, with a follow-up in 5 days."
         : kind === "review_reply"
@@ -234,7 +234,7 @@ export async function markOutreachSentQuickAction(input: { id: string }): Promis
   if (draft.status !== "approved") return { ok: false, message: "This one isn't approved anymore. Reload the page." };
   try {
     await markDraftSent(id, user.email);
-    return { ok: true, status: "sent", message: "Marked sent. A follow-up is due in 5 days." };
+    return { ok: true, status: "sent", message: "Marked sent. First messages and nudges get a follow-up in 5 days." };
   } catch (e) {
     return { ok: false, message: errorMessage(e) };
   }

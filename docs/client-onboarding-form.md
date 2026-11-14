@@ -47,13 +47,16 @@ listing link, what they sell and price range (website, Instagram and TikTok stay
 web address it came from, the date it was last checked and who checked it. Fix anything by hand there; tick
 "We looked" to mark the empty ones as not found. Every change is written to the activity log as before → after, and
 anything that looks like a password is refused. Emptying the Facebook Page also removes the "Facebook Page: …" line
-the Add-business form put in the notes, so a page that isn't theirs stays gone.
+the Add-business form put in the notes, so a page that isn't theirs stays gone. It stays gone even if a Settings
+tab that was already open saves the old notes again.
 
 ### What Claude can do (connector)
 
 - `set_business_facts`: save public facts, each with the web address it was found at; mark what can't be found as
-  `not_found`. Passwords are refused. It can't clear a fact or rename a business. After an owner's correction it may
-  use the owner as the source.
+  `not_found`. Passwords are refused. It can't clear a fact or rename a business. It fills empty facts and replaces
+  only what it found itself earlier: a fact one of you typed, or one the owner gave, is kept and reported back. After
+  an owner's correction it may use the owner as the source, and then it does replace the old value. It never edits
+  the notes.
 - `send_onboarding_form`: always shows the prefill checklist. It hands back the link only when every fact was saved
   or marked not found, or when one of you told Claude to send it anyway (`send_anyway`). Claude never sends anything:
   it gives you the link and the message to text.
@@ -63,7 +66,8 @@ Links:
 - Work for 60 days. **New link** replaces the old one (the old link stops working, even if it was opened).
 - **Turn off** stops a link right away. A form can be sent only once. After that the client sees "Thanks, we got
   your answers. Need to change something? Text Nora."
-- An expired or turned-off link shows "This link has expired. Ask Nora for a new one."
+- An expired or turned-off link shows "This link has expired. Ask Nora for a new one." So does the link of a business
+  switched to Inactive, until it is Active again.
 
 ## What the client sees
 
@@ -83,9 +87,14 @@ Links:
      creators can visit and what they could be offered, what to do with unhappy reviews, anything else.
 - Only page 1 has required answers: their name, and a phone number or email. **Send now** on pages 1 and 2 sends what
   is there. Everything else can be skipped.
-- A password typed into the form ("our ig password: …", "密码：…") is refused with a gentle message, so it is never
-  saved. Talking about a password ("I forgot my Facebook password", "我忘了密码怎么办") and deal text ("Buy1Get1!")
-  go through like any other answer.
+- A password typed into the form ("our ig password: …", "ig password is …", "密码：…", "login: name / …") is refused
+  with a gentle message, so it is never saved. Talking about a password ("I forgot my Facebook password", "the
+  password is wrong", "我忘了密码怎么办") and deal text ("Buy1Get1!", "Loyalty account: buy10get1!") go through like any
+  other answer.
+- The form's check is calm so nobody is stopped from sending. As a second net, what Claude reads (`get_client_intake`)
+  goes through the stricter check used for notes: anything password-like shows as `[password removed: …]`. That can
+  also hide a deal written as one word ("Buy1Get1!") from Claude. The answers page shows everything as typed, and
+  Claude is told to ask Nora instead of guessing.
 - Answers save on the phone as they type, so they can close the page and pick up where they left off.
 - The form works without JavaScript as one long page.
 
@@ -96,7 +105,7 @@ Links:
 | `TOKEN_ENC_KEY` | yes (already used for OAuth) | Encrypts the stored copy of each link, so the team can copy it again later. |
 | `APP_URL` | recommended | Base for the links, e.g. `https://hq.example.com`. Without it, the address you are using is used. |
 | `INTAKE_ACCESS_EMAIL` | recommended | The email clients add as a helper in Meta Business Suite and Google Business Profile (Nora's). Without it, the form says "Nora's email. We'll send it to you." |
-| `BLOB_READ_WRITE_TOKEN` | optional | Turns on "upload photos, videos or your logo" (up to 25 MB each, under `intake/<id>/` in Blob). Without it, clients share a Google Drive, Dropbox or iCloud link instead. |
+| `BLOB_READ_WRITE_TOKEN` | optional | Turns on "upload photos, videos or your logo" (up to 25 MB each, under `intake/<id>/` in Blob; at most 40 files a day per link, and each upload token is good for one file and 15 minutes). Without it, clients share a Google Drive, Dropbox or iCloud link instead. |
 
 ## Security notes
 
@@ -106,14 +115,16 @@ Links:
 - Spam and abuse checks: a honeypot field, 5 submissions per IP per hour (salted IP hash kept in `answers._meta`),
   length caps on every field, and control and invisible characters stripped. Answers are always shown as plain text, never as HTML.
 - Link previews (iMessage, WhatsApp, Slack…) don't count as "opened".
-- The form never asks for passwords and says so in two places. TikTok access is set up on the kickoff call.
+- The form never asks for passwords and says so where accounts come up: in the greeting on page 1, and on page 2 in
+  the access steps and the 🔒 note. TikTok access is set up on the kickoff call.
 - Everything the client typed is untrusted. The MCP tool labels it `untrusted_answers` and adds an
   `untrustedSource` note, so Claude treats it as data and never as instructions. A correction ("Something's off") is
   quoted line by line in its ask, marked as the owner's words. Every kind of line break counts as a new line there,
   the Unicode line and paragraph separators included, so no line of theirs can sit outside the quote.
 - The "Is this right?" card is built on the server from structured fields only, never from free-text notes. The one
   exception: a business added before public facts existed may still have its Page as a "Facebook Page: <link>" line
-  in the notes; it is used until the Facebook Page is saved or cleared under Public facts, which removes the line.
+  in the notes; it is used until the Facebook Page is saved or cleared under Public facts. When one of you does that,
+  the line is also removed from the notes; Claude never edits the notes.
   The record of what the owner was shown is rebuilt on the server when they send, not taken from the browser.
 - The team preview (`/start-preview/<business id>`) needs a sign-in; it has no link behind it and saves nothing.
 

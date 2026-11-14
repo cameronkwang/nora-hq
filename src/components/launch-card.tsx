@@ -10,7 +10,8 @@ import { Badge, Card, ProgressBar } from "./ui";
 /**
  * "Launch checklist" card on a business page, for a business that isn't open yet (Settings → Pre-launch).
  * Shows how long until opening day and the short launch checklist (tasks tagged "launch"); the monthly plan waits
- * until then. Once opening day is here it offers "They're open", which hands the business back to the normal plan.
+ * until then. Once opening day is here it offers "They're open", which takes the business out of pre-launch and
+ * creates the month's plan tasks.
  * Renders nothing for a business that is open.
  *   <LaunchCard client={client} />
  */
@@ -28,8 +29,8 @@ export async function LaunchCard({ client, className }: { client: Client; classN
     >
       <p className="-mt-1 mb-3 text-sm text-muted">
         {info.opened
-          ? `${client.name}'s opening day is here. The monthly plan applies again.`
-          : `${client.name} isn't open yet. Until opening day this is the work; the monthly plan starts then.`}
+          ? `${client.name}'s opening day is here.`
+          : `${client.name} isn't open yet. Until they open, this is the work.`}
         {!info.openingDate && (
           <>
             {" "}
@@ -40,7 +41,7 @@ export async function LaunchCard({ client, className }: { client: Client; classN
 
       {info.opened && (
         <form action={markOpenAction.bind(null, client.id, info.openingDate)} className="mb-3 flex flex-wrap items-center gap-3 rounded-lg bg-warn-soft px-3 py-2">
-          <p className="min-w-0 flex-1 text-sm text-warn">Are they open? This takes them out of pre-launch.</p>
+          <p className="min-w-0 flex-1 text-sm text-warn">Are they open? This takes them out of pre-launch and creates the month&apos;s checklist.</p>
           <SubmitButton size="sm" pendingLabel="Saving…">They&apos;re open</SubmitButton>
         </form>
       )}

@@ -5,7 +5,7 @@ import { getDb, schema } from "./db";
 import { newId } from "./ids";
 import { currentMonth, formatDate, today } from "./dates";
 import { logActivity } from "./activity";
-import { OpsError } from "./ops";
+import { OpsError, generateMonthTasks } from "./ops";
 import { LAUNCH_TAG, isDay, launchInfo, openingLine, type LaunchInfo } from "./launch";
 import { PROFILE_COPY_LABEL, PROFILE_COPY_WHERE, checkProfileCopy, overLimitLine, profileCopySurface } from "./profile-copy";
 import { PROFILE_COPY_LIMITS, PROFILE_COPY_SURFACES, type ProfileCopySurface } from "./schema";
@@ -15,14 +15,16 @@ import { PROFILE_COPY_LIMITS, PROFILE_COPY_SURFACES, type ProfileCopySurface } f
  *
  * - setLaunch (people only): switches Pre-launch on/off and saves the opening day. Switching it on adds the short
  *   launch checklist (tasks tagged "launch": verify the Google profile, bios, Google description, 3 coming-soon
- *   posts, opening-day creator shortlist) and clears this month's untouched monthly-plan slots, which come back when
- *   the checklist is created on or after opening day.
+ *   posts, opening-day creator shortlist) and clears this month's untouched monthly-plan slots. Switching it off
+ *   (Settings, or "They're open" on the business page) creates the current month's plan tasks again. Nothing happens
+ *   by itself on opening day: from that day "Create checklist" and Claude's generate_month_tasks work again.
  * - planHold: generateMonthTasks (lib/ops) asks this first — no monthly-plan tasks are created until opening day.
  * - launchBrief: what Claude's briefing says about pre-launch businesses (days to opening + open launch steps).
  * - assertProfileCopy: validation for drafts of kind "profile_copy" (a bio / Google description, with the
  *   platform's own length limit). Used by createDraft / reviseDraft / approveDraft.
  *
- * Same conventions as lib/ops: zod-validated input, `actor` is a user email or "claude", one activity entry per call.
+ * Same conventions as lib/ops: zod-validated input, `actor` is a user email or "claude", one activity entry per call
+ * (marking a business open also gets generateMonthTasks' own entry for the tasks it creates).
  */
 
 const NON_PEOPLE = new Set(["claude", "public", "system"]);
@@ -107,8 +109,8 @@ async function addLaunchTasks(clientId: string, actor: string): Promise<number> 
 /**
  * Monthly-plan slots nobody has touched (generated, still to do, unassigned, no date, no notes, still carrying the
  * title they were generated with, no draft or post linked), from this month on. They'd only sit there as "0 of 8"
- * before the doors open; generating the checklist on or after opening day brings them back with the same ids.
- * Anything a person renamed, assigned, dated or wrote on stays.
+ * before the doors open; generating the checklist again (setLaunch does it when a person marks the business open)
+ * brings that month's slots back with the same ids. Anything a person renamed, assigned, dated or wrote on stays.
  */
 async function clearUntouchedPlanTasks(clientId: string): Promise<number> {
   const db = await getDb();
@@ -153,11 +155,17 @@ export const LaunchInput = z.object({
   openingDate: z.string().trim().max(20).nullish(),
 });
 
-export type SetLaunchResult = { prelaunch: boolean; openingDate: string | null; changed: boolean; stepsAdded: number; planTasksCleared: number; message: string };
+export type SetLaunchResult = {
+  prelaunch: boolean; openingDate: string | null; changed: boolean; stepsAdded: number; planTasksCleared: number;
+  /** Plan tasks created for the current month because the business was just marked open. */
+  planTasksCreated: number;
+  message: string;
+};
 
 /**
  * People only: mark a business as not open yet (with its opening day), or as open.
  * Switching Pre-launch on adds the launch checklist; while the doors aren't open, untouched monthly-plan slots are cleared.
+ * Switching it off (marking the business open) creates the current month's plan tasks, so the cleared checklist is back.
  */
 export async function setLaunch(clientId: string, input: z.input<typeof LaunchInput>, actor: string): Promise<SetLaunchResult> {
   if (!isPerson(actor)) throw new OpsError("Only Nora or Cameron can mark a business as pre-launch or open.");
@@ -175,23 +183,32 @@ export async function setLaunch(clientId: string, input: z.input<typeof LaunchIn
   const info = launchInfo({ prelaunch: v.prelaunch, openingDate });
   const stepsAdded = v.prelaunch ? await addLaunchTasks(clientId, actor) : 0;
   const planTasksCleared = info.planOnHold ? await clearUntouchedPlanTasks(clientId) : 0;
+  const tasks = (n: number, untouched = false) => `${n} ${untouched ? "untouched " : ""}monthly checklist task${n === 1 ? "" : "s"}`;
 
-  const parts = [
-    !v.prelaunch ? (cur.prelaunch ? "Marked as open. The monthly plan applies from now on." : "Saved.") : openingDate ? `Pre-launch · ${openingLine(info)}.` : "Pre-launch · add the opening day when you know it.",
-    stepsAdded ? `Added the launch checklist (${stepsAdded} steps).` : null,
-    planTasksCleared ? `Cleared ${planTasksCleared} untouched monthly checklist task${planTasksCleared === 1 ? "" : "s"}; they come back on opening day.` : null,
-  ].filter(Boolean);
   if (changed || stepsAdded || planTasksCleared) {
     await logActivity({
       actor, action: "client.launch", entityType: "client", entityId: clientId, clientId,
       summary: [
         !v.prelaunch ? `${cur.name} marked as open` : `${cur.name} marked pre-launch${openingDate ? ` · opens ${formatDate(openingDate)}` : " · no opening day yet"}`,
         stepsAdded ? `launch checklist added (${stepsAdded} steps)` : null,
-        planTasksCleared ? `${planTasksCleared} untouched monthly checklist task${planTasksCleared === 1 ? "" : "s"} cleared` : null,
+        planTasksCleared ? `${tasks(planTasksCleared, true)} cleared` : null,
       ].filter(Boolean).join(" · "),
     });
   }
-  return { prelaunch: v.prelaunch, openingDate, changed, stepsAdded, planTasksCleared, message: parts.join(" ") };
+
+  // Marked open (Pre-launch switched off in Settings, or "They're open" on the business page): create this month's plan
+  // tasks, now that the switch is saved (generateMonthTasks skips a business that is still on hold, and logs what it
+  // creates). It only tops up what is missing, so a checklist someone already created on opening day stays as it is.
+  const planTasksCreated = cur.prelaunch && !v.prelaunch ? await generateMonthTasks(clientId, currentMonth(), actor) : 0;
+
+  const parts = [
+    !v.prelaunch
+      ? (cur.prelaunch ? (planTasksCreated ? `Marked as open. Created ${tasks(planTasksCreated)} for this month.` : "Marked as open. The monthly plan applies from now on.") : "Saved.")
+      : openingDate ? `Pre-launch · ${openingLine(info)}.` : "Pre-launch · add the opening day when you know it.",
+    stepsAdded ? `Added the launch checklist (${stepsAdded} steps).` : null,
+    planTasksCleared ? `Cleared ${tasks(planTasksCleared, true)}. The month's checklist is created when you mark the business open.` : null,
+  ].filter(Boolean);
+  return { prelaunch: v.prelaunch, openingDate, changed, stepsAdded, planTasksCleared, planTasksCreated, message: parts.join(" ") };
 }
 
 /* ───────────────────────── Monthly plan gate ───────────────────────── */
@@ -234,7 +251,7 @@ export async function launchBrief(activeClients: schema.Client[], names: Map<str
           daysToOpening: info.daysToOpening,
           opening: openingLine(info),
           ...(info.opened
-            ? { note: "Opening day is here or has passed: the monthly plan applies again (generate_month_tasks). Suggest that Nora or Cameron switch Pre-launch off in the business's Settings." }
+            ? { note: "Opening day is here or has passed: generate_month_tasks works again. Suggest that Nora or Cameron mark the business open (\"They're open\" on its page, or Pre-launch off in its Settings); that also creates this month's plan tasks." }
             : !info.openingDate
               ? { note: "No opening day is saved yet. Ask Nora or Cameron for it in an ask thread; a person saves it in the business's Settings." }
               : {}),

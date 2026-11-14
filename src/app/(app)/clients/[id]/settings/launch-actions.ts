@@ -14,8 +14,8 @@ function refresh(clientId: string) {
 }
 
 /**
- * Settings → Pre-launch: "Not open yet" + the opening day. While a business isn't open it works the launch checklist;
- * monthly-plan tasks start on opening day.
+ * Settings → Pre-launch: "Not open yet" + the opening day. While a business isn't open it works the launch checklist
+ * and gets no monthly-plan tasks. Unticking "Not open yet" marks it open, which creates the month's plan tasks.
  */
 export async function saveLaunchAction(clientId: string, _prev: FormState, fd: FormData): Promise<FormState> {
   const user = await requireUser();
@@ -30,7 +30,7 @@ export async function saveLaunchAction(clientId: string, _prev: FormState, fd: F
   }
 }
 
-/** Business page → "They're open": switches Pre-launch off (the opening day stays on record). The monthly plan applies from then on. */
+/** Business page → "They're open": switches Pre-launch off (the opening day stays on record) and creates the month's plan tasks. */
 export async function markOpenAction(clientId: string, openingDate: string | null) {
   const user = await requireUser();
   await setLaunch(clientId, { prelaunch: false, openingDate }, user.email);

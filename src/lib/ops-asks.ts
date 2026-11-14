@@ -6,6 +6,7 @@ import { newId } from "./ids";
 import { logActivity } from "./activity";
 import { AskInput, OpsError, createTask } from "./ops";
 import { notifyAsk } from "./notify";
+import { publicAskText } from "./credential-guard";
 
 /**
  * Ask routing ("triage"). Same conventions as lib/ops: zod-validated input, `actor` is a user email
@@ -51,10 +52,13 @@ async function ensurePersonTask(ask: schema.Ask, person: Person, actor: string):
   const [existing] = await db.select({ id: schema.tasks.id }).from(schema.tasks)
     .where(and(eq(schema.tasks.askId, ask.id), eq(schema.tasks.assignee, person))).limit(1);
   if (existing) return null;
-  const firstLine = askTaskTitle(ask.body);
+  // Text from a public form (an owner drop, the collab form) is masked here as it is for Claude: the task is read by
+  // Claude (list_tasks) and shown in lists. The ask page linked from the task keeps the owner's words as typed.
+  const text = publicAskText(ask);
+  const firstLine = askTaskTitle(text);
   return createTask({
     title: firstLine,
-    details: ask.body.trim() !== firstLine ? ask.body.trim() : null,
+    details: text.trim() !== firstLine ? text.trim() : null,
     clientId: ask.clientId,
     assignee: person,
     askId: ask.id,

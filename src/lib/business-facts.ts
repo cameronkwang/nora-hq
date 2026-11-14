@@ -29,6 +29,11 @@ export type PublicInfo = {
   googleListing?: string;
   sells?: string;
   priceRange?: string;
+  /**
+   * The Facebook Page was saved or cleared under Public facts (setBusinessFacts). From then on only `facebook` above
+   * counts: the old "Facebook Page: <link>" line in the notes is no longer read, so a cleared Page stays cleared.
+   */
+  facebookDecided?: true;
   /** Where each fact was found: a public URL, or "owner" when the owner gave it to us on their form. */
   sources?: Partial<Record<FactKey, string>>;
   /** Looked for in public sources and not found. */
@@ -85,6 +90,7 @@ export function readPublicInfo(raw: unknown): PublicInfo {
     const v = text(r[k], FACT_MAX[k]);
     if (v) out[k] = v;
   }
+  if (r.facebookDecided === true) out.facebookDecided = true;
   if (r.sources && typeof r.sources === "object" && !Array.isArray(r.sources)) {
     const sources: Partial<Record<FactKey, string>> = {};
     for (const [k, v] of Object.entries(r.sources as Record<string, unknown>)) {
@@ -157,19 +163,20 @@ const handle = (h: string | null | undefined) => {
   return v ? `@${v}` : null;
 };
 
-// Before public_info existed, the Add-business form kept the Page in the notes as "Facebook Page: <link>".
+// Before public_info existed, the Add-business form kept the Page in the notes as "Facebook Page: <link>" (it still
+// writes that line next to the fact).
 const FB_NOTE_LINE = /^Facebook Page:[ \t]*(\S+)[ \t]*$/gim;
 const isFbNoteLink = (link: string) => link.length <= FACT_MAX.facebook && FB_LINK.test(link);
 
-/** The Facebook Page read from that notes line (only used while public_info has none). */
+/** The Facebook Page read from that notes line (only used while public_info has none and the fact was never saved or cleared). */
 function facebookFromNotes(notes: string | null | undefined): string | null {
   for (const m of (notes ?? "").matchAll(FB_NOTE_LINE)) if (isFbNoteLink(m[1])) return m[1];
   return null;
 }
 
 /**
- * Notes without their "Facebook Page: <link>" line(s). Used when the Facebook fact is cleared or changed, so the
- * old link can't come back through the notes. Returns the notes unchanged when there is no such line.
+ * Notes without their "Facebook Page: <link>" line(s). Used when a person clears or changes the Facebook fact, so
+ * the notes don't keep saying the old link. Returns the notes unchanged when there is no such line.
  */
 export function dropFacebookNote(notes: string | null | undefined): string | null {
   if (!notes) return notes ?? null;
@@ -186,7 +193,9 @@ export function dropFacebookNote(notes: string | null | undefined): string | nul
 /** Every fact we hold for a business (null = we don't have it). Handles come back as "@handle". */
 export function businessFacts(c: FactsRow): Record<FactKey, string | null> {
   const info = readPublicInfo(c.publicInfo);
-  const facebook = info.facebook ?? facebookFromNotes(c.notes);
+  // The notes line is a fallback for businesses whose Page was never saved or cleared as a fact. After that the
+  // fact alone decides: a line written back into the notes (a Settings tab opened earlier) can't undo a clear.
+  const facebook = info.facebook ?? (info.facebookDecided ? null : facebookFromNotes(c.notes));
   return {
     address: info.address ?? null,
     phone: info.phone ?? null,

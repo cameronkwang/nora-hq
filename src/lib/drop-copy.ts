@@ -50,7 +50,7 @@ const zhHans: DropCopy = {
   meta: { title: "发送优惠或传单", description: "把传单或照片发给 Nora 和 Cameron 的专属页面。" },
   hi: (business) => `${business}，您好！👋`,
   title: "有新的优惠或传单吗？",
-  intro: "在这里发给我们，我们会帮您做成帖子和限时动态（Story）。",
+  intro: "在这里发给我们，我们会帮您做成帖子和快拍（Story）。",
   photo: {
     label: "传单或优惠的照片",
     hint: "可以现拍，也可以从手机相册里选。PDF 也可以。",
@@ -62,16 +62,16 @@ const zhHans: DropCopy = {
   send: "发送给 Nora",
   sending: "正在发送…",
   needOne: "请添加一张照片，或写一下优惠内容。",
-  uploadsOff: "这里暂时不能添加照片。请在下面写一下优惠内容，照片直接发短信给 Nora。",
+  uploadsOff: "这里暂时不能添加照片。请在下面写一下优惠内容，照片直接发给 Nora 就行。",
   thanks: {
     title: "收到了，谢谢！",
-    body: "我们会把它做成帖子和限时动态（Story）。",
+    body: "我们会把它做成帖子和快拍（Story）。",
     again: "再发一个",
   },
   share: {
     label: "简体中文",
     message: (business, url) =>
-      `您好！我是 Nora 😊 以后 ${business} 有新的优惠、传单或活动，直接在这里发给我们就行：拍张照，告诉我们哪天结束，我们会做成帖子和限时动态（Story）。\n\n${url}\n\n这个链接是专门给您的，请不要转发。随时都可以用。`,
+      `您好！我是 Nora 😊 以后 ${business} 有新的优惠、传单或活动，直接在这里发给我们就行：拍张照，告诉我们哪天结束，我们会做成帖子和快拍（Story）。\n\n${url}\n\n这个链接是专门给您的，请不要转发。随时都可以用。`,
   },
 };
 
@@ -91,7 +91,7 @@ const zhHant: DropCopy = {
   send: "傳送給 Nora",
   sending: "正在傳送…",
   needOne: "請新增一張照片，或寫一下優惠內容。",
-  uploadsOff: "這裡暫時不能新增照片。請在下面寫一下優惠內容，照片直接傳簡訊給 Nora。",
+  uploadsOff: "這裡暫時不能新增照片。請在下面寫一下優惠內容，照片直接傳給 Nora 就可以。",
   thanks: {
     title: "收到了，謝謝！",
     body: "我們會把它做成貼文和限時動態（Story）。",

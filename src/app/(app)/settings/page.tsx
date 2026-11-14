@@ -248,7 +248,7 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
             ) : undefined}
           >
             <div className="flex flex-col gap-3">
-              <p className="text-sm text-muted">The mailbox creator emails are sent from. Approved outreach emails go out from here, and replies move creators to “Replied”.</p>
+              <p className="text-sm text-muted">Approved lead pitches go out from this mailbox. A creator email goes out from here only when this mailbox is that business&apos;s saved sender (business Settings → Outreach profile). Replies move creators to “Replied”.</p>
               {!googleReady && <SetupHint>Add GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET and enable the Gmail API (docs/setup.md, step 7).</SetupHint>}
               <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
                 <div className="min-w-0">

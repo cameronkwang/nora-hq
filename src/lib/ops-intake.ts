@@ -30,6 +30,10 @@ import { FB_LINK, OWNER_SOURCE, businessFacts, factsChecklist, ownerCardFacts, o
  *   and an encrypted copy (lib/crypto) lets the team re-copy the link later.
  * - getIntakeLinkUrl (people only, via the app): decrypts the link for "Copy link".
  * - revokeIntake (people only).
+ * - A link only works while its business is Active: for an Inactive business (or Nora's own workspace) the page,
+ *   the submit and the upload route all read it as expired, and it works again when the business is Active again.
+ * - Uploads: one upload token makes one file, works for INTAKE_UPLOAD_TOKEN_MS, and a link gets
+ *   INTAKE_UPLOADS_PER_DAY of them a day (claimIntakeUpload: one conditional UPDATE on the link's row).
  * - Before the link goes out, Claude looks up the business's public facts (lib/business-facts). The form shows them
  *   back on one "Is this right?" card, so the owner never types an address or opening hours.
  * - submitIntake (actor "public"): saves the answers once (3-page form: "Is this right?" + contact, accounts +
@@ -45,6 +49,10 @@ import { FB_LINK, OWNER_SOURCE, businessFacts, factsChecklist, ownerCardFacts, o
 
 export const INTAKE_LINK_DAYS = 60;
 export const INTAKE_RATE_LIMIT = 5; // submissions per IP hash per hour
+/** Files one link may upload per day (UTC). The form takes 30; one upload token is good for one file and is counted when it's handed out. */
+export const INTAKE_UPLOADS_PER_DAY = 40;
+/** How long an upload token works: long enough for a 25 MB video on a slow phone, short once a link is turned off or sent. */
+export const INTAKE_UPLOAD_TOKEN_MS = 15 * 60_000;
 
 const NON_PEOPLE = new Set(["claude", "public", "system"]);
 const isPerson = (actor: string) => !!actor && !NON_PEOPLE.has(actor.toLowerCase());
@@ -157,7 +165,10 @@ export type IntakeLinkState =
   | { state: "submitted"; intake: schema.ClientIntake; client: { id: string; name: string } }
   | { state: "open"; intake: schema.ClientIntake; client: schema.Client };
 
-/** Looks a raw token up by hash. Never throws for a bad token. */
+/**
+ * Looks a raw token up by hash. Never throws for a bad token. A link for an Inactive business (or for Nora's own
+ * workspace) reads as expired, like the owner drop link: nothing opens, sends or uploads until it is Active again.
+ */
 export async function getIntakeByToken(raw: unknown): Promise<IntakeLinkState> {
   if (!looksLikeToken(raw)) return { state: "missing" };
   const db = await getDb();
@@ -167,7 +178,24 @@ export async function getIntakeByToken(raw: unknown): Promise<IntakeLinkState> {
   if (!client) return { state: "missing" };
   if (row.status === "submitted") return { state: "submitted", intake: row, client: { id: client.id, name: client.name } };
   if (row.status === "revoked" || (row.expiresAt && row.expiresAt.getTime() < Date.now())) return { state: "expired" };
+  if (client.archived || client.kind === "creator") return { state: "expired" };
   return { state: "open", intake: row, client };
+}
+
+/**
+ * Takes one of the link's upload tokens for today (UTC); false when today's are used up or the link no longer takes
+ * answers. ONE conditional UPDATE (as claimDropUpload in lib/ops-drop): the database checks and bumps the counter in
+ * the same statement, so asking for many tokens at once can't hand out more than the cap.
+ */
+export async function claimIntakeUpload(intakeId: string, now = new Date()): Promise<boolean> {
+  const db = await getDb();
+  const t = schema.clientIntakes;
+  const day = now.toISOString().slice(0, 10);
+  const rows = await db.update(t)
+    .set({ uploadDay: day, uploadCount: sql`case when ${t.uploadDay} is not distinct from ${day} then ${t.uploadCount} + 1 else 1 end` })
+    .where(and(eq(t.id, intakeId), inArray(t.status, ["sent", "opened"]), sql`(${t.uploadDay} is distinct from ${day} or ${t.uploadCount} < ${INTAKE_UPLOADS_PER_DAY})`))
+    .returning({ id: t.id });
+  return rows.length > 0;
 }
 
 export type IntakeFormSetup = {
@@ -304,7 +332,10 @@ export type IntakeAnswers = { [K in TextField]: string } & { [K in ChoiceField]:
 /** What the owner was shown on the "Is this right?" card when they answered it (our own data, saved with their answer). */
 export type FactsShown = { name: string } & Partial<Record<OwnerCardFact, string>>;
 
-/** Boxes where we ask for deals and anything else on their mind: a bare word like "Buy1Get1!" is no reason to refuse. */
+/**
+ * Boxes where we ask for deals and anything else on their mind: a bare word like "Buy1Get1!" is no reason to refuse.
+ * A password-shaped word right after an account ("login: name / …", "账号 name …") still is.
+ */
 const PROSE_BOXES = new Set<TextField>(["promote", "anythingElse"]);
 
 /**
@@ -312,6 +343,7 @@ const PROSE_BOXES = new Set<TextField>(["promote", "anythingElse"]);
  * A password the owner typed ("our ig password: …", "密码：…") is refused with a gentle message, so a credential
  * never reaches the database. The check is the calm one (looksLikeTypedSecret): talking about a password
  * ("我忘了Facebook的密码怎么办", "I forgot my password: can you help") never stops a busy owner from sending.
+ * What it lets through on purpose is still masked before Claude reads the answers (get_client_intake).
  */
 export const IntakeInput = z.object(shape).superRefine((v, ctx) => {
   const phone = typeof v.contactPhone === "string" ? v.contactPhone : "";

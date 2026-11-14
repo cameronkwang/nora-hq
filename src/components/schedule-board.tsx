@@ -9,7 +9,7 @@ import { ScheduleSheet } from "./schedule-sheet";
 import { Badge, EmptyState, cx } from "./ui";
 
 /**
- * One row of Nora's schedule as the page hands it to the browser. No money — the table has none. A job that
+ * One row of Nora's schedule as the page hands it to the browser. No amount — the table has none. A job that
  * was made into a deal carries the deal's id and whether it's paid; the amount stays on the deal.
  */
 export type ScheduleEntry = {

@@ -53,13 +53,16 @@ export function draftChannel(kind: string, meta: Record<string, unknown>): SendC
   return meta.channel === "tiktok_dm" ? "tiktok_dm" : "instagram_dm";
 }
 
+/** "Crab O Clock's"; a name that already ends in 's ("Max's") is left as it is. */
+const possessive = (name: string) => (/['’]s$/i.test(name.trim()) ? name.trim() : `${name}'s`);
+
 /**
  * A plain-words warning when a message's channel isn't the kind of account saved as the sender
  * (a TikTok DM for a business whose saved sender is its Instagram). Null when they match, or no sender is saved.
  */
 export function senderMismatch(p: OutreachProfile, channel: SendChannel): string | null {
   if (!p.sendFrom || !p.sendFromKind || p.sendFromKind === "other" || p.sendFromKind === CHANNEL_KIND[channel]) return null;
-  return `This is ${CHANNEL_NAME[channel]}, but ${p.business}'s saved sender is ${senderWithKind(p)}. Send it from ${p.business}'s own ${CHANNEL_ACCOUNT[channel]}.`;
+  return `This is ${CHANNEL_NAME[channel]}, but ${possessive(p.business)} saved sender is ${senderWithKind(p)}. Send it from ${possessive(p.business)} own ${CHANNEL_ACCOUNT[channel]}.`;
 }
 
 /**
@@ -67,19 +70,20 @@ export function senderMismatch(p: OutreachProfile, channel: SendChannel): string
  * ("@craboclock"), else the business's own account on that channel ("Crab O Clock's own TikTok").
  */
 export function sendFromText(p: OutreachProfile, channel: SendChannel): string {
-  if (!p.sendFrom) return `${p.business}'s own ${CHANNEL_ACCOUNT[channel]}`;
-  return senderMismatch(p, channel) ? `${p.business}'s own ${CHANNEL_ACCOUNT[channel]}` : p.sendFrom;
+  if (!p.sendFrom) return `${possessive(p.business)} own ${CHANNEL_ACCOUNT[channel]}`;
+  return senderMismatch(p, channel) ? `${possessive(p.business)} own ${CHANNEL_ACCOUNT[channel]}` : p.sendFrom;
 }
 
 /**
- * What approving an outreach email does. The connected Gmail inbox only sends it automatically when that inbox IS the
- * business's saved sender, or when the business has no sender saved yet (how it worked before outreach profiles).
- * Otherwise a person sends it by hand from the business's account and marks it sent.
+ * What approving an outreach email does. The connected Gmail inbox sends it automatically ONLY when a sender is saved
+ * for the business AND that inbox is the saved sender. In every other case (no sender saved yet included) approving
+ * sends nothing: a person sends it by hand from the business's own account and marks it sent.
+ * `from` is the saved sender, or null when none is saved.
  */
 export function emailSendPlan(p: Pick<OutreachProfile, "sendFrom" | "sendFromKind"> | null | undefined, gmailAddress: string | null | undefined): { auto: boolean; from: string | null } {
   const gmail = gmailAddress?.trim().toLowerCase() || null;
   const saved = p?.sendFrom?.trim() || null;
-  if (!saved) return { auto: !!gmail, from: gmail };
+  if (!saved) return { auto: false, from: null };
   const isGmail = p?.sendFromKind === "email" && !!gmail && saved.toLowerCase() === gmail;
   return { auto: isGmail, from: saved };
 }

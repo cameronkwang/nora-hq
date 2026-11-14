@@ -6,6 +6,7 @@ import webpush from "web-push";
 import { getDb, schema } from "./db";
 import { allowedUsers } from "./auth";
 import type { NotifyTopic } from "./schema";
+import { publicAskText } from "./credential-guard";
 
 /**
  * Phone notifications (Web Push). Server side only; the app never calls an LLM here.
@@ -221,7 +222,12 @@ export function notifyCollabRequest(r: { id: string; businessName: string; city?
   });
 }
 
-type AskLike = { id: string; body: string; kind: string; forWho: string };
+type AskLike = { id: string; body: string; kind: string; forWho: string; createdBy?: string; dropLinkId?: string | null };
+
+/** What an ask's push says: the owner's words from a public form (or drop) with anything password-like masked. */
+export function askPushText(ask: Pick<AskLike, "body" | "createdBy" | "dropLinkId">): string {
+  return publicAskText(ask);
+}
 
 /**
  * Ask hooks (createRoutedAsk / triageAsk):
@@ -248,7 +254,7 @@ export function notifyAsk(ask: AskLike, actor: string, prev?: { kind: string; fo
     const label = ask.kind === "idea" ? "an idea" : ask.kind === "update" ? "an FYI" : ask.kind === "question" ? "a question" : "an ask for you";
     await sendToUser(target, "ask_for_me", {
       title: prev ? `New ask for you (sorted by ${nameOf(actor)})` : `${nameOf(actor)} sent ${label}`,
-      body: ask.body,
+      body: askPushText(ask),
       url: `/asks/${ask.id}`,
       tag: `ask-${ask.id}`,
     });

@@ -53,7 +53,7 @@ export async function ClientIntakeCard({ clientId, clientName, className }: { cl
         </p>
       )}
       {/* Shown whenever a form could still go out or come back (also a fresh one after an earlier form was answered). */}
-      {latest?.status !== "submitted" && check && <PrefillChecklist clientId={clientId} check={check} />}
+      {latest?.status !== "submitted" && check && <PrefillChecklist clientId={clientId} check={check} out={latest?.status === "sent" || latest?.status === "opened"} />}
       <IntakeSharePanel clientId={clientId} clientName={clientName} status={status} />
     </Card>
   );
@@ -70,13 +70,16 @@ async function prefill(clientId: string): Promise<FactsChecklist | null> {
   }
 }
 
-/** What the owner will be shown instead of asked, what's missing, and a link to see it as they will. */
-function PrefillChecklist({ clientId, check }: { clientId: string; check: FactsChecklist }) {
+/**
+ * What the owner will be shown instead of asked, what's missing, and a link to see it as they will.
+ * `out`: a link is already with the owner (sent or opened), so nothing here talks about sending it.
+ */
+function PrefillChecklist({ clientId, check, out }: { clientId: string; check: FactsChecklist; out: boolean }) {
   const names = (list: { label: string }[]) => list.map((x) => x.label).join(" · ");
   return (
     <div data-intake-prefill="" className="mb-3 rounded-lg border border-border p-3 text-sm">
       <div className="mb-2 flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
-        <p className="font-medium">Before you send: what the form already knows</p>
+        <p className="font-medium">What the form already knows</p>
         <a href={`/start-preview/${clientId}`} target="_blank" rel="noopener" className="text-accent hover:underline">Preview what the owner sees</a>
       </div>
       <dl className="space-y-1">
@@ -100,7 +103,7 @@ function PrefillChecklist({ clientId, check }: { clientId: string; check: FactsC
       {check.missing.length > 0 ? (
         <p data-intake-hint="" className="mt-2 rounded-lg bg-warn-soft px-3 py-2 text-xs text-warn">
           {check.checkedAt ? "Not fully researched yet." : "Not researched yet."} Ask Claude to look up their public details first, or add them in{" "}
-          <Link href={`/clients/${clientId}/settings#facts`} className="underline underline-offset-2">Settings</Link>, so the owner only has to tap “Yes, that&apos;s right”. You can still send it now.
+          <Link href={`/clients/${clientId}/settings#facts`} className="underline underline-offset-2">Settings</Link>, so the owner only has to tap “Yes, that&apos;s right”.{!out && " You can still send it now."}
         </p>
       ) : (
         <p data-intake-hint="" className="mt-2 text-xs text-muted">

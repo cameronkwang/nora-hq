@@ -18,7 +18,7 @@ const lastDay = (month: string) => {
 };
 
 /**
- * Add (no `item`) or edit one schedule entry. Business, day or "no set day", free, reel. No money.
+ * Add (no `item`) or edit one schedule entry. Business, day or "no set day", free, reel. No amount.
  * A saved, non-free job can be made into a deal from here; once it has one, this links to it.
  */
 export function ScheduleItemForm({ month, item, onDone }: { month: string; item?: ScheduleEntry; onDone: (message?: string) => void }) {
