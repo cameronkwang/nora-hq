@@ -6,7 +6,7 @@ import { DraftCard } from "@/components/draft-card";
 import { DraftFilters } from "@/components/draft-filters";
 import { DraftQueue } from "@/components/draft-queue";
 import { KIND_LABELS, MANUAL_SEND_KINDS } from "@/components/draft-checks";
-import { EmptyState, PageHeader, clientLabel, cx } from "@/components/ui";
+import { EmptyState, PageHeader, Status, clientLabel } from "@/components/ui";
 import { REVIEW_TABS, getDraft, gmailConnected, googleConnected, listDrafts, loadContexts, tabCounts, type ReviewTab } from "./queries";
 import { listReadyToSend, readyToSendCount } from "./send-queries";
 import { ReadyToSend } from "@/components/ready-to-send";
@@ -76,54 +76,40 @@ export default async function ReviewPage({ searchParams }: { searchParams: Promi
 
   return (
     <div>
-      <PageHeader title="Review queue" subtitle="Everything Claude drafts waits here. Nothing goes out until Cameron or Nora approves it." />
+      <PageHeader
+        crumb={focused ? <Link href={focusedTab ? qs({ tab: focusedTab === "needs_review" ? "" : focusedTab }) : "/review"}>Review queue</Link> : undefined}
+        title="Review queue"
+        subtitle="Everything Claude drafts waits here. Nothing goes out until Cameron or Nora approves it."
+      />
 
       {msg && (
-        <div
-          role="status"
-          className={cx(
-            "mb-4 flex flex-wrap items-center justify-between gap-2 rounded-lg px-4 py-3 text-sm",
-            tone === "danger" ? "bg-danger-soft text-danger" : tone === "warn" ? "bg-warn-soft text-warn" : "bg-ok-soft text-ok",
-          )}
-        >
-          <span>{msg}</span>
+        <div role="status" className="notice mb-4">
+          <Status tone={tone === "danger" ? "danger" : tone === "warn" ? "warn" : "ok"} className="whitespace-normal text-text">
+            {msg}
+          </Status>
           {nextId && !focused && (
-            <Link href={`/review?draft=${nextId}`} className="font-semibold underline">
+            <Link href={`/review?draft=${nextId}`} className="link">
               Open it to copy &amp; send
             </Link>
           )}
         </div>
       )}
 
-      {focused ? (
-        <div className="mb-4 flex flex-wrap items-center gap-3 text-sm">
-          <Link href={focusedTab ? qs({ tab: focusedTab === "needs_review" ? "" : focusedTab }) : "/review"} className="text-accent hover:underline">
-            ← Back to the queue
-          </Link>
-        </div>
-      ) : (
+      {!focused && (
         <>
-          <nav aria-label="Queue" className="relative -mx-4 mb-4 overflow-x-auto px-4 md:mx-0 md:px-0">
-            <ul className="flex min-w-max gap-1 border-b border-border">
+          {/* Which pile: filter chips (the selected one is ink). One line; it scrolls sideways on a small phone. */}
+          <nav aria-label="Queue" className="-mx-4 mb-4 overflow-x-auto px-4 md:mx-0 md:px-0">
+            <ul className="chips min-w-max flex-nowrap">
               {REVIEW_TABS.map((t) => {
                 const active = t.key === shownTab;
                 const n = counts[t.key];
                 return (
                   <li key={t.key}>
-                    <Link
-                      href={qs({ tab: t.key === "needs_review" ? "" : t.key })}
-                      aria-current={active ? "page" : undefined}
-                      className={cx(
-                        "-mb-px flex items-center gap-1.5 border-b-2 px-3 py-2 text-sm pointer-coarse:min-h-11",
-                        active ? "border-accent font-semibold text-accent" : "border-transparent text-muted hover:text-text",
-                      )}
-                    >
-                      {t.label}
-                      {n > 0 && (
-                        <span className={cx("rounded-full px-1.5 text-xs font-semibold", t.key === "failed" ? "bg-danger-soft text-danger" : t.key === "needs_review" || t.key === "approved" ? "bg-accent text-accent-fg" : "bg-surface-2 text-muted")}>
-                          {n}
-                        </span>
-                      )}
+                    <Link href={qs({ tab: t.key === "needs_review" ? "" : t.key })} aria-current={active ? "page" : undefined} className="chip">
+                      <span>
+                        {t.label}
+                        {n > 0 && <i>{n}</i>}
+                      </span>
                     </Link>
                   </li>
                 );
@@ -142,15 +128,12 @@ export default async function ReviewPage({ searchParams }: { searchParams: Promi
                 kinds={DRAFT_KINDS.map((k) => ({ id: k, label: KIND_LABELS[k] ?? k }))}
               />
               {toSend > 0 && (tab === "approved" || tab === "needs_review") && (
-                <Link
-                  href={qs({ tab: "approved", kind: "", send: "1" })}
-                  className="mb-4 flex min-h-11 items-center justify-between gap-3 rounded-lg bg-accent-soft px-4 py-3 text-sm"
-                >
-                  <span>
-                    <span className="font-semibold">{toSend} outreach {toSend === 1 ? "message is" : "messages are"} ready to send.</span>{" "}
+                <Link href={qs({ tab: "approved", kind: "", send: "1" })} className="notice mb-6">
+                  <span className="min-w-0 flex-1 basis-56">
+                    <span className="font-medium">{toSend} outreach {toSend === 1 ? "message is" : "messages are"} ready to send.</span>{" "}
                     <span className="text-muted">One at a time, from each business&apos;s own account.</span>
                   </span>
-                  <span className="shrink-0 font-semibold text-accent">Send →</span>
+                  <span className="link shrink-0">Send →</span>
                 </Link>
               )}
             </>
@@ -158,18 +141,20 @@ export default async function ReviewPage({ searchParams }: { searchParams: Promi
         </>
       )}
 
-      {focusId && !focused && <EmptyState title="That draft doesn't exist anymore">It may have been deleted. <Link href="/review" className="text-accent hover:underline">Go to the queue</Link>.</EmptyState>}
+      {focusId && !focused && <EmptyState title="That draft doesn't exist anymore">It may have been deleted. <Link href="/review" className="link">Go to the queue</Link>.</EmptyState>}
 
       {!focusId && !sendMode && drafts.length === 0 && (
-        <EmptyState title={client || kind ? `${EMPTY[tab].title} for this filter` : EMPTY[tab].title}>
-          {EMPTY[tab].body}
-          {(client || kind) && (
-            <>
-              {" "}
-              <Link href={qs({ client: "", kind: "" })} className="text-accent hover:underline">Clear filters</Link>
-            </>
-          )}
-        </EmptyState>
+        <div className="border-t border-border pt-1">
+          <EmptyState title={client || kind ? `${EMPTY[tab].title} for this filter` : EMPTY[tab].title}>
+            {EMPTY[tab].body}
+            {(client || kind) && (
+              <>
+                {" "}
+                <Link href={qs({ client: "", kind: "" })} className="link">Clear filters</Link>
+              </>
+            )}
+          </EmptyState>
+        </div>
       )}
 
       {(() => {
@@ -189,9 +174,9 @@ export default async function ReviewPage({ searchParams }: { searchParams: Promi
         // Needs review: focus mode on phones, keyboard shortcuts + bulk replies on desktop.
         if (!focused && tab === "needs_review" && drafts.length > 0)
           return <DraftQueue googleConnected={google} items={drafts.map((d) => ({ id: d.id, kind: d.kind, title: d.title, node: card(d) }))} />;
-        return <div className="flex flex-col gap-4">{drafts.map(card)}</div>;
+        return <div className="draft-list">{drafts.map(card)}</div>;
       })()}
-      {!focused && drafts.length >= 100 && <p className="mt-4 text-center text-xs text-muted">Showing the first 100. Filter by business or type to see more.</p>}
+      {!focused && drafts.length >= 100 && <p className="meta mt-6">Showing the first 100. Filter by business or type to see more.</p>}
     </div>
   );
 }

@@ -15,7 +15,7 @@ export function PaymentLineForm({ line, id = "payment-line" }: { line: string | 
         <input id={id} name="line" defaultValue={line ?? ""} maxLength={200} placeholder="Zelle: 804-555-0123" className="input min-w-0 flex-1" autoComplete="off" />
         <SubmitButton variant="secondary" className="shrink-0">Save</SubmitButton>
       </div>
-      <p className="mt-1 text-xs text-muted">Printed on payment requests. Zelle, Venmo, PayPal or “check payable to…”. Never a password.</p>
+      <p className="hint">Printed on payment requests. Zelle, Venmo, PayPal or “check payable to…”. Never a password.</p>
     </ActionForm>
   );
 }

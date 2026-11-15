@@ -62,7 +62,7 @@ export function CopyButton({
         window.setTimeout(() => setState("idle"), 2000);
       }}
     >
-      <span aria-live="polite">{state === "copied" ? "Copied ✓" : state === "failed" ? "Copy failed — select and copy" : label}</span>
+      <span aria-live="polite">{state === "copied" ? "Copied ✓" : state === "failed" ? "Copy failed. Select and copy" : label}</span>
     </button>
   );
 }

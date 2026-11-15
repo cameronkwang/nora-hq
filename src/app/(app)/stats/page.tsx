@@ -6,7 +6,7 @@ import { getCreatorStats, PLATFORM_LABEL, type PlatformSummary, type TopPost } f
 import { instagramConfigured } from "@/lib/integrations/instagram";
 import { tiktokConfigured } from "@/lib/integrations/tiktok";
 import type { CreatorPlatform } from "@/lib/schema";
-import { Badge, Card, EmptyState, PageHeader, buttonClass, cx, formatNumber } from "@/components/ui";
+import { Card, EmptyState, PageHeader, Status, buttonClass, cx, formatNumber } from "@/components/ui";
 import { CopyButton } from "@/components/copy-button";
 import { StatsGrowthChart } from "@/components/stats-growth-chart";
 import { StatsManualForm, StatsSyncButton, StatsTagSelect } from "@/components/stats-forms";
@@ -26,8 +26,8 @@ function Delta({ n, label }: { n: number | null; label: string }) {
   if (n == null) return null;
   const sign = n > 0 ? "+" : n < 0 ? "−" : "±";
   return (
-    <span className="whitespace-nowrap text-xs text-muted">
-      <span className={cx("font-semibold tabular-nums", n > 0 ? "text-ok" : n < 0 ? "text-danger" : "text-muted")}>{sign}{formatNumber(Math.abs(n))}</span> {label}
+    <span className="whitespace-nowrap">
+      <span className={cx("tabular-nums", n > 0 ? "font-medium text-text" : "")}>{sign}{formatNumber(Math.abs(n))}</span> {label}
     </span>
   );
 }
@@ -35,9 +35,9 @@ function Delta({ n, label }: { n: number | null; label: string }) {
 function Mini({ label, value, hint }: { label: string; value: ReactNode; hint?: string | null }) {
   return (
     <div className="min-w-0">
-      <p className="text-xs text-muted">{label}</p>
-      <p className="text-lg font-semibold tabular-nums">{value}</p>
-      {hint && <p className="truncate text-[11px] text-muted" title={hint}>{hint}</p>}
+      <p className="eyebrow">{label}</p>
+      <p className="mt-0.5 font-medium tabular-nums">{value}</p>
+      {hint && <p className="meta truncate" title={hint}>{hint}</p>}
     </div>
   );
 }
@@ -47,58 +47,57 @@ function ConnectButton({ p, again, disabled }: { p: CreatorPlatform; again?: boo
   if (disabled) {
     return <span className={cx(buttonClass("secondary", "sm"), "pointer-events-none opacity-50")} aria-disabled>Connect {PLATFORM_LABEL[p]}</span>;
   }
-  return <a href={CONNECT[p]} className={buttonClass(again ? "ghost" : "primary", "sm")}>{again ? "Reconnect" : `Connect ${PLATFORM_LABEL[p]}`}</a>;
+  return <a href={CONNECT[p]} className={buttonClass(again ? "ghost" : "secondary", "sm")}>{again ? "Reconnect" : `Connect ${PLATFORM_LABEL[p]}`}</a>;
 }
 
 function PlatformCard({ s, ready }: { s: PlatformSummary; ready: boolean }) {
   const p = s.platform;
   const problem = s.connectionStatus && s.connectionStatus !== "ok";
   return (
-    <section className="flex min-w-0 flex-col gap-4 rounded-xl border border-border bg-surface p-4">
-      <header className="flex items-center justify-between gap-2">
-        <h2 className="flex min-w-0 items-center gap-2 text-sm font-semibold">
-          <span aria-hidden className={cx("inline-block size-2.5 rounded-full", p === "instagram" ? "bg-ig" : "bg-tt")} />
+    <section className="sec flex min-w-0 flex-col">
+      <header className="sec-head">
+        <h2 className="title min-w-0 truncate">
           {PLATFORM_LABEL[p]}
-          {s.connectionLabel && <span className="truncate font-normal text-muted">{s.connectionLabel}</span>}
+          {s.connectionLabel && <span className="meta">{s.connectionLabel}</span>}
         </h2>
         {s.connected ? (
-          problem ? <Badge tone={s.connectionStatus === "expired" ? "warn" : "danger"}>{s.connectionStatus === "expired" ? "Expired" : "Problem"}</Badge> : <Badge tone="ok">Auto-sync</Badge>
+          problem ? <Status tone={s.connectionStatus === "expired" ? "warn" : "danger"} small>{s.connectionStatus === "expired" ? "Expired" : "Problem"}</Status> : <Status tone="ok" small>Auto-sync</Status>
         ) : (
-          <Badge>{s.followers != null ? "Logged by hand" : "Not connected"}</Badge>
+          <Status small>{s.followers != null ? "Logged by hand" : "Not connected"}</Status>
         )}
       </header>
 
-      <div>
-        <p className="text-xs text-muted">Followers</p>
-        <p className="text-3xl font-semibold tracking-tight tabular-nums">{s.followers != null ? s.followers.toLocaleString("en-US") : "—"}</p>
-        <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1">
+      <div className="figure pt-2">
+        <span className="eyebrow">Followers</span>
+        <span className="value">{s.followers != null ? s.followers.toLocaleString("en-US") : "—"}</span>
+        <span className="meta flex flex-wrap gap-x-4 gap-y-0.5">
           <Delta n={s.change7} label="in 7 days" />
           <Delta n={s.change30} label="in 30 days" />
-          {s.change7 == null && s.change30 == null && s.followers != null && <span className="text-xs text-muted">Growth shows after a week of history.</span>}
-        </div>
+          {s.change7 == null && s.change30 == null && s.followers != null && <span>Growth shows after a week of history.</span>}
+        </span>
       </div>
 
-      <div className="grid grid-cols-3 gap-3 border-t border-border pt-3">
+      <div className="mt-4 grid grid-cols-3 gap-4 border-t border-border pt-3">
         <Mini label="Views, 28 days" value={formatNumber(s.views28)} hint={s.viewsNote} />
         <Mini label="Engagement" value={pct(s.engagementRate)} hint={s.engagementRate != null ? "last 10 posts" : null} />
         <Mini label="Posts this month" value={s.postsThisMonth ?? "—"} />
       </div>
 
-      {(problem && s.connectionError) && <p className="rounded-lg bg-danger-soft px-3 py-2 text-xs text-danger">{s.connectionError}</p>}
+      {(problem && s.connectionError) && <p className="status is-danger is-small mt-4 whitespace-normal">{s.connectionError}</p>}
       {s.missingScopes.length > 0 && (
-        <p className="rounded-lg bg-warn-soft px-3 py-2 text-xs text-warn">
+        <p className="status is-warn is-small mt-4 whitespace-normal">
           Some permissions were turned off at sign-in ({s.missingScopes.join(", ")}). Reconnect and allow them for full stats.
         </p>
       )}
 
-      <footer className="mt-auto flex flex-wrap items-center justify-between gap-2 text-xs text-muted">
+      <footer className="meta mt-4 flex flex-wrap items-center justify-between gap-2">
         <span>
           {s.lastSyncedAt ? <>Last synced {relativeTime(s.lastSyncedAt)}</> : s.followersDate ? <>Last logged {formatDate(s.followersDate)}</> : "No numbers yet"}
         </span>
         {(!s.connected || problem || s.missingScopes.length > 0) && <ConnectButton p={p} again={s.connected} disabled={!ready} />}
       </footer>
       {!ready && !s.connected && (
-        <p className="-mt-2 text-xs text-muted">
+        <p className="hint">
           {p === "instagram" ? "Needs IG_APP_ID / IG_APP_SECRET" : "Needs TIKTOK_CLIENT_KEY / TIKTOK_CLIENT_SECRET"} (docs/setup.md). Log numbers by hand below until then.
         </p>
       )}
@@ -112,26 +111,28 @@ function PostRow({ post, clients }: { post: TopPost; clients: Array<{ id: string
   ];
   return (
     <li className="flex gap-3 py-3">
-      <a href={post.permalink ?? undefined} target="_blank" rel="noreferrer" className="relative block h-20 w-16 shrink-0 overflow-hidden rounded-lg bg-surface-2 sm:h-24 sm:w-[4.5rem]" aria-label="Open post">
+      <a href={post.permalink ?? undefined} target="_blank" rel="noreferrer" className="relative block h-20 w-16 shrink-0 overflow-hidden rounded-sm bg-surface-2 sm:h-24 sm:w-[4.5rem]" aria-label="Open post">
         {post.thumbnailUrl && (
           // eslint-disable-next-line @next/next/no-img-element
           <img src={post.thumbnailUrl} alt="" loading="lazy" referrerPolicy="no-referrer" className="size-full object-cover" />
         )}
       </a>
-      <div className="flex min-w-0 flex-1 flex-col gap-1.5">
-        <div className="flex items-start justify-between gap-2">
-          <p className="line-clamp-2 min-w-0 text-sm">{post.caption || <span className="text-muted">No caption</span>}</p>
+      <div className="flex min-w-0 flex-1 flex-col gap-1">
+        <div className="flex items-baseline justify-between gap-2">
+          <p className="line-clamp-2 min-w-0">{post.caption || <span className="text-muted">No caption</span>}</p>
           {post.permalink && (
-            <a href={post.permalink} target="_blank" rel="noreferrer" className="tap-target shrink-0 text-xs font-medium text-accent hover:underline">Open ↗</a>
+            <a href={post.permalink} target="_blank" rel="noreferrer" className="link-quiet tap-target shrink-0">Open ↗</a>
           )}
         </div>
-        <p className="flex flex-wrap items-center gap-x-1.5 text-xs text-muted">
-          <span aria-hidden className={cx("inline-block size-1.5 rounded-full", post.platform === "instagram" ? "bg-ig" : "bg-tt")} />
-          {PLATFORM_LABEL[post.platform]}{post.mediaType ? ` ${post.mediaType}` : ""}{post.postedAt ? ` · ${formatDate(post.postedAt)}` : ""}
+        <p className="meta">
+          <span className={cx("status is-small", post.platform === "instagram" ? "is-ig" : "is-tt")}>
+            {PLATFORM_LABEL[post.platform]}{post.mediaType ? ` ${post.mediaType}` : ""}
+          </span>
+          {post.postedAt ? ` · ${formatDate(post.postedAt)}` : ""}
         </p>
-        <p className="flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-muted">
+        <p className="meta flex flex-wrap gap-x-3 gap-y-0.5">
           {stats.filter(([, v]) => v != null).map(([k, v], i) => (
-            <span key={k}><span className={cx("tabular-nums", i === 0 ? "font-semibold text-text" : "text-text")}>{formatNumber(v)}</span> {k}</span>
+            <span key={k}><span className={cx("tabular-nums text-text", i === 0 && "font-medium")}>{formatNumber(v)}</span> {k}</span>
           ))}
         </p>
         {clients.length > 0 && <div className="max-w-xs"><StatsTagSelect mediaId={post.id} value={post.clientId} clients={clients} /></div>}
@@ -140,23 +141,21 @@ function PostRow({ post, clients }: { post: TopPost; clients: Array<{ id: string
   );
 }
 
-/** Ranked horizontal bars (magnitude, one series): thin bars, 4px rounded end, value at the tip. */
+/** Ranked bars (magnitude, one series): thin ink lines, the share in words at the end. */
 function Bars({ title, rows, total }: { title: string; rows: Array<{ key: string; value: number }>; total: number }) {
   if (!rows.length) return null;
   const max = Math.max(...rows.map((r) => r.value));
   return (
     <div className="min-w-0">
-      <p className="mb-2 text-xs font-semibold text-muted">{title}</p>
-      <ul className="flex flex-col gap-2">
+      <p className="eyebrow mb-2">{title}</p>
+      <ul className="g-hbars">
         {rows.map((r) => {
           const share = total > 0 ? r.value / total : null;
           return (
-            <li key={r.key} className="grid grid-cols-[minmax(0,7.5rem)_1fr_auto] items-center gap-2 text-sm" title={`${r.key}: ${r.value.toLocaleString("en-US")}`}>
-              <span className="truncate">{r.key}</span>
-              <span className="h-2.5 min-w-0">
-                <span className="block h-full rounded-r bg-ig" style={{ width: `${Math.max(2, (r.value / max) * 100)}%` }} />
-              </span>
-              <span className="w-12 text-right text-xs tabular-nums text-muted">{share != null ? `${Math.round(share * 100)}%` : formatNumber(r.value)}</span>
+            <li key={r.key} title={`${r.key}: ${r.value.toLocaleString("en-US")}`}>
+              <span className="truncate text-sm">{r.key}</span>
+              <span className="min-w-0"><i style={{ width: `${Math.max(2, (r.value / max) * 100)}%` }} /></span>
+              <span className="n">{share != null ? `${Math.round(share * 100)}%` : formatNumber(r.value)}</span>
             </li>
           );
         })}
@@ -185,7 +184,7 @@ export default async function StatsPage({ searchParams }: { searchParams: Promis
 
   const manual = (
     <Card title="Log today's numbers">
-      <p className="mb-4 text-sm text-muted">Takes 20 seconds: open each app, copy the follower count (and views if you like). Saved for {formatDate(stats.today)}.</p>
+      <p className="meta mb-4">Takes 20 seconds: open each app, copy the follower count (and views if you like). Saved for {formatDate(stats.today)}.</p>
       <StatsManualForm show={manualFor} />
     </Card>
   );
@@ -198,92 +197,90 @@ export default async function StatsPage({ searchParams }: { searchParams: Promis
         actions={anyConnected ? <StatsSyncButton /> : undefined}
       />
 
-      {error && <div role="status" className="mb-6 rounded-lg border border-danger/30 bg-danger-soft px-4 py-3 text-sm text-danger">{error}</div>}
-      {msg && !error && <div role="status" className="mb-6 rounded-lg border border-ok/30 bg-ok-soft px-4 py-3 text-sm text-ok">{msg}</div>}
+      {error && <p role="status" className="notice mb-6"><span className="status is-danger">{error}</span></p>}
+      {msg && !error && <p role="status" className="notice mb-6"><span className="status is-ok">{msg}</span></p>}
 
-      <div className="flex flex-col gap-6">
-        <div className="grid gap-4 md:grid-cols-2">
-          <PlatformCard s={ig} ready={ready.instagram} />
-          <PlatformCard s={tt} ready={ready.tiktok} />
-        </div>
+      <div className="grid gap-10 md:grid-cols-2 md:gap-x-16">
+        <PlatformCard s={ig} ready={ready.instagram} />
+        <PlatformCard s={tt} ready={ready.tiktok} />
+      </div>
 
-        {nothingYet && manual}
+      {nothingYet && manual}
 
-        {!nothingYet && (
-          <Card title="Follower growth">
-            <div className="grid gap-6 md:grid-cols-2">
-              <StatsGrowthChart title="Instagram" color="ig" points={stats.series.instagram} days={DAYS} />
-              <StatsGrowthChart title="TikTok" color="tt" points={stats.series.tiktok} days={DAYS} />
-            </div>
-          </Card>
-        )}
+      {!nothingYet && (
+        <Card title="Follower growth">
+          <div className="grid gap-8 md:grid-cols-2 md:gap-x-16">
+            <StatsGrowthChart title="Instagram" color="ig" points={stats.series.instagram} days={DAYS} />
+            <StatsGrowthChart title="TikTok" color="tt" points={stats.series.tiktok} days={DAYS} />
+          </div>
+        </Card>
+      )}
 
-        <div className="grid gap-6 lg:grid-cols-5">
-          <Card title="Top posts, last 30 days" className="lg:col-span-3" padded={false}>
+      <div className="cols">
+        <div className="min-w-0">
+          <Card title="Top posts, last 30 days" padded={false}>
             {stats.topPosts.length === 0 ? (
-              <div className="p-4">
-                <EmptyState title="No posts synced yet">Top posts appear once Instagram or TikTok is connected.</EmptyState>
-              </div>
+              <EmptyState title="No posts synced yet">Top posts appear once Instagram or TikTok is connected.</EmptyState>
             ) : (
-              <ul className="divide-y divide-border px-4">
+              <ul className="list">
                 {stats.topPosts.map((p) => <PostRow key={p.id} post={p} clients={clientOpts} />)}
               </ul>
             )}
           </Card>
-
-          <div className="flex min-w-0 flex-col gap-6 lg:col-span-2">
-            <Card title="Media kit summary" actions={kitLines ? <CopyButton text={kitLines} size="sm" /> : undefined}>
-              {stats.mediaKit.text ? (
-                <div className="flex flex-col gap-3">
-                  <p className="text-sm leading-relaxed">{stats.mediaKit.text}</p>
-                  <dl className="grid grid-cols-2 gap-x-4 gap-y-2 border-t border-border pt-3">
-                    {stats.mediaKit.numbers.map((n) => (
-                      <div key={n.label} className="min-w-0">
-                        <dt className="truncate text-xs text-muted">{n.label}</dt>
-                        <dd className="truncate text-sm font-semibold tabular-nums">{n.value}</dd>
-                      </div>
-                    ))}
-                  </dl>
-                  <p className="text-xs text-muted">Paste into a pitch. Claude uses the same numbers when drafting collab outreach.</p>
-                </div>
-              ) : (
-                <EmptyState title="Nothing to summarize yet">Log or sync follower counts first.</EmptyState>
-              )}
-            </Card>
-
-            <Card title="Audience (Instagram)">
-              {stats.audience && (stats.audience.cities.length || stats.audience.ages.length) ? (
-                <div className="flex flex-col gap-5">
-                  <Bars title="Top cities" rows={stats.audience.cities} total={cityTotal} />
-                  <Bars title="Age" rows={stats.audience.ages} total={ageTotal} />
-                  {stats.audience.genders.length > 0 && (
-                    <p className="text-xs text-muted">
-                      {stats.audience.genders.map((g) => `${GENDER[g.key] ?? g.key} ${genderTotal ? Math.round((g.value / genderTotal) * 100) : 0}%`).join(" · ")}
-                    </p>
-                  )}
-                  <p className="text-xs text-muted">Updated weekly · last {relativeTime(stats.audience.capturedAt)}</p>
-                </div>
-              ) : (
-                <EmptyState title="No audience data yet">
-                  {ig.connected ? "Instagram shares this weekly once the account has 100+ followers." : "Connect Instagram to see top cities and ages — handy for local restaurant pitches."}
-                </EmptyState>
-              )}
-            </Card>
-          </div>
         </div>
 
-        {!nothingYet && (manualFor.instagram || manualFor.tiktok) && (
-          <details className="group rounded-xl border border-border bg-surface">
-            <summary className="no-marker flex min-h-12 cursor-pointer items-center justify-between px-4 py-3 text-sm font-semibold">
-              Log today&apos;s numbers by hand
-              <span aria-hidden className="text-muted transition group-open:rotate-180">⌄</span>
-            </summary>
-            <div className="border-t border-border p-4">
-              <StatsManualForm show={manualFor} />
-            </div>
-          </details>
-        )}
+        <div className="min-w-0">
+          <Card title="Media kit summary" actions={kitLines ? <CopyButton text={kitLines} size="sm" variant="ghost" /> : undefined}>
+            {stats.mediaKit.text ? (
+              <div className="flex flex-col gap-3">
+                <p>{stats.mediaKit.text}</p>
+                <dl className="grid grid-cols-2 gap-x-4 gap-y-2 border-t border-border pt-3">
+                  {stats.mediaKit.numbers.map((n) => (
+                    <div key={n.label} className="min-w-0">
+                      <dt className="meta truncate">{n.label}</dt>
+                      <dd className="truncate font-medium tabular-nums">{n.value}</dd>
+                    </div>
+                  ))}
+                </dl>
+                <p className="hint">Paste into a pitch. Claude uses the same numbers when drafting collab outreach.</p>
+              </div>
+            ) : (
+              <EmptyState title="Nothing to summarize yet">Log or sync follower counts first.</EmptyState>
+            )}
+          </Card>
+
+          <Card title="Audience (Instagram)">
+            {stats.audience && (stats.audience.cities.length || stats.audience.ages.length) ? (
+              <div className="flex flex-col gap-5">
+                <Bars title="Top cities" rows={stats.audience.cities} total={cityTotal} />
+                <Bars title="Age" rows={stats.audience.ages} total={ageTotal} />
+                {stats.audience.genders.length > 0 && (
+                  <p className="meta">
+                    {stats.audience.genders.map((g) => `${GENDER[g.key] ?? g.key} ${genderTotal ? Math.round((g.value / genderTotal) * 100) : 0}%`).join(" · ")}
+                  </p>
+                )}
+                <p className="meta">Updated weekly · last {relativeTime(stats.audience.capturedAt)}</p>
+              </div>
+            ) : (
+              <EmptyState title="No audience data yet">
+                {ig.connected ? "Instagram shares this weekly once the account has 100+ followers." : "Connect Instagram to see top cities and ages, handy for local restaurant pitches."}
+              </EmptyState>
+            )}
+          </Card>
+        </div>
       </div>
+
+      {!nothingYet && (manualFor.instagram || manualFor.tiktok) && (
+        <details className="sec g-fold">
+          <summary className="sec-head">
+            <span className="title">Log today&apos;s numbers by hand</span>
+            <svg viewBox="0 0 16 16" aria-hidden fill="none" stroke="currentColor" strokeWidth={1.8}><path d="M6 3.5 10.5 8 6 12.5" strokeLinecap="round" strokeLinejoin="round" /></svg>
+          </summary>
+          <div className="sec-body">
+            <StatsManualForm show={manualFor} />
+          </div>
+        </details>
+      )}
     </>
   );
 }

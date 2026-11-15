@@ -245,9 +245,9 @@ export function DraftQueue({ items, googleConnected }: { items: QueueItem[]; goo
 
   if (visible.length === 0) {
     return (
-      <div className="rounded-lg border border-dashed border-border px-4 py-8 text-center">
-        <p className="text-sm font-medium">All caught up</p>
-        <p className="mt-1 text-sm text-muted">Nothing else is waiting for review.</p>
+      <div className="empty border-t border-border">
+        <p>All caught up</p>
+        <p>Nothing else is waiting for review.</p>
         {toast && <ToastView toast={toast} onClose={() => setToast(null)} />}
       </div>
     );
@@ -258,31 +258,31 @@ export function DraftQueue({ items, googleConnected }: { items: QueueItem[]; goo
       <style>{SLIDE_CSS}</style>
 
       {/* Phone: progress + prev/next + list toggle */}
-      <div className="mb-3 flex items-center justify-between gap-2 md:hidden">
+      <div className="mb-2 flex items-center justify-between gap-2 md:hidden">
         {focusMode ? (
-          <div className="flex items-center gap-1">
-            <button type="button" onClick={() => move(-1)} disabled={index === 0} aria-label="Previous draft" className="flex h-11 w-11 items-center justify-center rounded-lg border border-border bg-surface text-lg disabled:opacity-40">
-              ‹
+          <div className="-ml-2.5 flex items-center gap-0.5">
+            <button type="button" onClick={() => move(-1)} disabled={index === 0} aria-label="Previous draft" className={cx(buttonClass("ghost"), "w-11 px-0")}>
+              <Arrow dir="left" />
             </button>
-            <span className="min-w-16 text-center text-sm font-semibold tabular-nums" aria-live="polite">
+            <span className="num min-w-16 text-center font-semibold" aria-live="polite">
               {index + 1} of {visible.length}
             </span>
-            <button type="button" onClick={() => move(1)} disabled={index >= visible.length - 1} aria-label="Next draft" className="flex h-11 w-11 items-center justify-center rounded-lg border border-border bg-surface text-lg disabled:opacity-40">
-              ›
+            <button type="button" onClick={() => move(1)} disabled={index >= visible.length - 1} aria-label="Next draft" className={cx(buttonClass("ghost"), "w-11 px-0")}>
+              <Arrow dir="right" />
             </button>
           </div>
         ) : (
-          <span className="text-sm text-muted">{visible.length} waiting</span>
+          <span className="meta">{visible.length} waiting</span>
         )}
-        <button type="button" onClick={() => setFocusMode((f) => !f)} className="flex h-11 items-center rounded-lg px-3 text-sm font-medium text-accent">
+        <button type="button" onClick={() => setFocusMode((f) => !f)} className={cx(buttonClass("ghost"), "-mr-2.5")}>
           {focusMode ? "Show all" : "One at a time"}
         </button>
       </div>
 
       {/* Desktop: shortcut hint */}
-      <p className="mb-3 hidden flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted md:flex" aria-live="polite">
+      <p className="meta mb-4 hidden flex-wrap items-center gap-x-4 gap-y-1 md:flex" aria-live="polite">
         {armed && current?.id === armed ? (
-          <span className="font-semibold text-accent">Press A again to approve “{current.title}” · Esc to cancel</span>
+          <span className="font-semibold text-text">Press A again to approve “{current.title}” · Esc to cancel</span>
         ) : (
           <>
             <span>Shortcuts:</span>
@@ -307,7 +307,7 @@ export function DraftQueue({ items, googleConnected }: { items: QueueItem[]; goo
         />
       )}
 
-      <div className={cx("flex flex-col gap-4", focusMode && "max-md:pb-24")}>
+      <div className={cx("draft-list", focusMode && "max-md:pb-24")}>
         {visible.map((item) => {
           const isCur = current?.id === item.id;
           const bulkable = bulkCandidates.length >= 2 && (BULK_APPROVE_KINDS as readonly string[]).includes(item.kind);
@@ -326,17 +326,19 @@ export function DraftQueue({ items, googleConnected }: { items: QueueItem[]; goo
                 if (!isCur) setCurrentId(item.id);
               }}
               className={cx(
-                "scroll-mt-20 rounded-xl outline-none",
+                // Focused from the keyboard shortcuts only; the mark for it is .draft-current, not the page-wide focus ring.
+                "scroll-mt-20 outline-none!",
                 focusMode && !isCur && "max-md:hidden",
                 focusMode && isCur && "dq-current",
-                isCur && kbdUsed && "md:ring-2 md:ring-accent md:ring-offset-2 md:ring-offset-bg",
+                isCur && kbdUsed && "draft-current",
                 busyId === item.id && "pointer-events-none opacity-60",
               )}
             >
               {bulkable && (
-                <label className="mb-1.5 flex min-h-11 cursor-pointer items-center gap-2 px-1 text-sm md:min-h-0">
+                <label className="meta mb-2 flex min-h-11 w-fit cursor-pointer items-center gap-2 md:min-h-0">
                   <input
                     type="checkbox"
+                    className="check"
                     checked={selected.has(item.id)}
                     onChange={(e) =>
                       setSelected((s) => {
@@ -362,30 +364,40 @@ export function DraftQueue({ items, googleConnected }: { items: QueueItem[]; goo
 }
 
 function Kbd({ children }: { children: ReactNode }) {
-  return <kbd className="rounded border border-border bg-surface-2 px-1 font-mono text-[11px] text-text">{children}</kbd>;
+  return <kbd>{children}</kbd>;
 }
 
+function Arrow({ dir }: { dir: "left" | "right" }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="!size-[18px]">
+      <path d={dir === "left" ? "m15 6-6 6 6 6" : "m9 6 6 6-6 6"} />
+    </svg>
+  );
+}
+
+/** A floating note after an action: the one place (with sheets and menus) that takes a shadow. Colour is in the dot. */
 function ToastView({ toast, onClose }: { toast: Toast; onClose: () => void }) {
   return (
     <div
       role="status"
       aria-live="polite"
       className={cx(
-        "fixed inset-x-4 z-30 flex items-start justify-between gap-3 rounded-lg px-4 py-3 text-sm shadow-lg",
+        "pop fixed inset-x-4 z-30 flex items-start justify-between gap-3 px-4 py-3 text-left",
         "bottom-[calc(var(--tabbar-h)+5.5rem)] md:inset-x-auto md:right-6 md:bottom-6 md:max-w-md",
-        toast.tone === "danger" ? "bg-danger-soft text-danger" : toast.tone === "warn" ? "bg-warn-soft text-warn" : "bg-ok-soft text-ok",
       )}
     >
-      <span>
-        {toast.msg}
-        {toast.openId && (
-          <>
-            {" "}
-            <Link href={`/review?draft=${toast.openId}`} className="font-semibold underline">Open it to copy &amp; send</Link>
-          </>
-        )}
+      <span className={cx("status whitespace-normal text-text", toast.tone === "danger" ? "is-danger" : toast.tone === "warn" ? "is-warn" : "is-ok")}>
+        <span>
+          {toast.msg}
+          {toast.openId && (
+            <>
+              {" "}
+              <Link href={`/review?draft=${toast.openId}`} className="link">Open it to copy &amp; send</Link>
+            </>
+          )}
+        </span>
       </span>
-      <button type="button" onClick={onClose} aria-label="Dismiss" className="tap-target -mr-1 shrink-0 font-semibold">×</button>
+      <button type="button" onClick={onClose} aria-label="Dismiss" className="tap-target -mr-1 shrink-0 text-muted hover:text-text">×</button>
     </div>
   );
 }
@@ -435,7 +447,7 @@ function BulkBar({
       setProgress(i + 1);
       const snap = handles.current?.get(item.id)?.snapshot();
       let outcome: QuickOutcome;
-      if (snap?.blocked) outcome = { ok: false, message: "Skipped — fix the problem on this reply first (too long?)." };
+      if (snap?.blocked) outcome = { ok: false, message: "Skipped. Fix the problem on this reply first (too long?)." };
       else {
         try {
           outcome = await bulkApproveReplyAction({ id: item.id, body: snap?.body });
@@ -467,12 +479,13 @@ function BulkBar({
 
   return (
     <>
-      <div className="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border bg-surface px-3 py-2">
-        <label className="flex min-h-11 cursor-pointer items-center gap-2 text-sm md:min-h-0">
-          <input type="checkbox" checked={allOn} onChange={(e) => setSelected(new Set(e.target.checked ? candidates.map((c) => c.id) : []))} />
+      {/* One row between hairlines. Outlined: the accent stays on the card you are on, and on the sheet's own button. */}
+      <div className="notice mb-6 items-center py-2">
+        <label className="flex min-h-11 cursor-pointer items-center gap-2 md:min-h-9">
+          <input type="checkbox" className="check" checked={allOn} onChange={(e) => setSelected(new Set(e.target.checked ? candidates.map((c) => c.id) : []))} />
           Select all {candidates.length} review replies
         </label>
-        <button type="button" disabled={n === 0} onClick={openConfirm} className={cx(buttonClass("primary"), "w-full sm:w-auto")}>
+        <button type="button" disabled={n === 0} onClick={openConfirm} className={cx(buttonClass("secondary"), "w-full sm:w-auto")}>
           {n === 0 ? "Approve replies" : `Approve ${n} ${n === 1 ? "reply" : "replies"}`}
         </button>
       </div>
@@ -486,29 +499,29 @@ function BulkBar({
         onClose={flush}
         className="sheet fixed inset-x-0 top-auto bottom-0 w-full md:inset-0 md:m-auto md:h-fit md:max-w-md"
       >
-        <div className="sheet-panel mx-auto max-h-[85dvh] overflow-y-auto overscroll-contain rounded-t-2xl bg-surface px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-4 shadow-xl md:rounded-2xl md:p-5">
-          <h2 id="bulk-title" className="text-base font-semibold">
+        <div className="sheet-panel mx-auto max-h-[85dvh] overflow-y-auto overscroll-contain rounded-t-2xl bg-surface px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-4 shadow-xl md:rounded-2xl md:p-6">
+          <h2 id="bulk-title" className="title">
             {results && !running ? "Done" : `Approve ${queued.length} review ${queued.length === 1 ? "reply" : "replies"}?`}
           </h2>
           {!results && (
-            <div className="mt-2 space-y-2 text-sm">
+            <div className="mt-2 space-y-3">
               {googleConnected ? (
-                <p className="rounded-lg bg-warn-soft px-3 py-2 text-warn">
-                  Google is connected, so each reply is <strong>posted publicly on Google right away</strong>, exactly as written on this page.
+                <p className="status is-warn flex whitespace-normal">
+                  <span>
+                    Google is connected, so each reply is <strong className="font-semibold">posted publicly on Google right away</strong>, exactly as written on this page.
+                  </span>
                 </p>
               ) : (
-                <p className="rounded-lg bg-surface-2 px-3 py-2">
-                  Google isn&apos;t connected, so they&apos;ll be marked approved — copy each one, post it from Google Maps, then mark it sent.
-                </p>
+                <p>Google isn&apos;t connected, so they&apos;ll be marked approved. Copy each one, post it from Google Maps, then mark it sent.</p>
               )}
-              <p className="text-muted">Edits you made on the page are included. Replies with a problem are skipped. Outreach, pitches and reports are never bulk-approved.</p>
-              <ul className="max-h-40 list-disc overflow-y-auto pl-5 text-muted">
-                {queued.map((q) => <li key={q.id}>{q.title}</li>)}
+              <p className="meta">Edits you made on the page are included. Replies with a problem are skipped. Outreach, pitches and reports are never bulk-approved.</p>
+              <ul className="list is-ruled max-h-40 overflow-y-auto text-sm">
+                {queued.map((q) => <li key={q.id} className="py-1.5">{q.title}</li>)}
               </ul>
             </div>
           )}
           {results && (
-            <div className="mt-2 space-y-2 text-sm">
+            <div className="mt-2 space-y-3">
               {running ? (
                 <p aria-live="polite">Approving {progress} of {queued.length}…</p>
               ) : (
@@ -516,17 +529,19 @@ function BulkBar({
                   {[posted && `${posted} posted to Google`, manual && `${manual} approved to post by hand`, failed && `${failed} not approved`].filter(Boolean).join(" · ") || "Nothing changed."}
                 </p>
               )}
-              <ul className="flex max-h-64 flex-col gap-1.5 overflow-y-auto">
+              <ul className="list is-ruled max-h-64 overflow-y-auto">
                 {results.map((r) => (
-                  <li key={r.id} className={cx("rounded-lg px-3 py-2", !r.outcome.ok ? "bg-danger-soft text-danger" : r.outcome.manual ? "bg-warn-soft text-warn" : "bg-ok-soft text-ok")}>
-                    <span className="font-medium">{r.outcome.ok ? "✓" : "✕"} {r.title}</span>
-                    <span className="block text-xs">{r.outcome.message}</span>
+                  <li key={r.id} className="py-2">
+                    <span className={cx("status flex whitespace-normal text-text", !r.outcome.ok ? "is-danger" : r.outcome.manual ? "is-warn" : "is-ok")}>
+                      <span className="font-medium">{r.outcome.ok ? "✓" : "✕"} {r.title}</span>
+                    </span>
+                    <span className="meta block pl-[15px]">{r.outcome.message}</span>
                   </li>
                 ))}
               </ul>
             </div>
           )}
-          <div className="mt-4 flex flex-wrap gap-2">
+          <div className="mt-5 flex flex-wrap gap-2">
             {!results ? (
               <>
                 <button type="button" onClick={run} className={cx(buttonClass("primary"), "grow sm:grow-0")}>

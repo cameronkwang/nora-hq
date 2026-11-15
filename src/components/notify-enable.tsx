@@ -2,7 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
-import { Button, cx } from "./ui";
+import { Button, Status, cx } from "./ui";
 
 /* ───────────────────────── Browser helpers (shared by notify-* components) ───────────────────────── */
 
@@ -64,13 +64,13 @@ async function postJson(url: string, body: unknown) {
 
 export function IosInstallSteps() {
   return (
-    <div className="rounded-lg border border-border bg-surface-2 p-3 text-sm">
+    <div>
       <p className="font-medium">Add Nora HQ to your Home Screen first</p>
       <p className="mt-1 text-muted">iPhones only send notifications to web apps opened from the Home Screen.</p>
-      <ol className="mt-2 list-decimal space-y-1 pl-5 text-muted">
-        <li>In Safari, tap the Share button <span aria-hidden>(□↑)</span>.</li>
-        <li>Tap <span className="font-medium text-text">Add to Home Screen</span> → <span className="font-medium text-text">Add</span>.</li>
-        <li>Open Nora HQ from the new icon, then come back to Settings → Notifications.</li>
+      <ol className="ps-steps-list mt-3 text-muted">
+        <li><span aria-hidden className="n">1</span><span>In Safari, tap the Share button <span aria-hidden>(□↑)</span>.</span></li>
+        <li><span aria-hidden className="n">2</span><span>Tap <span className="font-medium text-text">Add to Home Screen</span> → <span className="font-medium text-text">Add</span>.</span></li>
+        <li><span aria-hidden className="n">3</span><span>Open Nora HQ from the new icon, then come back to Settings → Notifications.</span></li>
       </ol>
     </div>
   );
@@ -154,7 +154,7 @@ export function NotifyEnable({ publicKey, deviceKeys, compact = false }: { publi
       const r = await postJson("/api/push/test", {});
       const sent = Number(r.data.sent ?? 0);
       if (r.data.skipped === "not_configured") setMsg({ tone: "danger", text: "Server isn't set up for notifications (VAPID keys missing)." });
-      else if (sent > 0) setMsg({ tone: "ok", text: `Sent to ${sent} device${sent === 1 ? "" : "s"} — it should pop up in a few seconds.` });
+      else if (sent > 0) setMsg({ tone: "ok", text: `Sent to ${sent} device${sent === 1 ? "" : "s"}. It should pop up in a few seconds.` });
       else setMsg({ tone: "danger", text: "No device got it. Turn notifications off and on again on this device." });
     } catch {
       setMsg({ tone: "danger", text: "Couldn't send a test." });
@@ -162,20 +162,22 @@ export function NotifyEnable({ publicKey, deviceKeys, compact = false }: { publi
   }
 
   return (
-    <div className="flex flex-col gap-3">
-      {state === "loading" && <p className="text-sm text-muted">Checking this device…</p>}
+    <div className="ps-enable flex flex-col gap-3">
+      {state === "loading" && <p className="meta">Checking this device…</p>}
       {state === "ios-install" && <IosInstallSteps />}
-      {state === "unsupported" && <p className="text-sm text-muted">This browser can&apos;t show notifications. On iPhone, use Safari and add Nora HQ to your Home Screen.</p>}
+      {state === "unsupported" && <p className="text-muted">This browser can&apos;t show notifications. On iPhone, use Safari and add Nora HQ to your Home Screen.</p>}
       {state === "denied" && (
-        <p className="rounded-lg bg-warn-soft px-3 py-2 text-sm text-warn">
-          Notifications are blocked for Nora HQ. On iPhone: Settings → Notifications → Nora HQ → Allow. On a computer: click the lock icon next to the address and allow notifications, then reload.
+        <p className="notice">
+          <Status tone="warn">
+            Notifications are blocked for Nora HQ. On iPhone: Settings → Notifications → Nora HQ → Allow. On a computer: click the lock icon next to the address and allow notifications, then reload.
+          </Status>
         </p>
       )}
       {(state === "off" || state === "on" || state === "busy") && (
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex flex-wrap items-baseline gap-x-3 gap-y-2">
           {state === "on" ? (
             <>
-              <span className="text-sm font-medium text-ok">On for this device ✓</span>
+              <Status tone="ok" className="mr-2 font-medium text-text">On for this device ✓</Status>
               <Button size="md" onClick={test}>Send test</Button>
               {!compact && <Button size="md" variant="ghost" onClick={turnOff}>Turn off here</Button>}
             </>
@@ -187,7 +189,7 @@ export function NotifyEnable({ publicKey, deviceKeys, compact = false }: { publi
         </div>
       )}
       {msg && (
-        <p role="status" aria-live="polite" className={cx("text-sm", msg.tone === "ok" ? "text-ok" : msg.tone === "danger" ? "text-danger" : "text-muted")}>
+        <p role="status" aria-live="polite" className={cx("status is-small whitespace-normal", msg.tone === "ok" ? "is-ok" : msg.tone === "danger" ? "is-danger" : "is-idle")}>
           {msg.text}
         </p>
       )}

@@ -78,15 +78,13 @@ export function TaskSelection({ ids, alwaysOn = false, children }: { ids: string
   );
 }
 
-const boxCls = "size-5 shrink-0 cursor-pointer rounded border-border";
-
-/** Row checkbox. Renders nothing outside a <TaskSelection> or while list selection is off. */
+/** Row checkbox, in the tick's place and at its size. Renders nothing outside a <TaskSelection> or while list selection is off. */
 export function TaskSelectBox({ id, title, className }: { id: string; title: string; className?: string }) {
   const ctx = useTaskSelection();
   if (!ctx || !ctx.selecting) return null;
   return (
-    <label className={cx("tap-target flex shrink-0 items-center justify-center", className)}>
-      <input type="checkbox" className={boxCls} checked={ctx.selected.has(id)} onChange={(e) => ctx.toggle(id, e.currentTarget.checked)} aria-label={`Select “${title}”`} />
+    <label className={cx("pick", className)}>
+      <input type="checkbox" className="check" checked={ctx.selected.has(id)} onChange={(e) => ctx.toggle(id, e.currentTarget.checked)} aria-label={`Select “${title}”`} />
     </label>
   );
 }
@@ -98,10 +96,10 @@ export function TaskSelectAll({ bare = false, className }: { bare?: boolean; cla
   const all = ctx.selected.size > 0 && ctx.selected.size === ctx.ids.length;
   const some = ctx.selected.size > 0 && !all;
   return (
-    <label className={cx("tap-target inline-flex cursor-pointer items-center gap-2 text-sm", className)}>
+    <label className={cx("tap-target inline-flex cursor-pointer items-center gap-3", className)}>
       <input
         type="checkbox"
-        className={boxCls}
+        className="check"
         checked={all}
         ref={(el) => {
           if (el) el.indeterminate = some;
@@ -119,7 +117,7 @@ export function TaskSelectToggle() {
   const ctx = useTaskSelection();
   if (!ctx || ctx.ids.length === 0) return null;
   return (
-    <button type="button" onClick={() => ctx.setSelecting(!ctx.selecting)} className={cx(buttonClass("ghost", "sm"), "text-muted")}>
+    <button type="button" onClick={() => ctx.setSelecting(!ctx.selecting)} className={buttonClass("ghost", "sm")}>
       {ctx.selecting ? "Cancel" : "Select"}
     </button>
   );
@@ -154,8 +152,8 @@ function BulkBar() {
 
   if (n === 0)
     return msg ? (
-      <p role="status" className="fixed inset-x-4 bottom-[calc(var(--tabbar-h)+0.75rem)] z-30 mx-auto max-w-md rounded-lg bg-text px-3 py-2 text-center text-sm text-bg shadow-lg md:bottom-6">
-        {msg.text}
+      <p role="status" className="pop fixed inset-x-4 bottom-[calc(var(--tabbar-h)+0.75rem)] z-30 mx-auto max-w-md px-4 py-2.5 md:bottom-6">
+        <span className="status is-ok">{msg.text}</span>
       </p>
     ) : null;
 
@@ -165,27 +163,27 @@ function BulkBar() {
       role="region"
       aria-label="Bulk actions"
       className={cx(
-        // Phone: floats above the tab bar. Desktop: sticks to the top of the content while scrolling.
-        "fixed inset-x-3 bottom-[calc(var(--tabbar-h)+0.5rem)] z-30 rounded-xl border border-border bg-surface p-2 shadow-lg",
+        // A floating thing (.pop). Phone: above the tab bar. Desktop: sticks to the top of the content while scrolling.
+        "pop bulk-bar fixed inset-x-3 bottom-[calc(var(--tabbar-h)+0.5rem)] z-30",
         "md:sticky md:inset-x-auto md:top-2 md:bottom-auto md:mb-3",
       )}
     >
       <div className="flex flex-col gap-2 md:flex-row md:items-center">
-        <div className="flex items-center justify-between gap-2 px-1 md:justify-start">
-          <p className="text-sm font-semibold" aria-live="polite">{n} selected</p>
-          <button type="button" onClick={ctx.clear} className={cx(buttonClass("ghost", "sm"), "text-muted")}>Clear</button>
+        <div className="flex items-center justify-between gap-2 md:justify-start">
+          <p className="font-semibold num" aria-live="polite">{n} selected</p>
+          <button type="button" onClick={ctx.clear} className={buttonClass("ghost", "sm")}>Clear</button>
         </div>
         {confirmDelete ? (
           <div className="flex flex-wrap items-center gap-2 md:ml-auto">
-            <span className="text-sm">Delete {plural(n)}? This can’t be undone.</span>
-            <button type="button" disabled={pending} onClick={() => run("delete", undefined, `Deleted ${plural(n)}.`)} className={cx(buttonClass("primary", "sm"), "bg-danger! text-surface!")}>
+            <span className="meta text-text">Delete {plural(n)}? This can’t be undone.</span>
+            <button type="button" disabled={pending} onClick={() => run("delete", undefined, `Deleted ${plural(n)}.`)} className={buttonClass("danger", "sm")}>
               {pending ? "Deleting…" : "Delete"}
             </button>
             <button type="button" disabled={pending} onClick={() => setConfirmDelete(false)} className={buttonClass("secondary", "sm")}>Keep</button>
           </div>
         ) : (
           <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:items-center md:ml-auto">
-            <button type="button" disabled={pending} onClick={() => run("done", undefined, `Marked ${plural(n)} done.`)} className={buttonClass("primary", "sm")}>
+            <button type="button" disabled={pending} onClick={() => run("done", undefined, `Marked ${plural(n)} done.`)} className={buttonClass("secondary", "sm")}>
               Mark done
             </button>
             <select
@@ -196,7 +194,7 @@ function BulkBar() {
                 const v = e.currentTarget.value;
                 if (v) run("assign", v, v === "unassigned" ? `Unassigned ${plural(n)}.` : `Assigned ${plural(n)} to ${humanize(v)}.`);
               }}
-              className="input w-full py-1! font-medium sm:w-auto"
+              className="input"
             >
               <option value="">Assign to…</option>
               {ASSIGNEES.map((a) => (
@@ -213,7 +211,9 @@ function BulkBar() {
         )}
       </div>
       {msg?.tone === "danger" && (
-        <p role="alert" className="mt-2 rounded-md bg-danger-soft px-2 py-1 text-xs text-danger">{msg.text}</p>
+        <p role="alert" className="mt-2 border-t border-border pt-2">
+          <span className="status is-danger is-small whitespace-normal">{msg.text}</span>
+        </p>
       )}
     </div>
   );

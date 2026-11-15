@@ -36,7 +36,7 @@ export default async function ActivityPage({ searchParams }: { searchParams: Pro
     <div>
       <PageHeader title="Activity" subtitle="Everything anyone (or Claude) changed, newest first." />
 
-      <form method="get" action="/activity" className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-end">
+      <form method="get" action="/activity" className="mb-8 flex flex-col gap-3 sm:flex-row sm:items-end max-md:mb-6">
         <div className="min-w-0 sm:w-72">
           <label htmlFor="a-client" className="label">Business</label>
           <select id="a-client" name="client" defaultValue={client} className="input">
@@ -46,54 +46,45 @@ export default async function ActivityPage({ searchParams }: { searchParams: Pro
             ))}
           </select>
         </div>
-        <button className={buttonClass("secondary")}>Filter</button>
+        <button className={cx(buttonClass("secondary"), "self-start sm:self-auto")}>Filter</button>
       </form>
 
       {rows.length === 0 ? (
-        <EmptyState title={page > 1 ? "No more activity." : "No activity yet."}>
-          {page > 1 ? <Link href={href(1)} className="text-accent hover:underline">Back to the newest</Link> : "Changes show up here as soon as anyone makes them."}
-        </EmptyState>
+        <div className="border-t border-border">
+          <EmptyState title={page > 1 ? "No more activity." : "No activity yet."}>
+            {page > 1 ? <Link href={href(1)} className="link">Back to the newest</Link> : "Changes show up here as soon as anyone makes them."}
+          </EmptyState>
+        </div>
       ) : (
-        <ol className="divide-y divide-border rounded-xl border border-border bg-surface">
+        <ol className="list is-ruled">
           {rows.map((a) => {
             const who = actorName(a.actor);
             const link = a.action.endsWith(".deleted") ? null : entityHref(a.entityType, a.entityId, a.clientId);
+            const biz = a.clientId && !client ? names.get(a.clientId) : undefined;
             return (
-              <li key={a.id} className="flex gap-3 px-4 py-3">
-                <span
-                  aria-hidden
-                  className={cx(
-                    "mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-full text-xs font-semibold",
-                    who === "Claude" ? "bg-accent-soft text-accent" : "bg-surface-2 text-muted",
+              <li key={a.id} className="ps-act">
+                <p className="min-w-0 break-words">
+                  <span className="font-semibold">{who}</span>{" "}
+                  {link ? (
+                    <Link href={link} className="hover:underline">
+                      {a.summary}
+                    </Link>
+                  ) : (
+                    a.summary
                   )}
-                >
-                  {who.slice(0, 1).toUpperCase()}
-                </span>
-                <div className="min-w-0 flex-1">
-                  <p className="break-words text-sm">
-                    <span className="font-semibold">{who}</span>{" "}
-                    {link ? (
-                      <Link href={link} className="hover:underline">
-                        {a.summary}
-                      </Link>
-                    ) : (
-                      a.summary
-                    )}
-                  </p>
-                  <p className="mt-0.5 text-xs text-muted">
-                    <time dateTime={a.createdAt.toISOString()} title={formatDate(a.createdAt, true)}>
-                      {relativeTime(a.createdAt)}
-                    </time>
-                    {a.clientId && names.get(a.clientId) && !client && (
-                      <>
-                        {" · "}
-                        <Link href={`/activity?client=${a.clientId}`} className="hover:underline">
-                          {names.get(a.clientId)}
-                        </Link>
-                      </>
-                    )}
-                  </p>
-                </div>
+                </p>
+                <p className="row-meta meta">
+                  {biz ? (
+                    <Link href={`/activity?client=${a.clientId}`} className="biz hover:text-text hover:underline">
+                      {biz}
+                    </Link>
+                  ) : (
+                    <span className="biz" />
+                  )}
+                  <time className="when num" dateTime={a.createdAt.toISOString()} title={formatDate(a.createdAt, true)}>
+                    {relativeTime(a.createdAt)}
+                  </time>
+                </p>
               </li>
             );
           })}
@@ -101,9 +92,9 @@ export default async function ActivityPage({ searchParams }: { searchParams: Pro
       )}
 
       {pages > 1 && (
-        <nav aria-label="Pages" className="mt-4 flex items-center justify-between gap-2 text-sm">
+        <nav aria-label="Pages" className="mt-6 flex items-center justify-between gap-2">
           {page > 1 ? <Link href={href(page - 1)} className={buttonClass("secondary", "sm")}>← Newer</Link> : <span />}
-          <span className="text-muted">
+          <span className="meta num">
             Page {Math.min(page, pages)} of {pages}
           </span>
           {page < pages ? <Link href={href(page + 1)} className={buttonClass("secondary", "sm")}>Older →</Link> : <span />}

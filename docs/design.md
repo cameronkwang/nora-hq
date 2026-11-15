@@ -163,6 +163,8 @@ Email to Myah the Beauty   S&F Massage…   5h ago  ›
   like the current sidebar row (`--surface-2`, ink, 600).
 - **Figures** `.figure` inside `.figures` (`<Stat>` / `<Figure>`): `.eyebrow` label, the number in
   Newsreader 28px tabular (`.value`), a meta line. No box; figures are separated by 48px of space.
+  On a phone they are two columns whose labels, numbers and meta lines share rows (subgrid), so a
+  label that wraps never pushes its number below its neighbour's. An empty value is "—" (a mark, not copy).
 - **Things that float** `.pop`: `--surface`, a hairline, 6px radius (14px with `.is-sheet`),
   `--shadow-pop`.
 - **Focus**: every focusable element gets `outline: 2px solid var(--text); outline-offset: 2px`.
@@ -197,8 +199,11 @@ Email to Myah the Beauty   S&F Massage…   5h ago  ›
 - More sheet: `--surface`, 14px top radius, `--shadow-pop`, 48px text rows on hairlines (name left,
   city or handle right), current row `--surface-2` and 600.
 - Every tap target is 44px or taller; inputs are 16px so iOS does not zoom.
-- `--tabbar-h` is the tab bar's height (0 on desktop): sticky bars sit above it with
-  `bottom: calc(var(--tabbar-h) + 0.5rem)` (`.sticky-actions`).
+- `--tabbar-h` is the tab bar's height (0 on desktop): a sticky action bar (`.sticky-actions`) is a
+  solid paper strip with a hairline on top, flush with the top of the tab bar (`bottom: var(--tabbar-h)`),
+  so nothing shows underneath it.
+- A native `<dialog className="sheet">` is a bottom sheet on phones; its box reset lives in `@layer base`,
+  so `md:m-auto md:max-w-md` on the call site centres it on desktop without `!`.
 
 ## Component map
 

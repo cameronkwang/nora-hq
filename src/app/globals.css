@@ -243,16 +243,15 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--text); }
   transform: translate(-50%, -50%);
 }
 
-/* Sticky action bar for long forms: sits above the phone tab bar, at the bottom edge on desktop. */
+/* Sticky action bar for long forms: a solid strip (each call site gives it the paper colour and a hairline on top) flush
+   with the top of the phone tab bar, and with the bottom edge on desktop (--tabbar-h is 0 there), so nothing shows under it. */
 .sticky-actions {
   position: sticky;
-  bottom: calc(var(--tabbar-h) + 0.5rem);
+  bottom: var(--tabbar-h);
   z-index: 10;
 }
-@media (min-width: 768px) { .sticky-actions { bottom: 1rem; } }
 
-/* Native <dialog> used as a bottom sheet on phones. */
-dialog.sheet { margin: 0; padding: 0; border: 0; background: transparent; color: var(--text); max-width: 100vw; max-height: 100dvh; }
+/* Native <dialog> used as a bottom sheet on phones. (Its box reset is in @layer base below, so md:m-auto / md:max-w-* centre it on desktop.) */
 dialog.sheet::backdrop { background: rgb(0 0 0 / 0.4); }
 @media (prefers-reduced-motion: no-preference) {
   dialog.sheet[open] > .sheet-panel { animation: sheet-in 180ms ease-out; }
@@ -272,6 +271,8 @@ summary.no-marker::-webkit-details-marker { display: none; }
   /* An element that states its language takes that language's sans stack (the zh-Hant override above only changes
      the variable; this makes body text inside the owner-facing shells use it). Titles keep their own face. */
   [lang] { font-family: var(--font-sans); }
+  /* Native <dialog> as a sheet: no UA box. Layered, so a call site's utilities (md:m-auto md:max-w-md) still win. */
+  dialog.sheet { margin: 0; padding: 0; border: 0; background: transparent; color: var(--text); max-width: 100vw; max-height: 100dvh; }
 }
 
 @layer components {
@@ -470,6 +471,9 @@ summary.no-marker::-webkit-details-marker { display: none; }
     padding: 12px 0 6px;
   }
   .sec-head > .title { min-width: 0; }
+  /* The section's one quiet action keeps its small look but gets a 44px hit area (same as .tap-target). */
+  .sec-head > a { position: relative; }
+  .sec-head > a::after { content: ""; position: absolute; left: 50%; top: 50%; width: max(100%, 44px); height: max(100%, 44px); transform: translate(-50%, -50%); }
   .sec-head .title .count { font-family: var(--font-sans); letter-spacing: 0; margin-left: 4px; }
   .sec-head .title .meta { font-family: var(--font-sans); letter-spacing: 0; font-weight: 400; margin-left: 6px; }
   .sec-note { padding: 2px 0 10px; font-size: var(--text-sm); color: var(--muted); }
@@ -511,6 +515,12 @@ summary.no-marker::-webkit-details-marker { display: none; }
   .figure .value { display: block; margin-top: 2px; font-family: var(--font-display); font-size: 1.75rem; line-height: 2.25rem; font-weight: 450; letter-spacing: -0.01em; font-variant-numeric: lining-nums tabular-nums; }
   .figure .eyebrow, .figure .meta { display: block; }
   .figures { display: flex; flex-wrap: wrap; gap: 16px 48px; }
+  /* Phones: two columns. Each figure's label, number and meta line share rows with its neighbour's (subgrid), so a
+     label that wraps to two lines doesn't push its number below the one beside it. */
+  @media (max-width: 767px) {
+    .figures { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px 24px; }
+    .figures > .figure { display: grid; grid-row: span 3; grid-template-rows: subgrid; row-gap: 0; align-content: start; }
+  }
 
   .cols { display: grid; grid-template-columns: minmax(0, 1fr) 18.75rem; column-gap: 64px; align-items: start; margin-top: var(--space-10); }
   @media (max-width: 1199px) { .cols { grid-template-columns: minmax(0, 1fr); row-gap: var(--space-10); } }
@@ -672,6 +682,9 @@ summary.no-marker::-webkit-details-marker { display: none; }
   .tabs :is(a, button):hover { color: var(--text); }
   .tabs :is(a, button):is([aria-current="page"], [aria-selected="true"], [aria-pressed="true"]) { color: var(--text); border-bottom-color: var(--text); font-weight: 600; }
   @media (max-width: 767px), (pointer: coarse) { .tabs :is(a, button) { min-height: 2.75rem; } }
+  /* Small phones: tighter tabs so a four-tab row (Inbox, Insights) fits instead of cutting its last tab at the edge. */
+  @media (max-width: 399px) { .tabs { gap: 16px; } }
+  @media (max-width: 359px) { .tabs :is(a, button) { font-size: 0.9375rem; } }
 
   /* Month switcher: no box, just the month between two arrows */
   .monthpick { display: inline-flex; align-items: center; gap: 2px; font-weight: 600; font-variant-numeric: tabular-nums; }

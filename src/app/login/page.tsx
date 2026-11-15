@@ -3,6 +3,7 @@ import { cookies } from "next/headers";
 import { allowedUsers, checkPassword, getUser } from "@/lib/auth";
 import { SESSION_COOKIE, SESSION_MAX_AGE, signSession } from "@/lib/session";
 import { checkLogin, clearFailedLogins, recordFailedLogin } from "@/lib/login-guard";
+import { buttonClass, cx } from "@/components/ui";
 
 export const metadata = { title: "Sign in" };
 
@@ -47,12 +48,12 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
   const lockedMin = locked && /^\d{1,3}$/.test(locked) ? Number(locked) : null;
   const dev = process.env.NODE_ENV !== "production" && !process.env.APP_PASSWORD;
   return (
-    <main className="flex min-h-dvh items-center justify-center px-4">
-      <form action={login} className="w-full max-w-sm rounded-xl border border-border bg-surface p-6">
-        <h1 className="text-xl font-semibold">Nora HQ</h1>
-        <p className="mt-1 text-sm text-muted">Private. Sign in to continue.</p>
+    <main className="ps-login">
+      <form action={login} className="w-full max-w-sm">
+        <h1 className="display">Nora HQ</h1>
+        <p className="sub">Private. Sign in to continue.</p>
         <input type="hidden" name="next" value={next ?? "/"} />
-        <div className="mt-5 space-y-3">
+        <div className="mt-8 space-y-5">
           <div>
             <label className="label" htmlFor="email">Email</label>
             <input className="input" id="email" name="email" type="email" autoComplete="email" required />
@@ -63,12 +64,12 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
           </div>
         </div>
         {lockedMin ? (
-          <p className="mt-3 text-sm text-danger">Too many tries. Please wait about {lockedMin} minute{lockedMin === 1 ? "" : "s"} and try again.</p>
+          <p role="alert" className="status is-danger mt-5 flex whitespace-normal">Too many tries. Please wait about {lockedMin} minute{lockedMin === 1 ? "" : "s"} and try again.</p>
         ) : error ? (
-          <p className="mt-3 text-sm text-danger">That email and password don&apos;t match.</p>
+          <p role="alert" className="status is-danger mt-5 flex whitespace-normal">That email and password don&apos;t match.</p>
         ) : null}
-        {dev && <p className="mt-3 text-xs text-muted">Local dev: cameron@local or nora@local, password “dev”.</p>}
-        <button className="mt-5 w-full rounded-lg bg-accent px-4 py-2 text-sm font-medium text-accent-fg hover:opacity-90">Sign in</button>
+        {dev && <p className="meta mt-5">Local dev: cameron@local or nora@local, password “dev”.</p>}
+        <button className={cx(buttonClass("primary"), "mt-6 w-full")}>Sign in</button>
       </form>
     </main>
   );

@@ -5,7 +5,7 @@ import { cx, formatNumber } from "./ui";
 
 /**
  * Review-queue pieces for creator outreach. Server-component safe (no hooks).
- *  - SenderChip: "Send from @x (not Nora) · Offer: …" — which account the message goes out from, and the standing offer.
+ *  - SenderChip: "Send from @x (not Nora) · Offer: …": which account the message goes out from, and the standing offer.
  *  - CreatorCheckLine: "10.5K TikTok · checked 3d ago · no prior posts".
  */
 
@@ -29,10 +29,11 @@ export function SenderChip({
 
   return (
     <div className="flex flex-col gap-1.5">
+      {/* One row between hairlines: who it goes out as, then the standing offer. The sender is ink, never the accent. */}
       {profile.sendFrom ? (
-        <p className="break-words rounded-lg bg-accent-soft px-3 py-2 text-sm">
+        <p className="notice block break-words">
           <span className="font-semibold">
-            Send from <span className="text-accent">{profile.sendFrom}</span>
+            Send from <span>{profile.sendFrom}</span>
           </span>{" "}
           <span className="text-muted">({kind ? `${kind}, ` : ""}not Nora)</span>
           {" · "}
@@ -41,26 +42,29 @@ export function SenderChip({
           ) : (
             <>
               No standing offer saved.{" "}
-              <Link href={settings} className="font-medium text-accent hover:underline">Add it</Link>
+              <Link href={settings} className="link">Add it</Link>
             </>
           )}
         </p>
       ) : (
-        <p className="break-words rounded-lg bg-warn-soft px-3 py-2 text-sm text-warn">
-          <span className="font-semibold">No sender saved for {profile.business}.</span> It goes out from the business&apos;s own account, not Nora&apos;s.{" "}
-          <Link href={settings} className="font-semibold underline">Set it</Link>
+        <p className="notice block break-words">
+          <span className="status is-warn is-run">
+            <span className="font-semibold">No sender saved for {profile.business}.</span>
+          </span>{" "}
+          It goes out from the business&apos;s own account, not Nora&apos;s.{" "}
+          <Link href={settings} className="link">Set it</Link>
           {profile.creatorOffer ? <> · Offer: {profile.creatorOffer}</> : <> · No standing offer saved.</>}
         </p>
       )}
       {plan && pending && plan.auto && (
-        <p className={cx("text-xs", profile.sendFrom ? "text-muted" : "font-medium text-warn")}>
+        <p className={cx("meta", !profile.sendFrom && "font-medium text-text")}>
           Approving emails this right away from {plan.from} (the connected Gmail).
         </p>
       )}
       {plan && pending && !plan.auto && plan.from && (
-        <p className="text-xs text-muted">Approving doesn&apos;t email it: you send it from {sendFromText(profile, channel)}, then mark it sent.</p>
+        <p className="meta">Approving doesn&apos;t email it: you send it from {sendFromText(profile, channel)}, then mark it sent.</p>
       )}
-      {mismatch && <p className="rounded-lg bg-warn-soft px-3 py-2 text-sm text-warn">{mismatch}</p>}
+      {mismatch && <p className="status is-warn flex whitespace-normal"><span>{mismatch}</span></p>}
     </div>
   );
 }
@@ -82,10 +86,11 @@ export function CreatorCheckLine({
   const ig = creator.instagramFollowers != null ? `${formatNumber(creator.instagramFollowers)} IG` : null;
   const tt = creator.tiktokFollowers != null ? `${formatNumber(creator.tiktokFollowers)} TikTok` : null;
   const followers = channel === "tiktok_dm" ? (tt ?? ig) : channel === "instagram_dm" ? (ig ?? tt) : [ig, tt].filter(Boolean).join(" · ") || null;
-  const checkCls = check.state === "fresh" ? "text-muted" : "font-medium text-warn";
+  // A fact that needs a second look gets a dot and ink words; one that is fine stays muted.
+  const checkCls = check.state === "fresh" ? "text-muted" : "status is-warn is-run font-medium";
   return (
     <p className="break-words text-sm">
-      <span className="font-medium tabular-nums">{followers ?? "Followers unknown"}</span>
+      <span className="num font-medium">{followers ?? "Followers unknown"}</span>
       {" · "}
       {creator.statsSource && check.state !== "never" ? (
         <a href={creator.statsSource} target="_blank" rel="noopener noreferrer nofollow" className={cx(checkCls, "hover:underline")}>{check.label}</a>
@@ -94,12 +99,12 @@ export function CreatorCheckLine({
       )}
       {" · "}
       {posted ? (
-        <span className="font-medium text-danger">
+        <span className="status is-danger is-run font-medium">
           already posted about {business}
           {posted.url && (
             <>
               {" "}
-              <a href={posted.url} target="_blank" rel="noopener noreferrer nofollow" className="underline">see post ↗</a>
+              <a href={posted.url} target="_blank" rel="noopener noreferrer nofollow" className="link font-normal">see post ↗</a>
             </>
           )}
         </span>

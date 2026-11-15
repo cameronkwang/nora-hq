@@ -1,36 +1,37 @@
 import type { ReactNode } from "react";
 import type { IntakeCopy } from "@/lib/intake-copy";
 
-/** Static screens for the onboarding form (thank-you, already sent, expired). No hooks — usable from server and client. */
+/** Static screens for the onboarding form (thank-you, already sent, expired). No hooks: usable from server and client. */
 
 export function IntakeThanks({ C, name }: { C: IntakeCopy; name: string }) {
   return (
-    <div role="status" data-intake-done="" className="px-1 py-6 text-center sm:px-4">
-      <span aria-hidden className="mx-auto mb-4 flex size-14 items-center justify-center rounded-full bg-ok-soft text-2xl text-ok">✓</span>
-      <h2 className="text-2xl font-semibold tracking-tight">{C.thanks.title(name || "")}</h2>
-      <p className="mx-auto mt-2 max-w-sm text-[17px] leading-relaxed text-muted">{C.thanks.body}</p>
-      <div className="mx-auto mt-8 max-w-sm text-left">
-        <h3 className="mb-3 text-[16px] font-semibold">{C.thanks.nextTitle}</h3>
-        <ol className="space-y-3">
+    <div role="status" data-intake-done="" className="ps-hero">
+      <h2 className="display emoji">{C.thanks.title(name || "")}</h2>
+      <p className="sub">{C.thanks.body}</p>
+      <section className="sec">
+        <header className="sec-head">
+          <h3 className="title">{C.thanks.nextTitle}</h3>
+        </header>
+        <ol className="ps-steps-list sec-body">
           {C.thanks.next.map((s, i) => (
-            <li key={i} className="flex gap-3 text-[16px] leading-relaxed">
-              <span aria-hidden className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-full bg-accent-soft text-sm font-semibold text-accent">{i + 1}</span>
+            <li key={i}>
+              <span aria-hidden className="n">{i + 1}</span>
               <span>{s}</span>
             </li>
           ))}
         </ol>
-      </div>
-      <p className="mx-auto mt-8 max-w-sm text-[15px] text-muted">{C.thanks.foot}</p>
+      </section>
+      <p className="meta mt-8">{C.thanks.foot}</p>
     </div>
   );
 }
 
-export function IntakeNotice({ icon, title, children }: { icon: string; title: string; children: ReactNode }) {
+/** A short screen in place of the form: the serif title and a line or two. (`icon` is kept for callers; Ink draws no badge.) */
+export function IntakeNotice({ title, children }: { icon?: string; title: string; children: ReactNode }) {
   return (
-    <div role="status" className="px-1 py-8 text-center sm:px-4">
-      <span aria-hidden className="mx-auto mb-4 flex size-14 items-center justify-center rounded-full bg-accent-soft text-2xl">{icon}</span>
-      <h2 className="text-2xl font-semibold tracking-tight">{title}</h2>
-      <div className="mx-auto mt-3 max-w-sm space-y-3 text-[17px] leading-relaxed text-muted">{children}</div>
+    <div role="status" className="ps-hero">
+      <h2 className="display">{title}</h2>
+      <div className="mt-3 space-y-3 text-muted">{children}</div>
     </div>
   );
 }

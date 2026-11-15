@@ -3,7 +3,7 @@ import { requireUser } from "@/lib/auth";
 import { listClients } from "@/lib/data";
 import { formatDate, relativeTime } from "@/lib/dates";
 import { findConnection } from "@/lib/integrations/connections";
-import { Badge, Card, EmptyState, LinkButton, PageHeader, Stat, StatusBadge, buttonClass, clientLabel, cx, humanize } from "@/components/ui";
+import { EmptyState, LinkButton, PageHeader, Stat, Status, StatusBadge, buttonClass, clientLabel, humanize } from "@/components/ui";
 import { SubmitButton } from "@/components/client-form";
 import { syncReviewsAction } from "../settings/actions";
 import { askClaudeToReplyAction } from "./actions";
@@ -14,19 +14,21 @@ export const dynamic = "force-dynamic";
 type SP = Record<string, string | string[] | undefined>;
 const one = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v) ?? "";
 
+/** Stars in ink, the empty ones in the hairline colour (no traffic-light colours). */
 function Stars({ n }: { n: number | null }) {
-  if (!n) return <span className="text-xs text-muted">No rating</span>;
+  if (!n) return <span className="meta">No rating</span>;
   return (
-    <span className="text-sm tracking-tight" aria-label={`${n} out of 5 stars`} title={`${n} of 5`}>
-      <span aria-hidden className={n <= 2 ? "text-danger" : n === 3 ? "text-warn" : "text-ok"}>{"★".repeat(n)}</span>
-      <span aria-hidden className="text-border">{"★".repeat(5 - n)}</span>
+    <span className="tracking-tight" aria-label={`${n} out of 5 stars`} title={`${n} of 5`}>
+      <span aria-hidden className="text-text">{"★".repeat(n)}</span>
+      <span aria-hidden className="text-border-strong opacity-50">{"★".repeat(5 - n)}</span>
     </span>
   );
 }
 
+/** A message after an action: one line between hairlines, the colour in its dot. */
 function Flash({ tone, msg }: { tone: string; msg: string }) {
-  const cls = tone === "danger" ? "border-danger/30 bg-danger-soft text-danger" : tone === "warn" ? "border-warn/30 bg-warn-soft text-warn" : "border-ok/30 bg-ok-soft text-ok";
-  return <div role="status" className={cx("mb-4 rounded-lg border px-4 py-3 text-sm", cls)}>{msg}</div>;
+  const cls = tone === "danger" ? "is-danger" : tone === "warn" ? "is-warn" : "is-ok";
+  return <p role="status" className="notice mb-4"><span className={`status ${cls}`}>{msg}</span></p>;
 }
 
 export default async function ReviewsPage({ searchParams }: { searchParams: Promise<SP> }) {
@@ -73,16 +75,16 @@ export default async function ReviewsPage({ searchParams }: { searchParams: Prom
 
       {msg && <Flash tone={one(sp.tone)} msg={msg} />}
       {conn && conn.status !== "ok" && (
-        <Flash tone="warn" msg={`Google connection problem: ${conn.lastError ?? humanize(conn.status)} — fix it in Settings.`} />
+        <Flash tone="warn" msg={`Google connection problem: ${conn.lastError ?? humanize(conn.status)}. Fix it in Settings.`} />
       )}
 
-      <div className="mb-6 grid grid-cols-3 gap-3">
-        <Stat label="Need a reply" value={stats.unreplied} />
+      <div className="figures mb-8">
+        <Stat label="Need a reply" value={<span className={stats.unreplied > 0 ? "text-accent" : undefined}>{stats.unreplied}</span>} />
         <Stat label="Total" value={stats.total} />
         <Stat label="Average" value={stats.avg != null ? `${stats.avg}★` : "—"} />
       </div>
 
-      <form method="get" className="mb-6 grid grid-cols-2 gap-3 sm:flex sm:flex-wrap sm:items-end" aria-label="Filter reviews">
+      <form method="get" className="mb-2 grid grid-cols-2 gap-3 sm:flex sm:flex-wrap sm:items-end" aria-label="Filter reviews">
         <div className="col-span-2 sm:w-64">
           <label className="label" htmlFor="f-client">Business</label>
           <select id="f-client" name="client" defaultValue={client} className="input">
@@ -105,7 +107,7 @@ export default async function ReviewsPage({ searchParams }: { searchParams: Prom
           </select>
         </div>
         <div className="col-span-2 flex gap-2">
-          <button className={buttonClass("primary")}>Apply</button>
+          <button className={buttonClass("secondary")}>Apply</button>
           {qs.size > 0 && <Link href="/reviews" className={buttonClass("ghost")}>Clear</Link>}
         </div>
       </form>
@@ -113,11 +115,11 @@ export default async function ReviewsPage({ searchParams }: { searchParams: Prom
       {list.length === 0 ? (
         !conn ? (
           <EmptyState title="Google isn't connected yet">
-            Connect Google Business Profile in <Link href="/settings" className="underline">Settings</Link>, link each business to its Google listing, then sync.
+            Connect Google Business Profile in <Link href="/settings" className="link">Settings</Link>, link each business to its Google listing, then sync.
           </EmptyState>
         ) : mapped === 0 ? (
           <EmptyState title="No business is linked to a Google listing">
-            Pick a Google location for each business in <Link href="/settings" className="underline">Settings</Link>, then press Sync now.
+            Pick a Google location for each business in <Link href="/settings" className="link">Settings</Link>, then press Sync now.
           </EmptyState>
         ) : stats.total === 0 ? (
           <EmptyState title="No reviews synced yet">Press “Sync now” to pull reviews from Google.</EmptyState>
@@ -127,77 +129,73 @@ export default async function ReviewsPage({ searchParams }: { searchParams: Prom
           <EmptyState title="No reviews match these filters" />
         )
       ) : (
-        <ul className="flex flex-col gap-3">
+        <ul className="list is-ruled mt-8">
           {list.map(({ review: r, clientName, clientLocation }) => {
             const draft = drafts.get(r.id);
             const askId = asks.get(r.id);
             return (
-              <li key={r.id}>
-                <Card>
-                  <div className="flex flex-col gap-3">
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
-                        <Stars n={r.rating} />
-                        <span className="font-medium">{r.reviewer ?? "Google user"}</span>
-                        <span className="text-xs text-muted">{r.createTime ? formatDate(r.createTime) : ""}</span>
-                      </div>
-                      <Link href={`/clients/${r.clientId}`} className="text-xs text-muted hover:underline">
-                        {clientLocation ? `${clientName} · ${clientLocation}` : clientName}
-                      </Link>
-                    </div>
+              <li key={r.id} className="flex flex-col gap-3 py-5">
+                <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+                  <div className="flex min-w-0 flex-wrap items-baseline gap-x-3 gap-y-1">
+                    <Stars n={r.rating} />
+                    <span className="font-medium">{r.reviewer ?? "Google user"}</span>
+                    <span className="meta">{r.createTime ? formatDate(r.createTime) : ""}</span>
+                  </div>
+                  <Link href={`/clients/${r.clientId}`} className="link-quiet">
+                    {clientLocation ? `${clientName} · ${clientLocation}` : clientName}
+                  </Link>
+                </div>
 
-                    {r.comment ? (
-                      <p className="whitespace-pre-line break-words text-sm">{r.comment}</p>
+                {r.comment ? (
+                  <p className="max-w-3xl whitespace-pre-line break-words">{r.comment}</p>
+                ) : (
+                  <p className="meta italic">Rating only, no written review.</p>
+                )}
+
+                {r.replyText && (
+                  <div className="g-quote max-w-3xl">
+                    <p className="mb-1 flex flex-wrap items-baseline gap-x-3">
+                      <span className="eyebrow">Our reply</span>
+                      {r.replyState && <Status tone={/reject|violat/i.test(r.replyState) ? "danger" : /pending/i.test(r.replyState) ? "warn" : "neutral"} small>{humanize(r.replyState.toLowerCase())}</Status>}
+                    </p>
+                    <p className="whitespace-pre-line break-words text-muted">{r.replyText}</p>
+                  </div>
+                )}
+                {r.policyViolation && (
+                  <p className="status is-danger is-small whitespace-normal">Google flagged the reply: {r.policyViolation}</p>
+                )}
+
+                {!r.replyText && (
+                  <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+                    {draft ? (
+                      <>
+                        <StatusBadge status={draft.status} />
+                        <LinkButton href={`/review?draft=${draft.id}`} size="sm">
+                          {draft.status === "needs_review" ? "Review draft reply" : "Open draft"}
+                        </LinkButton>
+                      </>
+                    ) : askId ? (
+                      <>
+                        <Status tone="info" small>Asked Claude</Status>
+                        <Link href={`/asks/${askId}`} className="link text-sm">View ask</Link>
+                      </>
                     ) : (
-                      <p className="text-sm italic text-muted">Rating only — no written review.</p>
-                    )}
-
-                    {r.replyText && (
-                      <div className="rounded-lg border-l-2 border-accent bg-surface-2 px-3 py-2">
-                        <p className="mb-1 flex flex-wrap items-center gap-2 text-xs font-semibold text-muted">
-                          Our reply
-                          {r.replyState && <Badge tone={/reject|violat/i.test(r.replyState) ? "danger" : /pending/i.test(r.replyState) ? "warn" : "neutral"}>{humanize(r.replyState.toLowerCase())}</Badge>}
-                        </p>
-                        <p className="whitespace-pre-line break-words text-sm">{r.replyText}</p>
-                      </div>
-                    )}
-                    {r.policyViolation && (
-                      <p className="rounded-lg bg-danger-soft px-3 py-2 text-xs text-danger">Google flagged the reply: {r.policyViolation}</p>
-                    )}
-
-                    {!r.replyText && (
-                      <div className="flex flex-wrap items-center gap-2">
-                        {draft ? (
-                          <>
-                            <StatusBadge status={draft.status} />
-                            <LinkButton href={`/review?draft=${draft.id}`} size="sm" variant="primary">
-                              {draft.status === "needs_review" ? "Review draft reply" : "Open draft"}
-                            </LinkButton>
-                          </>
-                        ) : askId ? (
-                          <>
-                            <Badge tone="info">Asked Claude</Badge>
-                            <Link href={`/asks/${askId}`} className="text-xs text-muted underline">View ask</Link>
-                          </>
-                        ) : (
-                          <form action={askClaudeToReplyAction} className="flex w-full flex-col gap-2 sm:flex-row sm:items-center">
-                            <input type="hidden" name="reviewId" value={r.id} />
-                            <input type="hidden" name="returnTo" value={returnTo} />
-                            <label htmlFor={`note-${r.id}`} className="sr-only">Notes for Claude (optional)</label>
-                            <input id={`note-${r.id}`} name="note" placeholder="Optional note for Claude (e.g. offer a free drink)" className="input sm:max-w-sm" />
-                            <SubmitButton size="sm" pendingLabel="Asking…" className="shrink-0">Ask Claude to draft a reply</SubmitButton>
-                          </form>
-                        )}
-                      </div>
+                      <form action={askClaudeToReplyAction} className="flex w-full flex-col gap-2 sm:flex-row sm:items-center">
+                        <input type="hidden" name="reviewId" value={r.id} />
+                        <input type="hidden" name="returnTo" value={returnTo} />
+                        <label htmlFor={`note-${r.id}`} className="sr-only">Notes for Claude (optional)</label>
+                        <input id={`note-${r.id}`} name="note" placeholder="Optional note for Claude (e.g. offer a free drink)" className="input sm:max-w-sm" />
+                        <SubmitButton size="sm" variant="secondary" pendingLabel="Asking…" className="shrink-0">Ask Claude to draft a reply</SubmitButton>
+                      </form>
                     )}
                   </div>
-                </Card>
+                )}
               </li>
             );
           })}
         </ul>
       )}
-      {more && <p className="mt-4 text-center text-xs text-muted">Showing the newest {PAGE_SIZE}. Filter by business or rating to see older ones.</p>}
+      {more && <p className="meta mt-4 border-t border-border pt-3">Showing the newest {PAGE_SIZE}. Filter by business or rating to see older ones.</p>}
     </>
   );
 }

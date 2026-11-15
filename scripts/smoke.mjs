@@ -1221,7 +1221,7 @@ async function v6Flows(browser) {
 /* ── responsive QA: every route × 7 viewports × light/dark ── */
 /* ── v7: Services & plans (Facebook, creator areas) + client onboarding form (/start/<token>) ── */
 const INTAKE_LANGS = {
-  en: { next: "Next", thanks: /Thank you/, already: "Thanks — we got your answers", expired: "This link has expired", stepOf: "Step 1 of 3", minutes: "about a minute",
+  en: { next: "Next", thanks: /Thank you/, already: "Thanks! We got your answers", expired: "This link has expired", stepOf: "Step 1 of 3", minutes: "about a minute",
     right: "Is this right?", address: "Address", hours: "Hours", yes: "Yes, that's right", off: "Something's off", fix: "What should we fix?", sendNow: "Send now", more: "Got one more minute?", talk: "en" },
   "zh-Hans": { next: "下一步", thanks: /谢谢您/, already: "谢谢，我们已经收到您的资料", expired: "这个链接已经失效", stepOf: "第 1 步，共 3 步", minutes: "大约一分钟",
     right: "这些信息对吗？", address: "地址", hours: "营业时间", yes: "对，没问题", off: "有地方不对", fix: "哪里需要改？", sendNow: "现在提交", more: "还有一分钟吗？", talk: "mandarin" },
@@ -1699,7 +1699,7 @@ async function v7Flows(browser) {
     const res = await page.goto(`${BASE}/clients/poke-bros/intake`, { waitUntil: "networkidle" });
     if (res?.status() !== 200) throw new Error(`HTTP ${res?.status()}`);
     const t = await page.locator("main").innerText();
-    for (const s of ["Earlier answers · Your business", "Business name (as the owner wrote it)", "SAMPLE 1 Example Ave", "SAMPLE 周一至周日 11am–9pm", "$$ · $15–30", "Friendly, Fun", "OK — let's do it on the call", "SAMPLE 老板", "Within 1–2 days", "About you"]) {
+    for (const s of ["Earlier answers · Your business", "Business name (as the owner wrote it)", "SAMPLE 1 Example Ave", "SAMPLE 周一至周日 11am–9pm", "$$ · $15–30", "Friendly, Fun", "OK, let's do it on the call", "SAMPLE 老板", "Within 1–2 days", "About you"]) {
       if (!t.includes(s)) throw new Error(`legacy answers page missing ${s}`);
     }
     if (/oddKeyFromTheFuture|ipHash|\[object Object\]/.test(t)) throw new Error("legacy page shows unknown keys / _meta");
@@ -1720,7 +1720,7 @@ async function v7Flows(browser) {
   const resend = async () => {
     await page.goto(`${BASE}/clients/${id}`, { waitUntil: "networkidle" });
     await page.locator("button:has-text('Send another form')").click();
-    await page.locator("button:has-text('Yes — send a fresh form')").click();
+    await page.locator("button:has-text('Yes, send a fresh form')").click();
     const input = page.locator("input[aria-label='Onboarding form link']");
     await input.waitFor({ timeout: 30000 });
     const link = BASE + new URL(await input.inputValue()).pathname;

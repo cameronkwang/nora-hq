@@ -8,8 +8,9 @@ import { formatDate, relativeTime } from "@/lib/dates";
 import { blobEnabled } from "@/lib/uploads";
 import { CalendarPostForm } from "@/components/calendar-post-form";
 import { MediaStrip } from "@/components/calendar-media";
+import { STATUS_TONE } from "@/components/calendar-grid";
 import { CopyButton } from "@/components/copy-button";
-import { Badge, Button, Card, PageHeader, PlatformTag, StatusBadge, clientLabel, cx, humanize } from "@/components/ui";
+import { Button, Card, PageHeader, PlatformTag, Status, StatusBadge, clientLabel, humanize } from "@/components/ui";
 import { deletePostAction, markPublishedAction, schedulePostAction, setPostStatusAction } from "../actions";
 import { utcToZoned } from "../tz";
 
@@ -55,45 +56,48 @@ export default async function PostPage({ params, searchParams }: { params: Promi
 
   return (
     <div>
-      <Link href={backHref} className="mb-3 inline-block text-sm text-accent hover:underline">
-        ← Calendar
-      </Link>
       <PageHeader
-        title={
-          <span className="flex flex-wrap items-center gap-2">
-            {client ? clientLabel(client) : "Archived business"}
-          </span>
-        }
+        crumb={<Link href={backHref}>Calendar</Link>}
+        title={client ? clientLabel(client) : "Archived business"}
         subtitle={
-          <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
-            <PlatformTag platform={post.platform} />
+          <span className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+            <PlatformTag platform={post.platform} inherit />
             <span>{humanize(post.format)}</span>
             <span>{post.scheduledFor ? formatDate(post.scheduledFor, true) + " ET" : "No date yet"}</span>
-            <StatusBadge status={post.status} />
+            {/* The same dot colours as the calendar grid and its legend. */}
+            <Status tone={STATUS_TONE[post.status] ?? "neutral"} small>{humanize(post.status)}</Status>
           </span>
         }
       />
 
-      {msg && (
-        <p role="status" className={cx("mb-4 rounded-lg px-4 py-3 text-sm", tone === "danger" ? "bg-danger-soft text-danger" : tone === "warn" ? "bg-warn-soft text-warn" : "bg-ok-soft text-ok")}>
-          {msg}
-        </p>
-      )}
-      {post.status === "failed" && (
-        <div role="alert" className="mb-4 rounded-lg bg-danger-soft px-4 py-3 text-sm text-danger">
-          <p className="font-semibold">Publishing failed</p>
-          <p className="mt-0.5 break-words">{post.error ?? "No error details were recorded."}</p>
-          <p className="mt-1 text-xs">Fix the problem (often media links or the Instagram connection), then schedule it again or post it manually and mark it published.</p>
+      {/* Notes in a row between hairlines: a dot and plain words. */}
+      {(msg || post.status === "failed" || pastDue) && (
+        <div className="mb-2">
+          {msg && (
+            <p role="status" className="notice">
+              <Status tone={tone === "danger" ? "danger" : tone === "warn" ? "warn" : "ok"} className="whitespace-normal text-text">{msg}</Status>
+            </p>
+          )}
+          {post.status === "failed" && (
+            <div role="alert" className="notice block">
+              <Status tone="danger" className="font-semibold">Publishing failed</Status>
+              <p className="mt-0.5 break-words pl-[15px]">{post.error ?? "No error details were recorded."}</p>
+              <p className="meta mt-1 pl-[15px]">Fix the problem (often media links or the Instagram connection), then schedule it again or post it manually and mark it published.</p>
+            </div>
+          )}
+          {pastDue && post.status !== "failed" && (
+            <p className="notice">
+              <Status tone="warn" className="whitespace-normal">
+                {post.status === "scheduled" ? "This was due to publish already. It should go out on the next publishing run." : "The planned time has passed. Post it and mark it published, or move the date."}
+              </Status>
+            </p>
+          )}
         </div>
       )}
-      {pastDue && post.status !== "failed" && (
-        <p className="mb-4 rounded-lg bg-warn-soft px-4 py-3 text-sm text-warn">
-          {post.status === "scheduled" ? "This was due to publish already — it should go out on the next publishing run." : "The planned time has passed. Post it and mark it published, or move the date."}
-        </p>
-      )}
 
-      <div className="grid gap-6 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
-        <Card title="Edit post">
+      {/* The form, then the publishing side column (one column under 1200px). */}
+      <div className="cols">
+        <Card title="Edit post" className="mt-0">
           <CalendarPostForm
             clients={clients.map((c) => ({ id: c.id, label: clientLabel(c) }))}
             post={{
@@ -112,16 +116,16 @@ export default async function PostPage({ params, searchParams }: { params: Promi
           />
         </Card>
 
-        <div className="flex flex-col gap-4">
+        <div className="flex flex-col gap-8 md:gap-10">
           <Card title="Publishing">
-            <div className="flex flex-col gap-4 text-sm">
+            <div className="flex flex-col gap-4">
               {post.status === "published" ? (
                 <div className="flex flex-col gap-1">
-                  <p>
-                    <Badge tone="ok">Published</Badge> {post.publishedAt && <span className="text-muted">{formatDate(post.publishedAt, true)}</span>}
+                  <p className="flex flex-wrap items-baseline gap-x-3">
+                    <Status tone="ok">Published</Status> {post.publishedAt && <span className="meta">{formatDate(post.publishedAt, true)}</span>}
                   </p>
                   {post.permalink && (
-                    <a href={post.permalink} target="_blank" rel="noreferrer" className="break-all text-accent hover:underline">{post.permalink}</a>
+                    <a href={post.permalink} target="_blank" rel="noreferrer" className="link break-all">{post.permalink}</a>
                   )}
                 </div>
               ) : post.status === "publishing" ? (
@@ -144,10 +148,10 @@ export default async function PostPage({ params, searchParams }: { params: Promi
                   {canSchedule ? (
                     <form action={schedulePostAction}>
                       <input type="hidden" name="id" value={post.id} />
-                      <Button type="submit" variant="primary">Schedule auto-publish</Button>
+                      <Button type="submit">Schedule auto-publish</Button>
                     </form>
                   ) : (
-                    <p className="text-xs text-muted">To schedule it: {scheduleBlockers.join(", ")}.</p>
+                    <p className="meta">To schedule it: {scheduleBlockers.join(", ")}.</p>
                   )}
                 </div>
               ) : (
@@ -166,7 +170,7 @@ export default async function PostPage({ params, searchParams }: { params: Promi
                   <input type="hidden" name="id" value={post.id} />
                   <label htmlFor="permalink" className="label">{post.status === "published" ? "Post link" : "Link to the live post (optional)"}</label>
                   <input id="permalink" name="permalink" type="url" defaultValue={post.permalink ?? ""} placeholder={post.platform === "tiktok" ? "https://www.tiktok.com/@…/video/…" : "https://www.instagram.com/p/…"} className="input" />
-                  <Button type="submit" variant={post.status === "published" ? "secondary" : "primary"} className="self-start">
+                  <Button type="submit" className="self-start">
                     {post.status === "published" ? "Save link" : "Mark published"}
                   </Button>
                 </form>
@@ -192,37 +196,39 @@ export default async function PostPage({ params, searchParams }: { params: Promi
           {post.mediaUrls.length > 0 && (
             <Card title={`Media (${post.mediaUrls.length})`}>
               <MediaStrip urls={post.mediaUrls} />
-              <p className="mt-2 text-xs text-muted">Tap a photo or video to open it full size and save it.</p>
+              <p className="meta mt-2">Tap a photo or video to open it full size and save it.</p>
             </Card>
           )}
 
-          <Card title="Linked">
-            <ul className="flex flex-col gap-2 text-sm">
-              {drafts.length === 0 && !task && <li className="text-muted">No draft or task linked. Claude links drafts here when it writes the caption.</li>}
-              {drafts.map((d) => (
-                <li key={d.id} className="flex flex-wrap items-center gap-2">
-                  <span className="text-muted">Draft:</span>
-                  <Link href={`/review?draft=${d.id}`} className="min-w-0 break-words hover:underline">{d.title}</Link>
-                  <StatusBadge status={d.status} />
-                  <span className="text-xs text-muted">{relativeTime(d.createdAt)}</span>
-                </li>
-              ))}
-              {task && (
-                <li className="flex flex-wrap items-center gap-2">
-                  <span className="text-muted">Task:</span>
-                  <Link href={`/tasks/${task.id}`} className="min-w-0 break-words hover:underline">{task.title}</Link>
-                  <StatusBadge status={task.status} />
-                </li>
-              )}
-            </ul>
+          <Card title="Linked" padded={false}>
+            {drafts.length === 0 && !task ? (
+              <p className="sec-note">No draft or task linked. Claude links drafts here when it writes the caption.</p>
+            ) : (
+              <ul className="list">
+                {drafts.map((d) => (
+                  <li key={d.id} className="py-2.5">
+                    <p className="meta">Draft · {relativeTime(d.createdAt)}</p>
+                    <Link href={`/review?draft=${d.id}`} className="link break-words">{d.title}</Link>
+                    <p><StatusBadge status={d.status} /></p>
+                  </li>
+                ))}
+                {task && (
+                  <li className="py-2.5">
+                    <p className="meta">Task</p>
+                    <Link href={`/tasks/${task.id}`} className="link break-words">{task.title}</Link>
+                    <p><StatusBadge status={task.status} /></p>
+                  </li>
+                )}
+              </ul>
+            )}
           </Card>
 
-          <details className="rounded-xl border border-border bg-surface">
-            <summary className="cursor-pointer select-none px-4 py-3 text-sm font-medium text-danger">Delete this post…</summary>
-            <form action={deletePostAction} className="flex flex-col gap-2 border-t border-border p-4 text-sm">
+          <details className="border-t border-border">
+            <summary className="no-marker flex min-h-11 cursor-pointer select-none items-center font-medium text-danger">Delete this post…</summary>
+            <form action={deletePostAction} className="flex flex-col gap-3 pb-2 pt-1">
               <input type="hidden" name="id" value={post.id} />
               <input type="hidden" name="returnTo" value={`/calendar?tab=posts${zoned ? `&month=${zoned.date.slice(0, 7)}` : ""}`} />
-              <p className="text-muted">This removes it from the calendar. It doesn&apos;t delete anything already posted on {post.platform === "tiktok" ? "TikTok" : "Instagram"}.</p>
+              <p className="meta">This removes it from the calendar. It doesn&apos;t delete anything already posted on {post.platform === "tiktok" ? "TikTok" : "Instagram"}.</p>
               <Button type="submit" variant="danger" className="self-start">Delete post</Button>
             </form>
           </details>

@@ -4,7 +4,7 @@ import { requireUser } from "@/lib/auth";
 import { getClient, isCreatorClient, listBusinesses } from "@/lib/data";
 import { formatDate, isMonth, monthLabel } from "@/lib/dates";
 import { listClientReports, reportMonths, type ReportRow } from "@/lib/ops-reports";
-import { Badge, Card, EmptyState, LinkButton, PageHeader, clientLabel, cx } from "@/components/ui";
+import { EmptyState, LinkButton, PageHeader, Status, Tag, clientLabel, cx } from "@/components/ui";
 import { CopyButton } from "@/components/copy-button";
 import { ReportMarkdown, markdownToPlainText } from "@/components/report-markdown";
 import { ReportRequestButton, ReportSendActions } from "@/components/report-actions";
@@ -23,12 +23,12 @@ type SP = Record<string, string | string[] | undefined>;
 const one = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v) ?? "";
 
 function statusChip(r: ReportRow | undefined) {
-  if (!r) return <Badge>Not started</Badge>;
-  if (r.audience === "internal") return <Badge tone="info">Team only</Badge>;
-  if (r.status === "sent") return <Badge tone="ok">Sent</Badge>;
-  if (r.status === "approved") return <Badge tone="accent">Approved · not sent</Badge>;
-  if (r.draftStatus === "rejected") return <Badge tone="neutral">Sent back</Badge>;
-  return <Badge tone="warn">Needs review</Badge>;
+  if (!r) return <Status small>Not started</Status>;
+  if (r.audience === "internal") return <Tag bare>Team only</Tag>;
+  if (r.status === "sent") return <Status tone="ok" small>Sent</Status>;
+  if (r.status === "approved") return <Status tone="accent" small>Approved · not sent</Status>;
+  if (r.draftStatus === "rejected") return <Status small>Sent back</Status>;
+  return <Status tone="warn" small>Needs review</Status>;
 }
 
 export default async function ReportsPage({ searchParams }: { searchParams: Promise<SP> }) {
@@ -44,11 +44,12 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
         {businesses.length === 0 ? (
           <EmptyState title="No businesses yet" />
         ) : (
-          <ul className="divide-y divide-border rounded-xl border border-border bg-surface">
+          <ul className="list is-ruled max-w-3xl">
             {businesses.map((b) => (
               <li key={b.id}>
-                <Link href={`/reports?client=${encodeURIComponent(b.id)}`} className="flex min-h-12 items-center px-4 py-3 text-sm font-medium hover:bg-surface-2">
-                  {clientLabel(b)}
+                <Link href={`/reports?client=${encodeURIComponent(b.id)}`} className="row">
+                  <span className="row-title">{clientLabel(b)}</span>
+                  <svg viewBox="0 0 16 16" aria-hidden className="chev size-3.5" fill="none" stroke="currentColor" strokeWidth={1.8}><path d="M6 3.5 10.5 8 6 12.5" strokeLinecap="round" strokeLinejoin="round" /></svg>
                 </Link>
               </li>
             ))}
@@ -77,36 +78,31 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
       <PageHeader
         title={
           <>
-            <Link href={`/clients/${client.id}`} className="hover:underline">{client.name}</Link>
+            <Link href={`/clients/${client.id}`} className="no-underline hover:underline">{client.name}</Link>
             <span className="text-muted"> · Reports</span>
           </>
         }
         subtitle={
           <>
             Owner:{" "}
-            {client.ownerEmail ? <span className="break-all font-medium text-text">{client.ownerEmail}</span> : <span>not set</span>}
+            {client.ownerEmail ? <span className="break-all text-text">{client.ownerEmail}</span> : <span>not set</span>}
             {" · "}
-            <Link href={`/clients/${client.id}/settings#owner`} className="text-accent hover:underline">{client.ownerEmail ? "Change" : "Add owner email"}</Link>
+            <Link href={`/clients/${client.id}/settings#owner`} className="link">{client.ownerEmail ? "Change" : "Add owner email"}</Link>
           </>
         }
       />
 
       {/* Months */}
-      <nav aria-label="Month" className="-mx-4 mb-4 overflow-x-auto px-4 md:mx-0 md:px-0">
-        <ul className="flex w-max gap-2">
+      <nav aria-label="Month" className="-mx-4 overflow-x-auto px-4 md:mx-0 md:px-0">
+        <ul className="chips g-months w-max flex-nowrap">
           {months.map((m) => {
             const rs = reports.filter((r) => r.month === m);
             const ext = rs.find((r) => r.audience === "external");
-            const dot = ext?.status === "sent" ? "bg-ok" : ext?.status === "approved" ? "bg-accent" : rs.length ? "bg-warn" : "bg-border";
+            const dot = ext?.status === "sent" ? "is-ok" : ext?.status === "approved" ? "is-accent" : rs.length ? "is-warn" : "is-idle";
             return (
               <li key={m}>
-                <Link
-                  href={href(m, tab)}
-                  aria-current={m === month ? "page" : undefined}
-                  className={cx("inline-flex min-h-11 items-center gap-2 rounded-full border px-4 text-sm font-medium", m === month ? "border-accent bg-accent-soft text-accent" : "border-border bg-surface hover:bg-surface-2")}
-                >
-                  <span aria-hidden className={cx("inline-block size-2 rounded-full", dot)} />
-                  {monthLabel(m, "short")}
+                <Link href={href(m, tab)} aria-current={m === month ? "page" : undefined} className="chip">
+                  <span className={cx("status", dot)}>{monthLabel(m, "short")}</span>
                 </Link>
               </li>
             );
@@ -114,9 +110,9 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
         </ul>
       </nav>
 
-      <Card padded={false}>
+      <section className="sec mt-8">
         {/* Tabs */}
-        <div role="tablist" aria-label="Audience" className="grid grid-cols-2 border-b border-border">
+        <div role="tablist" aria-label="Audience" className="tabs grid grid-cols-2 gap-6">
           {(["external", "internal"] as const).map((t) => {
             const r = t === "internal" ? internal : external;
             const on = t === tab;
@@ -126,41 +122,41 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
                 role="tab"
                 aria-selected={on}
                 href={href(month, t)}
-                className={cx("flex min-h-12 flex-col items-start justify-center gap-1 px-4 py-2 sm:flex-row sm:items-center sm:gap-2", on ? "border-b-2 border-accent bg-surface" : "bg-surface-2/50 text-muted hover:bg-surface-2")}
+                className="flex-col items-start! justify-center gap-0! justify-self-start whitespace-normal py-2 sm:flex-row sm:items-baseline! sm:justify-start sm:gap-3!"
               >
-                <span className="text-sm font-semibold">{t === "external" ? "External · for the owner" : "Internal · team only"}</span>
-                {statusChip(r)}
+                <span>{t === "external" ? "External · for the owner" : "Internal · team only"}</span>
+                <span className="font-normal">{statusChip(r)}</span>
               </Link>
             );
           })}
         </div>
 
-        <div className="p-4 sm:p-6">
+        <div className="pt-6">
           {!current ? (
-            <div className="flex flex-col items-start gap-3">
-              <p className="text-sm text-muted">
+            <div className="flex flex-col items-start gap-4">
+              <p className="meta">
                 No {tab} report for {monthLabel(month)} yet.{" "}
-                {internal || external ? "" : "Claude drafts both on the 1st of each month — or ask now."}
+                {internal || external ? "" : "Claude drafts both on the 1st of each month, or ask now."}
               </p>
               <ReportRequestButton action={requestReportAction.bind(null, client.id, month)} />
             </div>
           ) : (
-            <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_16rem]">
+            <div className="grid gap-10 lg:grid-cols-[minmax(0,1fr)_16rem] lg:gap-16">
               <article className="min-w-0">
                 {current.audience === "internal" && (
-                  <p className="mb-3 rounded-lg bg-info-soft px-3 py-2 text-xs text-info">Team only — never sent to the owner.</p>
+                  <p className="notice mb-4"><span className="status is-info">Team only. Never sent to the owner.</span></p>
                 )}
                 <ReportMarkdown body={body} />
               </article>
 
-              <aside className="flex min-w-0 flex-col gap-3 lg:border-l lg:border-border lg:pl-6">
-                <p className="text-xs text-muted">
+              <aside className="flex min-w-0 flex-col items-start gap-3 max-lg:border-t max-lg:border-border max-lg:pt-4">
+                <p className="meta">
                   {current.createdBy === "claude" ? "Drafted by Claude" : "Written"} · updated {formatDate(current.updatedAt, true)}
                   {current.sentAt && <> · sent {formatDate(current.sentAt, true)}{current.sentTo ? ` to ${current.sentTo}` : ""}</>}
                 </p>
-                <CopyButton text={markdownToPlainText(body)} label="Copy as text" className="w-full" />
+                <CopyButton text={markdownToPlainText(body)} label="Copy as text" className="lg:w-full" />
                 {current.audience === "external" && current.status === "draft" && current.draftId && (
-                  <LinkButton href={`/review?client=${encodeURIComponent(client.id)}#d-${current.draftId}`} variant="primary" className="w-full">
+                  <LinkButton href={`/review?client=${encodeURIComponent(client.id)}#d-${current.draftId}`} variant="primary" className="lg:w-full">
                     {current.draftStatus === "rejected" ? "See it in Review" : "Review & approve"}
                   </LinkButton>
                 )}
@@ -173,16 +169,16 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
                   />
                 )}
                 {current.audience === "external" && current.status === "sent" && (
-                  <p className="rounded-lg bg-ok-soft px-3 py-2 text-sm text-ok">Sent{current.sentTo ? ` to ${current.sentTo}` : ""}.</p>
+                  <p className="status is-ok whitespace-normal">Sent{current.sentTo ? ` to ${current.sentTo}` : ""}.</p>
                 )}
                 {current.audience === "external" && current.status === "draft" && (
-                  <p className="text-xs text-muted">Approving it in Review doesn’t send anything — you send it from here after.</p>
+                  <p className="hint">Approving it in Review doesn’t send anything; you send it from here after.</p>
                 )}
               </aside>
             </div>
           )}
         </div>
-      </Card>
+      </section>
     </>
   );
 }

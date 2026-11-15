@@ -6,7 +6,7 @@ import { DROP_MAX_FILES, DROP_NOTE_MAX, dropCopy } from "@/lib/drop-copy";
 import { intakeCopy, type IntakeLangCode } from "@/lib/intake-copy";
 import { IntakeExpired } from "./intake-screens";
 import { IntakeUpload, type IntakeUploadedFile } from "./intake-upload";
-import { buttonClass, cx } from "./ui";
+import { Status, buttonClass, cx } from "./ui";
 
 /**
  * The owner drop page (/drop/<token>): one short screen, made for one hand on a phone.
@@ -43,11 +43,10 @@ function DropFormRound({
 
   if (state.done) {
     return (
-      <div ref={doneRef} tabIndex={-1} role="status" data-intake-done="" className="px-1 py-6 text-center outline-none sm:px-4">
-        <span aria-hidden className="mx-auto mb-4 flex size-14 items-center justify-center rounded-full bg-ok-soft text-2xl text-ok">✓</span>
-        <h1 className="text-2xl font-semibold tracking-tight">{D.thanks.title}</h1>
-        <p className="mx-auto mt-2 max-w-sm text-[17px] leading-relaxed text-muted">{D.thanks.body}</p>
-        <button type="button" onClick={onAgain} className={cx(buttonClass("secondary"), "mt-8 min-h-12 px-5 text-[16px]")}>
+      <div ref={doneRef} tabIndex={-1} role="status" data-intake-done="" className="ps-hero outline-none">
+        <h1 className="display">{D.thanks.title}</h1>
+        <p className="sub">{D.thanks.body}</p>
+        <button type="button" onClick={onAgain} className={cx(buttonClass("secondary"), "mt-8")}>
           {D.thanks.again}
         </button>
       </div>
@@ -58,7 +57,7 @@ function DropFormRound({
     <form
       action={formAction}
       noValidate
-      className="space-y-6"
+      className="space-y-8"
       onSubmit={(e) => {
         // A photo or a few words: either is enough.
         if (!uploads.length && !noteRef.current?.value.trim()) {
@@ -79,10 +78,10 @@ function DropFormRound({
         </label>
       </div>
 
-      <header>
-        <p className="mb-1 text-[15px] font-semibold text-accent">{D.hi(businessName)}</p>
-        <h1 className="text-2xl font-semibold tracking-tight">{D.title}</h1>
-        <p className="mt-1 text-[16px] leading-relaxed text-muted">{D.intro}</p>
+      <header className="ps-hero">
+        <p className="ps-lead emoji">{D.hi(businessName)}</p>
+        <h1 className="display">{D.title}</h1>
+        <p className="sub">{D.intro}</p>
       </header>
 
       {uploadsEnabled ? (
@@ -104,11 +103,13 @@ function DropFormRound({
           }}
         />
       ) : (
-        <p className="rounded-xl bg-surface-2 px-4 py-3 text-[15px] leading-relaxed text-muted">{D.uploadsOff}</p>
+        <p className="notice">
+          <Status tone="neutral">{D.uploadsOff}</Status>
+        </p>
       )}
 
       <div>
-        <label htmlFor="drop-note" className="mb-2 block text-[16px] font-medium leading-snug">{D.note.label}</label>
+        <label htmlFor="drop-note" className="ps-q ps-q-head">{D.note.label}</label>
         <textarea
           key={state.at ?? 0} // after an error the server hands the note back: remount with it
           ref={noteRef}
@@ -121,16 +122,16 @@ function DropFormRound({
           aria-invalid={error ? true : undefined}
           aria-describedby={error ? "drop-note-err" : undefined}
           onInput={() => setLocal(null)}
-          className={cx("input !min-h-0 !text-[16px] leading-relaxed", error && "!border-danger")}
+          className={cx("input !min-h-0", error && "!border-danger")}
         />
-        {error && <p id="drop-note-err" role="alert" className="mt-1.5 text-[15px] text-danger">{error}</p>}
+        {error && <p id="drop-note-err" role="alert" className="status is-danger is-small ps-err flex">{error}</p>}
       </div>
 
-      <button type="submit" disabled={pending} className={cx(buttonClass("primary"), "min-h-12 w-full text-[16px]")}>
+      <button type="submit" disabled={pending} className={cx(buttonClass("primary"), "w-full sm:w-auto")}>
         {pending ? D.sending : D.send}
       </button>
 
-      <p className="text-center text-sm leading-relaxed text-muted">
+      <p className="meta">
         {C.common.privacy} {C.common.neverPasswords}
       </p>
     </form>

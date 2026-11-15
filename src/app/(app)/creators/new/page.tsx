@@ -20,18 +20,19 @@ export default async function NewCreatorPage({ searchParams }: { searchParams: P
 
   return (
     <>
-      <p className="mb-2 text-sm">
-        <Link href="/creators" className="text-muted hover:underline">← Creators</Link>
-      </p>
-      <PageHeader title="Add creator" subtitle="If they're already in the roster (same handle or email), we'll update that profile instead of making a duplicate." />
+      <PageHeader
+        crumb={<Link href="/creators">Creators</Link>}
+        title="Add creator"
+        subtitle="If they're already in the roster (same handle or email), we'll update that profile instead of making a duplicate."
+      />
 
-      <ActionForm action={createCreatorAction} className="space-y-5" ariaLabel="Add creator">
+      <ActionForm action={createCreatorAction} className="max-w-3xl [&>.sec:first-child]:mt-0" ariaLabel="Add creator">
         <Card title="Profile">
           <CreatorFields />
         </Card>
 
         <Card title="Start outreach (optional)">
-          <p className="mb-3 text-sm text-muted">Pick a business to add them to its pipeline now. Claude can then draft the first message for you to approve.</p>
+          <p className="meta mb-4">Pick a business to add them to its pipeline now. Claude can then draft the first message for you to approve.</p>
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="sm:col-span-2">
               <label className="label" htmlFor="new-client">Business</label>
@@ -46,14 +47,14 @@ export default async function NewCreatorPage({ searchParams }: { searchParams: P
             <CompSelect idPrefix="new" />
             <StageSelect idPrefix="new" stages={["sourced", "shortlisted"]} />
           </div>
-          <p className="mt-3 text-xs text-muted">
+          <p className="hint mt-4">
             Stage moves to “Contacted” automatically when a DM or email is marked sent from the review queue.
           </p>
         </Card>
 
-        <div className="flex flex-wrap gap-2">
+        <div className="g-bar sticky-actions mt-8">
           <SubmitButton pendingLabel="Adding…">Add creator</SubmitButton>
-          <Link href="/creators" className="inline-flex items-center px-3 text-sm text-muted hover:underline">Cancel</Link>
+          <Link href="/creators" className="btn btn-ghost">Cancel</Link>
         </div>
       </ActionForm>
     </>

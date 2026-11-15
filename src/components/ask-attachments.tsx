@@ -13,14 +13,14 @@ export function AskAttachments({ items, size = "sm" }: { items: Attachment[]; si
       {items.map((a, i) => (
         <li key={`${a.url}-${i}`} className={size === "sm" ? "" : "min-w-0"}>
           {size === "lg" && isVideo(a) ? (
-            <video src={a.url} controls playsInline preload="metadata" className={cx(box, "rounded-lg border border-border bg-surface-2 object-cover")} />
+            <video src={a.url} controls playsInline preload="metadata" className={cx(box, "ask-thumb object-cover")} />
           ) : (
             <a
               href={a.url}
               target="_blank"
               rel="noreferrer"
               title={a.name}
-              className={cx(box, "relative block overflow-hidden rounded-lg border border-border bg-surface-2 hover:opacity-90")}
+              className={cx(box, "ask-thumb relative hover:opacity-90")}
             >
               {isImage(a) ? (
                 // eslint-disable-next-line @next/next/no-img-element
@@ -28,14 +28,16 @@ export function AskAttachments({ items, size = "sm" }: { items: Attachment[]; si
               ) : isVideo(a) ? (
                 <>
                   <video src={`${a.url}#t=0.1`} muted playsInline preload="metadata" className="size-full object-cover" />
-                  <span className="absolute bottom-1 left-1 rounded bg-surface/85 px-1 text-[10px] font-semibold text-text">Video</span>
+                  <span className="tag is-bare absolute bottom-1 left-1 border-0 bg-surface text-text">Video</span>
                 </>
               ) : (
-                <span className="flex size-full items-center justify-center p-1 text-center text-xs text-muted">{a.name}</span>
+                <span className="meta flex size-full items-center justify-center break-all p-1 text-center leading-tight">
+                  <span className="line-clamp-3">{a.name}</span>
+                </span>
               )}
             </a>
           )}
-          {size === "lg" && <p className="mt-1 truncate text-xs text-muted">{a.name}</p>}
+          {size === "lg" && <p className="meta mt-1 truncate">{a.name}</p>}
         </li>
       ))}
     </ul>

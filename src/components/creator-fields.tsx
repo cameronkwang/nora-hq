@@ -20,7 +20,7 @@ export function CreatorFields({ creator }: { creator?: Creator }) {
       <div className="sm:col-span-2">
         <label className="label" htmlFor="cr-email">Public email</label>
         <input id="cr-email" name="email" type="email" className="input" defaultValue={c?.email ?? ""} placeholder="From their bio or website" autoCapitalize="none" autoComplete="off" />
-        <p className="mt-1 text-xs text-muted">Only use emails creators list publicly.</p>
+        <p className="hint">Only use emails creators list publicly.</p>
       </div>
       <div>
         <label className="label" htmlFor="cr-city">City</label>
@@ -47,7 +47,7 @@ export function CreatorFields({ creator }: { creator?: Creator }) {
       <div className="sm:col-span-2">
         <label className="label" htmlFor="cr-src">Where you read the numbers (link)</label>
         <input id="cr-src" name="statsSource" inputMode="url" className="input" defaultValue={c?.statsSource ?? ""} placeholder="https://www.tiktok.com/@handle" autoCapitalize="none" autoComplete="off" spellCheck={false} />
-        <p className="mt-1 text-xs text-muted">Their public profile. With a link, the numbers count as checked today.</p>
+        <p className="hint">Their public profile. With a link, the numbers count as checked today.</p>
       </div>
       <div className="sm:col-span-2">
         <label className="label" htmlFor="cr-notes">Notes</label>

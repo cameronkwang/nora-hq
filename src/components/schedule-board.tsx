@@ -2,14 +2,14 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState, useTransition } from "react";
+import { useState, useTransition, type ReactNode } from "react";
 import { setReelPostedAction } from "@/app/(app)/calendar/schedule-actions";
 import { ScheduleItemForm } from "./schedule-item-form";
 import { ScheduleSheet } from "./schedule-sheet";
-import { Badge, EmptyState, cx } from "./ui";
+import { EmptyState, Status, Tag, cx } from "./ui";
 
 /**
- * One row of Nora's schedule as the page hands it to the browser. No money — the table has none. A job that
+ * One row of Nora's schedule as the page hands it to the browser. No money: the table has none. A job that
  * was made into a deal carries the deal's id and whether it's paid; the amount stays on the deal.
  */
 export type ScheduleEntry = {
@@ -42,9 +42,9 @@ const shortDate = (iso: string) => new Date(iso).toLocaleDateString("en-US", { m
 const owesReel = (i: ScheduleEntry) => i.needsReel && !i.reelPostedAt;
 
 /**
- * Schedule tab body: filter chips, a month grid (desktop) and the list (always; the only view on phones).
- * Undated jobs sit at the top under "Sometime in <Month>". Tapping a name opens its business (if linked);
- * "Edit" opens the quick form; the 📸 checkbox ticks a reel as posted.
+ * Schedule tab body: the month switcher and filter chips on one line, then the list grouped by day (the only view
+ * on phones), then on desktop the same month as a grid. Undated jobs sit at the top under "Sometime in <Month>".
+ * Tapping a name opens its business (if linked); "Edit" opens the quick form; the 📸 checkbox ticks a reel as posted.
  */
 export function ScheduleBoard({
   month,
@@ -52,12 +52,15 @@ export function ScheduleBoard({
   otherReels,
   todayStr,
   initialFilter,
+  monthPicker,
 }: {
   month: string;
   items: ScheduleEntry[];
   otherReels: ScheduleEntry[];
   todayStr: string;
   initialFilter: ScheduleFilter;
+  /** The month switcher, drawn at the start of the filter bar. */
+  monthPicker?: ReactNode;
 }) {
   const [filter, setFilterState] = useState<ScheduleFilter>(initialFilter);
   const [editing, setEditing] = useState<ScheduleEntry | null>(null);
@@ -82,113 +85,112 @@ export function ScheduleBoard({
   const counts = { all: items.length, reels: items.filter(owesReel).length, free: items.filter((i) => i.isFree).length };
 
   return (
-    <div className="flex flex-col gap-4">
-      <div role="group" aria-label="Show" className="flex flex-wrap gap-2">
-        {FILTERS.map((f) => (
-          <button
-            key={f.value}
-            type="button"
-            aria-pressed={filter === f.value}
-            onClick={() => setFilter(f.value)}
-            className={cx(
-              "inline-flex min-h-9 items-center gap-1.5 rounded-full border px-3 text-sm font-medium pointer-coarse:min-h-11",
-              filter === f.value ? "border-accent bg-accent-soft text-accent" : "border-border bg-surface text-muted hover:text-text",
-            )}
-          >
-            {f.label}
-            <span className="tabular-nums opacity-80">{counts[f.value]}</span>
-          </button>
-        ))}
+    <div>
+      <div className="sched-bar">
+        {monthPicker}
+        <div role="group" aria-label="Show" className="chips">
+          {FILTERS.map((f) => (
+            <button key={f.value} type="button" className="chip" aria-pressed={filter === f.value} onClick={() => setFilter(f.value)}>
+              <span>
+                {f.label} <i>{counts[f.value]}</i>
+              </span>
+            </button>
+          ))}
+        </div>
       </div>
 
-      <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_24rem]">
-        <div className="hidden min-w-0 md:block">
-          <ScheduleGrid month={month} items={dated} todayStr={todayStr} onOpen={setEditing} />
-        </div>
-
-        <div className="min-w-0">
-          {visible.length === 0 && !(filter === "reels" && otherReels.length) ? (
+      <div className="sched-list">
+        {visible.length === 0 && !(filter === "reels" && otherReels.length) ? (
+          <div className="mt-4 border-t border-border">
             <EmptyState title={items.length ? "Nothing matches this filter" : `Nothing on the schedule for ${monthName(month, true)}`}>
               {items.length ? "Try “All”." : "Paste Nora's list or add a job."}
             </EmptyState>
-          ) : (
-            <div className="flex flex-col gap-4">
-              {undated.length > 0 && (
-                <Group title={`Sometime in ${monthName(month)}`}>
-                  {undated.map((i) => <Row key={i.id} item={i} onEdit={setEditing} />)}
-                </Group>
-              )}
-              {days.map((d) => (
-                <Group key={d} title={dayLabel(d)} highlight={d === todayStr}>
-                  {dated.filter((i) => i.date === d).map((i) => <Row key={i.id} item={i} onEdit={setEditing} hideDate />)}
-                </Group>
-              ))}
-              {filter === "reels" && otherReels.length > 0 && (
-                <Group title="Other months">
-                  {otherReels.map((i) => <Row key={i.id} item={i} onEdit={setEditing} showMonth />)}
-                </Group>
-              )}
-            </div>
-          )}
-        </div>
+          </div>
+        ) : (
+          <>
+            {undated.length > 0 && (
+              <Group title={`Sometime in ${monthName(month)}`}>
+                {undated.map((i) => <Row key={i.id} item={i} onEdit={setEditing} />)}
+              </Group>
+            )}
+            {days.map((d) => (
+              <Group key={d} title={dayLabel(d)} today={d === todayStr}>
+                {dated.filter((i) => i.date === d).map((i) => <Row key={i.id} item={i} onEdit={setEditing} />)}
+              </Group>
+            ))}
+            {filter === "reels" && otherReels.length > 0 && (
+              <Group title="Other months">
+                {otherReels.map((i) => <Row key={i.id} item={i} onEdit={setEditing} showWhen />)}
+              </Group>
+            )}
+          </>
+        )}
       </div>
 
-      <ScheduleSheet open={!!editing} onClose={() => setEditing(null)} title={editing ? editing.businessName : "Edit"} subtitle="Change the day, free or reel — or remove it.">
+      {/* Desktop: the same month as a grid, under the list. Each name opens the same quick form as Edit. */}
+      <section className="sec hidden md:block" aria-label={`${monthName(month)} at a glance`}>
+        <header className="sec-head">
+          <h2 className="title">{monthName(month)} at a glance</h2>
+        </header>
+        <ScheduleGrid month={month} items={dated} todayStr={todayStr} onOpen={setEditing} />
+      </section>
+
+      <ScheduleSheet open={!!editing} onClose={() => setEditing(null)} title={editing ? editing.businessName : "Edit"} subtitle="Change the day, free or reel, or remove it.">
         {editing && <ScheduleItemForm month={editing.month} item={editing} onDone={() => setEditing(null)} />}
       </ScheduleSheet>
     </div>
   );
 }
 
-function Group({ title, highlight, children }: { title: string; highlight?: boolean; children: React.ReactNode }) {
+/** A day: a caps label on a hairline ("Today" in cinnabar on the right), then the visits on hairlines. */
+function Group({ title, today, children }: { title: string; today?: boolean; children: React.ReactNode }) {
   return (
     <section>
-      <h3 className={cx("mb-1.5 text-sm font-semibold", highlight && "text-accent")}>
-        {title}
-        {highlight && " · Today"}
+      <h3 className={cx("eyebrow group-label", today && "is-today")}>
+        {/* Drawn in caps; the words themselves stay in sentence case ("Sometime in November") for screen readers and
+            for anything that reads the page's text, which would otherwise get the caps. */}
+        <span aria-hidden>{title}</span>
+        <span className="sr-only normal-case">{title}</span>
+        {today && <b>Today</b>}
       </h3>
-      <ul className="divide-y divide-border overflow-hidden rounded-xl border border-border bg-surface">{children}</ul>
+      <ul className="list">{children}</ul>
     </section>
   );
 }
 
-function Row({ item, onEdit, hideDate, showMonth }: { item: ScheduleEntry; onEdit: (i: ScheduleEntry) => void; hideDate?: boolean; showMonth?: boolean }) {
-  const when = item.date ? dayLabel(item.date) : showMonth ? `Sometime in ${monthName(item.month, true)}` : null;
+/** One line per visit: the name (and Free, and the deal's Paid / Not paid), the reel checkbox, Edit. Never an amount. */
+function Row({ item, onEdit, showWhen }: { item: ScheduleEntry; onEdit: (i: ScheduleEntry) => void; showWhen?: boolean }) {
+  const when = item.date ? dayLabel(item.date) : `Sometime in ${monthName(item.month, true)}`;
   return (
-    <li className="flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2">
-      <span className="min-w-0 flex-1">
-        <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
-          {item.clientId ? (
-            <Link href={`/clients/${item.clientId}`} className="inline-flex min-h-11 items-center text-sm font-medium text-accent hover:underline md:min-h-0">
-              {item.businessName}
-            </Link>
-          ) : (
-            <span className="text-sm font-medium">{item.businessName}</span>
-          )}
-          {item.isFree && <Badge tone="ok">Free</Badge>}
-          {item.dealId && <DealBadge item={item} />}
-        </span>
-        {((!hideDate && when) || showMonth) && <span className="block text-xs text-muted">{when}</span>}
+    <li className="row sched-row">
+      <span className="row-title">
+        {item.clientId ? (
+          <Link href={`/clients/${item.clientId}`} className="sched-name tap-target">
+            {item.businessName}
+          </Link>
+        ) : (
+          <span>{item.businessName}</span>
+        )}
+        {item.isFree && <Tag>Free</Tag>}
+        {item.dealId && <DealStatus item={item} />}
+        {showWhen && <span className="meta font-normal">{when}</span>}
       </span>
       {item.needsReel && <ReelCheck item={item} />}
-      <button
-        type="button"
-        onClick={() => onEdit(item)}
-        className="inline-flex min-h-11 items-center rounded-lg px-2 text-sm text-muted hover:bg-surface-2 hover:text-text md:min-h-9"
-        aria-label={`Edit ${item.businessName}`}
-      >
+      <button type="button" onClick={() => onEdit(item)} className="btn btn-sm btn-ghost" aria-label={`Edit ${item.businessName}`}>
         Edit
       </button>
     </li>
   );
 }
 
-/** Payment status of the job's deal — Paid / Not paid, never an amount. Opens the deal. */
-function DealBadge({ item }: { item: ScheduleEntry }) {
+/** Payment status of the job's deal: Paid / Not paid, never an amount. Opens the deal. */
+function DealStatus({ item }: { item: ScheduleEntry }) {
   const label = item.payment === "paid" ? "Paid" : item.payment === "not_paid" ? "Not paid" : "Deal";
   return (
-    <Link href={`/deals/${item.dealId}`} className="inline-flex min-h-11 items-center md:min-h-0" aria-label={`${label} — open the ${item.businessName} deal`}>
-      <Badge tone={item.payment === "paid" ? "ok" : item.payment === "not_paid" ? "warn" : "neutral"}>{label}</Badge>
+    <Link href={`/deals/${item.dealId}`} className="sched-deal tap-target font-normal" aria-label={`${label}. Open the ${item.businessName} deal`}>
+      <Status tone={item.payment === "paid" ? "ok" : item.payment === "not_paid" ? "warn" : "neutral"} small>
+        {label}
+      </Status>
     </Link>
   );
 }
@@ -214,15 +216,32 @@ function ReelCheck({ item }: { item: ScheduleEntry }) {
   };
 
   return (
-    <label className={cx("inline-flex min-h-11 cursor-pointer items-center gap-2 rounded-lg px-2 text-sm md:min-h-9", posted ? "text-ok" : "text-warn", pending && "opacity-60")} title={error ?? undefined}>
-      <input type="checkbox" checked={!!posted} disabled={pending} onChange={(e) => toggle(e.currentTarget.checked)} aria-label={posted ? `Reel posted for ${item.businessName} — untick if not` : `Reel to post for ${item.businessName} — tick when posted`} />
-      {posted ? <span>✓ Reel posted <span className="text-xs text-muted">{shortDate(posted)}</span></span> : <span><span aria-hidden>📸</span> Reel to post</span>}
-      {error && <span role="alert" className="text-xs text-danger">{error}</span>}
+    <label className={cx("reel-check", posted && "is-done", pending && "is-busy")} title={error ?? undefined}>
+      <input
+        type="checkbox"
+        className="check"
+        checked={!!posted}
+        disabled={pending}
+        onChange={(e) => toggle(e.currentTarget.checked)}
+        aria-label={posted ? `Reel posted for ${item.businessName}. Untick if not` : `Reel to post for ${item.businessName}. Tick when posted`}
+      />
+      {posted ? (
+        <span>
+          <span className="reel-words">Reel posted </span>
+          <span className="num">{shortDate(posted)}</span>
+        </span>
+      ) : (
+        <span>
+          <span className="emoji" aria-hidden>📸</span>
+          <span className="reel-words"> Reel to post</span>
+        </span>
+      )}
+      {error && <span role="alert">{error}</span>}
     </label>
   );
 }
 
-/** Desktop month grid: each day lists its businesses; 📸 marks a reel still to post. */
+/** Desktop month grid: each day lists its businesses; 📸 marks a reel still to post. An open grid on hairlines. */
 function ScheduleGrid({ month, items, todayStr, onOpen }: { month: string; items: ScheduleEntry[]; todayStr: string; onOpen: (i: ScheduleEntry) => void }) {
   const [y, m] = month.split("-").map(Number);
   const total = new Date(Date.UTC(y, m, 0)).getUTCDate();
@@ -236,39 +255,36 @@ function ScheduleGrid({ month, items, todayStr, onOpen }: { month: string; items
   for (const it of items) byDay.set(it.date!, [...(byDay.get(it.date!) ?? []), it]);
 
   return (
-    <div className="overflow-hidden rounded-xl border border-border bg-surface">
-      <div className="grid grid-cols-7 border-b border-border bg-surface-2 text-center text-xs font-semibold text-muted">
+    <div className="pt-2">
+      <div className="mgrid-head eyebrow">
         {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((d) => (
-          <div key={d} className="py-2">{d}</div>
+          <div key={d}>{d}</div>
         ))}
       </div>
-      <div className="grid grid-cols-7">
+      <div className="mgrid-body">
         {cells.map((date, i) => {
           const list = date ? (byDay.get(date) ?? []) : [];
           return (
-            <div key={date ?? `empty-${i}`} className={cx("min-h-24 min-w-0 border-b border-r border-border p-1.5 [&:nth-child(7n)]:border-r-0", !date && "bg-surface-2/40")}>
+            <div key={date ?? `empty-${i}`} className={cx("mgrid-cell", date === todayStr && "is-today")}>
               {date && (
                 <>
-                  <span className={cx("mb-1 flex size-6 items-center justify-center rounded-full text-xs", date === todayStr ? "bg-accent font-semibold text-accent-fg" : "text-muted")}>
-                    {Number(date.slice(8))}
-                  </span>
-                  <div className="flex flex-col gap-1">
+                  <div className="mgrid-day">
+                    <span>{Number(date.slice(8))}</span>
+                  </div>
+                  <div className="mgrid-items">
                     {list.slice(0, 4).map((it) => (
                       <button
                         key={it.id}
                         type="button"
                         onClick={() => onOpen(it)}
                         title={`${it.businessName}${it.isFree ? " · Free" : ""}${it.payment === "paid" ? " · Paid" : it.payment === "not_paid" ? " · Not paid" : ""}${owesReel(it) ? " · Reel to post" : it.reelPostedAt ? " · Reel posted" : ""}`}
-                        className={cx(
-                          "flex min-w-0 items-center gap-1 rounded px-1.5 py-0.5 text-left text-[11px] font-medium",
-                          owesReel(it) ? "bg-warn-soft text-warn" : "bg-surface-2 text-text hover:bg-accent-soft",
-                        )}
+                        className={cx("mgrid-item", owesReel(it) && "is-owed")}
                       >
-                        {owesReel(it) && <span aria-hidden>📸</span>}
-                        <span className="truncate">{it.businessName}</span>
+                        {owesReel(it) && <span className="emoji" aria-hidden>📸 </span>}
+                        {it.businessName}
                       </button>
                     ))}
-                    {list.length > 4 && <span className="px-1 text-[11px] text-muted">+{list.length - 4} more</span>}
+                    {list.length > 4 && <span className="mgrid-more">+{list.length - 4} more</span>}
                   </div>
                 </>
               )}

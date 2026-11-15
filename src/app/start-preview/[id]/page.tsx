@@ -6,6 +6,7 @@ import { requireUser } from "@/lib/auth";
 import { getDb, schema } from "@/lib/db";
 import { IntakeForm } from "@/components/intake-form";
 import { IntakeShell } from "@/components/intake-shell";
+import { Status } from "@/components/ui";
 import { parseIntakeLang, type IntakeLangCode } from "@/lib/intake-copy";
 import { intakeAccessEmail, intakeFormSetup } from "@/lib/ops-intake";
 
@@ -33,11 +34,13 @@ export default async function StartPreviewPage({ params, searchParams }: Props) 
       lang={lang}
       rememberLang={false}
       banner={
-        <div lang="en" data-intake-preview="" className="mb-5 flex flex-wrap items-center justify-between gap-x-4 gap-y-1 rounded-xl bg-info-soft px-4 py-3 text-[15px] text-info">
-          <span className="min-w-0 flex-1">
-            <strong className="font-semibold">Preview.</strong> This is what {client.name}&apos;s owner sees. Nothing you type here is saved or sent.
-          </span>
-          <Link href={`/clients/${client.id}`} className="font-medium underline underline-offset-2">Back to {client.name}</Link>
+        <div lang="en" data-intake-preview="" className="notice mb-8">
+          <Status tone="info" className="min-w-0 flex-1">
+            <span>
+              <strong className="font-semibold">Preview.</strong> This is what {client.name}&apos;s owner sees. Nothing you type here is saved or sent.
+            </span>
+          </Status>
+          <Link href={`/clients/${client.id}`} className="link">Back to {client.name}</Link>
         </div>
       }
     >

@@ -5,7 +5,7 @@ import { CREATOR_WORKSPACE_ID } from "@/lib/ops-collab";
 import { dealGroup, dealsOwed, listDeals, type DealGroup, type DealWithDeliverables } from "@/lib/ops-deals";
 import { SubmitButton } from "@/components/client-form";
 import { DealStatusBadge, DeliverablesProgress, PaymentChip, compText, formatMoney, formatVisit } from "@/components/deal-bits";
-import { Card, EmptyState, PageHeader, cx } from "@/components/ui";
+import { Card, EmptyState, PageHeader, buttonClass, cx } from "@/components/ui";
 import { createDealAction } from "./actions";
 
 export const dynamic = "force-dynamic";
@@ -33,89 +33,87 @@ export default async function DealsPage({ searchParams }: { searchParams: Promis
 
   return (
     <>
-      <p className="mb-2 text-sm">
-        <Link href={`/clients/${CREATOR_WORKSPACE_ID}`} className="text-muted hover:underline">← Nora’s workspace</Link>
-      </p>
-      <PageHeader title="Collab deals" subtitle="Agreed collabs: visits, deliverables and getting paid." />
+      <PageHeader
+        crumb={<Link href={`/clients/${CREATOR_WORKSPACE_ID}`}>Nora’s workspace</Link>}
+        title="Collab deals"
+        subtitle="Agreed collabs: visits, deliverables and getting paid."
+      />
 
-      {error && <p role="alert" className="mb-4 rounded-lg bg-danger-soft px-3 py-2 text-sm text-danger">{error}</p>}
+      {error && <p role="alert" className="notice mb-6"><span className="status is-danger">{error}</span></p>}
 
-      <div className="mb-6 flex flex-wrap items-baseline gap-x-4 gap-y-1 rounded-xl border border-border bg-surface px-4 py-3">
-        <span className="text-sm text-muted">Owed</span>
-        <span className="text-2xl font-semibold tabular-nums">{formatMoney(owed.owedCents) || "$0"}</span>
-        <span className="text-sm text-muted">
+      <p className="g-owed">
+        <span className="text-muted">Owed</span>
+        <span className="value">{formatMoney(owed.owedCents) || "$0"}</span>
+        <span className="meta">
           {owed.count === 0 ? "all paid up" : `${owed.count} deal${owed.count === 1 ? "" : "s"}`}
           {owed.unpricedCount > 0 && ` · ${owed.unpricedCount} with no amount set`}
         </span>
         {owed.overdueCount > 0 && (
-          <span className="text-sm font-semibold text-danger">{owed.overdueCount} overdue · {formatMoney(owed.overdueCents)}</span>
+          <span className="status is-danger">{owed.overdueCount} overdue · {formatMoney(owed.overdueCents)}</span>
         )}
-      </div>
+      </p>
 
-      <div className="grid gap-6">
-        {SECTIONS.map((s) => {
-          const rows = groups[s.key];
-          const body = rows.length === 0 ? (
-            <div className="p-4"><EmptyState title="None">{s.empty}</EmptyState></div>
-          ) : (
-            <ul className="divide-y divide-border">
-              {rows.map((d) => <DealRow key={d.id} deal={d} today={t} showVisit={s.key === "upcoming"} />)}
-            </ul>
-          );
-          if (s.key === "done") {
-            return (
-              <details key={s.key} className="group rounded-xl border border-border bg-surface" open={rows.length > 0 && rows.length <= 3}>
-                <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between px-4 py-3 text-sm font-semibold">
-                  <span>{s.title}{rows.length > 0 && <span className="font-normal text-muted"> · {rows.length}</span>}</span>
-                  <span aria-hidden className="text-muted transition group-open:rotate-180">▾</span>
-                </summary>
-                <div className="border-t border-border">{body}</div>
-              </details>
-            );
-          }
+      {SECTIONS.map((s) => {
+        const rows = groups[s.key];
+        const body = rows.length === 0 ? (
+          <EmptyState title="None">{s.empty}</EmptyState>
+        ) : (
+          <ul className="list">
+            {rows.map((d) => <DealRow key={d.id} deal={d} today={t} showVisit={s.key === "upcoming"} />)}
+          </ul>
+        );
+        if (s.key === "done") {
           return (
-            <Card key={s.key} title={<>{s.title}{rows.length > 0 && <span className="font-normal text-muted"> · {rows.length}</span>}</>} padded={false}>
+            <details key={s.key} className="sec g-fold" open={rows.length > 0 && rows.length <= 3}>
+              <summary className="sec-head">
+                <span className="title">{s.title}{rows.length > 0 && <span className="meta num">{rows.length}</span>}</span>
+                <svg viewBox="0 0 16 16" aria-hidden fill="none" stroke="currentColor" strokeWidth={1.8}><path d="M6 3.5 10.5 8 6 12.5" strokeLinecap="round" strokeLinejoin="round" /></svg>
+              </summary>
               {body}
-            </Card>
+            </details>
           );
-        })}
+        }
+        return (
+          <Card key={s.key} title={<>{s.title}{rows.length > 0 && <span className="meta num">{rows.length}</span>}</>} padded={false}>
+            {body}
+          </Card>
+        );
+      })}
 
-        <Card title="Add a deal">
-          <form action={createDealAction} className="flex flex-col gap-2 sm:flex-row sm:items-end">
-            <div className="min-w-0 flex-1">
-              <label className="label" htmlFor="new-deal-name">Business name</label>
-              <input id="new-deal-name" name="businessName" required maxLength={160} className="input" placeholder="e.g. Lucia’s Trattoria" autoComplete="off" />
-            </div>
-            <SubmitButton pendingLabel="Creating…">Create deal</SubmitButton>
-          </form>
-          <p className="mt-2 text-xs text-muted">For collabs that came in by DM or email. Requests from the collab form get a “Create deal” button once accepted.</p>
-        </Card>
-      </div>
+      <Card title="Add a deal" className="max-w-3xl">
+        <form action={createDealAction} className="flex flex-col gap-3 sm:flex-row sm:items-end">
+          <div className="min-w-0 flex-1">
+            <label className="label" htmlFor="new-deal-name">Business name</label>
+            <input id="new-deal-name" name="businessName" required maxLength={160} className="input" placeholder="e.g. Lucia’s Trattoria" autoComplete="off" />
+          </div>
+          <SubmitButton pendingLabel="Creating…">Create deal</SubmitButton>
+        </form>
+        <p className="hint">For collabs that came in by DM or email. Requests from the collab form get a “Create deal” button once accepted.</p>
+      </Card>
     </>
   );
 }
 
 function DealRow({ deal: d, today, showVisit }: { deal: DealWithDeliverables; today: string; showVisit: boolean }) {
   const posted = d.deliverables.filter((x) => x.postedAt).length;
+  const when = d.visitAt ? formatVisit(d.visitAt) : d.status === "planning" ? "No visit date yet" : "";
   return (
-    <li className="flex items-stretch">
-      <Link href={`/deals/${d.id}`} className="flex min-h-14 min-w-0 flex-1 flex-col justify-center gap-1 px-4 py-3 hover:bg-surface-2">
-        <span className="flex items-center gap-2">
-          <span className={cx("truncate text-[15px] font-medium", d.status === "cancelled" && "text-muted line-through")}>{d.businessName}</span>
-          {d.status !== "planning" && d.status !== "scheduled" && <DealStatusBadge status={d.status} />}
-        </span>
-        <span className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted">
-          <span className={cx(!d.visitAt && d.status === "planning" && "italic")}>{d.visitAt ? formatVisit(d.visitAt) : d.status === "planning" ? "No visit date yet" : ""}</span>
-          <span>{compText(d)}</span>
-          <DeliverablesProgress posted={posted} total={d.deliverables.length} />
-          <PaymentChip deal={d} today={today} />
-        </span>
-      </Link>
+    <li className="g-row">
+      <div className="head">
+        <Link href={`/deals/${d.id}`} className={cx(d.status === "cancelled" && "text-muted line-through")}>{d.businessName}</Link>
+        {d.status !== "planning" && d.status !== "scheduled" && <DealStatusBadge status={d.status} />}
+      </div>
       {showVisit && d.visitAt && (
-        <Link href={`/deals/${d.id}/visit`} className="flex shrink-0 items-center border-l border-border px-4 text-sm font-medium text-accent hover:bg-surface-2">
-          Visit
-        </Link>
+        <span className="end">
+          <Link href={`/deals/${d.id}/visit`} className={buttonClass("secondary", "sm")}>Visit</Link>
+        </span>
       )}
+      <p className="more g-dots">
+        {when && <span>{when}</span>}
+        <span>{compText(d)}</span>
+        <DeliverablesProgress posted={posted} total={d.deliverables.length} />
+        <PaymentChip deal={d} today={today} />
+      </p>
     </li>
   );
 }

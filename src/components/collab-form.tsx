@@ -6,7 +6,7 @@ import {
   BUDGETS, BUSINESS_TYPES, COLLAB_COPY as C, COMPENSATION, DELIVERABLES, FIELDS, FIELD_STEP, HEARD_FROM, INTERESTS, PAID_COMPENSATION, ROLES, USAGE,
   type CollabField, type Option,
 } from "@/lib/collab-copy";
-import { buttonClass, cx } from "./ui";
+import { Status, buttonClass, cx } from "./ui";
 
 /**
  * The public "Collab with Nora" form. Three steps on one route; with JavaScript off it renders as one long
@@ -62,7 +62,7 @@ export function CollabForm({ token }: { token: string }) {
       }
     }
     if (n === 1 && !root.querySelector('input[name="interests"]:checked')) {
-      setLocal((l) => ({ ...l, interests: "Pick at least one — whatever's closest." }));
+      setLocal((l) => ({ ...l, interests: "Pick at least one, whatever's closest." }));
       root.querySelector<HTMLElement>('input[name="interests"]')?.focus();
       return false;
     }
@@ -79,8 +79,8 @@ export function CollabForm({ token }: { token: string }) {
       <Progress step={step} />
 
       {state.error && (
-        <p role="alert" className="mb-5 rounded-xl bg-danger-soft px-4 py-3 text-[15px] text-danger">
-          {state.error}
+        <p role="alert" className="notice mb-8">
+          <Status tone="danger">{state.error}</Status>
         </p>
       )}
 
@@ -116,7 +116,7 @@ export function CollabForm({ token }: { token: string }) {
 
         {/* ── Step 1 — About you ── */}
         <Step index={0} current={step} refs={stepRefs}>
-          <div className="grid gap-4 sm:grid-cols-2">
+          <div className="grid gap-x-6 gap-y-5 pt-2 sm:grid-cols-2">
             <Text {...p} name="businessName" required max={160} autoComplete="organization" />
             <Text {...p} name="contactName" required max={120} autoComplete="name" />
             <Text {...p} name="email" type="email" required max={200} autoComplete="email" inputMode="email" />
@@ -135,7 +135,7 @@ export function CollabForm({ token }: { token: string }) {
 
         {/* ── Step 2 — The collab ── */}
         <Step index={1} current={step} refs={stepRefs}>
-          <div className="space-y-6">
+          <div className="space-y-7 pt-2">
             <Group label={FIELDS.interests.label} hint={FIELDS.interests.hint} required error={errors.interests}>
               <Chips name="interests" options={INTERESTS} checked={arr("interests")} onChange={() => local.interests && setLocal(({ interests: _drop, ...rest }) => rest)} />
             </Group>
@@ -153,9 +153,9 @@ export function CollabForm({ token }: { token: string }) {
                 <div className="w-full sm:w-56">
                   <input type="date" name="idealDate" aria-label={FIELDS.idealDate.label} defaultValue={val("idealDate")} className="input" />
                 </div>
-                <label className="inline-flex min-h-11 items-center gap-2 text-[15px]">
-                  <input type="checkbox" name="flexible" defaultChecked={val("flexible") === "on"} />
-                  {FIELDS.flexible.label}
+                <label className="ps-opt">
+                  <input type="checkbox" name="flexible" defaultChecked={val("flexible") === "on"} className="check" />
+                  <span>{FIELDS.flexible.label}</span>
                 </label>
               </div>
             </Group>
@@ -169,10 +169,10 @@ export function CollabForm({ token }: { token: string }) {
 
         {/* ── Step 3 — Details ── */}
         <Step index={2} current={step} refs={stepRefs}>
-          <div className="space-y-4">
+          <div className="space-y-5 pt-2">
             <Area {...p} name="special" max={2000} rows={4} />
             <Area {...p} name="dietary" max={1000} rows={2} />
-            <div className="grid gap-4 sm:grid-cols-2">
+            <div className="grid gap-x-6 gap-y-5 sm:grid-cols-2">
               <Text {...p} name="bestTimes" max={300} />
               <Select {...p} name="heardFrom" options={HEARD_FROM} />
             </div>
@@ -180,31 +180,31 @@ export function CollabForm({ token }: { token: string }) {
             <Area {...p} name="links" max={1500} rows={2} />
             <Area {...p} name="anythingElse" max={2000} rows={3} />
 
-            <div className="space-y-2 rounded-xl bg-surface-2 p-3 sm:p-4">
+            <div className="ps-blocks is-ruled !mt-8 [&>*]:!py-1">
               <Ack name="ackDisclosure" text={C.acks.disclosure} checked={val("ackDisclosure") === "on"} error={errors.ackDisclosure} />
               <Ack name="ackHonest" text={C.acks.honest} checked={val("ackHonest") === "on"} error={errors.ackHonest} />
             </div>
           </div>
         </Step>
 
-        <div className="sticky-actions mt-8">
-          <div className="flex items-center gap-3 rounded-2xl border border-border bg-surface/95 p-2 shadow-sm backdrop-blur supports-[backdrop-filter]:bg-surface/80">
+        <div className="sticky-actions ps-bar mt-10">
+          <div className="flex items-center gap-3">
             <button
               type="button"
               onClick={() => go(step - 1)}
               data-off={step === 0}
-              className={cx(buttonClass("ghost"), "collab-js min-h-11 data-[off=true]:invisible")}
+              className={cx(buttonClass("ghost"), "collab-js data-[off=true]:invisible")}
             >
               {C.back}
             </button>
-            <span className="collab-js ml-auto text-xs tabular-nums text-muted">
+            <span className="collab-js meta num ml-auto">
               {step + 1} / {STEPS}
             </span>
             <button
               type="button"
               data-off={step === STEPS - 1}
               onClick={() => checkStep(step) && go(step + 1)}
-              className={cx(buttonClass("primary"), "collab-js min-h-11 px-6 data-[off=true]:hidden")}
+              className={cx(buttonClass("primary"), "collab-js px-6 data-[off=true]:hidden")}
             >
               {C.next}
             </button>
@@ -212,7 +212,7 @@ export function CollabForm({ token }: { token: string }) {
               type="submit"
               disabled={pending}
               data-off={step !== STEPS - 1}
-              className={cx(buttonClass("primary"), "collab-submit min-h-11 px-6 data-[off=true]:hidden")}
+              className={cx(buttonClass("primary"), "collab-submit px-6 data-[off=true]:hidden")}
             >
               {pending ? C.sending : C.submit}
             </button>
@@ -225,18 +225,17 @@ export function CollabForm({ token }: { token: string }) {
 
 /* ───────────────────────── Pieces ───────────────────────── */
 
+/** "Step 1 of 3" and one segment per step. The step's title is read out when it changes. */
 function Progress({ step }: { step: number }) {
   return (
-    <div className="collab-js mb-6" aria-live="polite">
-      <div className="mb-2 flex items-baseline justify-between gap-3 text-sm">
-        <span className="font-semibold">{C.steps[step].title}</span>
-        <span className="text-muted">Step {step + 1} of {STEPS}</span>
-      </div>
-      <div className="grid grid-cols-3 gap-1.5" aria-hidden>
+    <div className="collab-js ps-steps" aria-live="polite">
+      <span className="sr-only">{C.steps[step].title}</span>
+      <span className="meta">Step {step + 1} of {STEPS}</span>
+      <span className="meter" aria-hidden>
         {C.steps.map((s, i) => (
-          <span key={s.title} className={cx("h-1.5 rounded-full transition-colors", i <= step ? "bg-accent" : "bg-surface-2")} />
+          <i key={s.title} className={i <= step ? "on" : undefined} />
         ))}
-      </div>
+      </span>
     </div>
   );
 }
@@ -250,13 +249,13 @@ function Step({ index, current, refs, children }: { index: number; current: numb
       aria-labelledby={`collab-step-${index}`}
       className="collab-step data-[off=true]:hidden"
     >
-      <header className="mb-5">
-        <h2 id={`collab-step-${index}`} tabIndex={-1} className="text-lg font-semibold tracking-tight outline-none">
+      <header className="sec-head">
+        <h2 id={`collab-step-${index}`} tabIndex={-1} className="title outline-none">
           <span className="collab-nojs mr-1 hidden text-muted">{index + 1}.</span>
           {s.title}
         </h2>
-        <p className="mt-0.5 text-[15px] text-muted">{s.blurb}</p>
       </header>
+      <p className="sec-note">{s.blurb}</p>
       {children}
     </section>
   );
@@ -273,11 +272,12 @@ function placeholderOf(name: FieldName) {
   return f.placeholder || undefined;
 }
 
+/** Field label. A required field gets an ink asterisk (the browser and the screen reader get `required`). */
 function Label({ htmlFor, children, required, optional }: { htmlFor?: string; children: ReactNode; required?: boolean; optional?: boolean }) {
   return (
-    <label htmlFor={htmlFor} className="mb-1.5 block text-sm font-medium">
+    <label htmlFor={htmlFor} className="label">
       {children}
-      {required && <span className="ml-0.5 text-accent" aria-hidden>*</span>}
+      {required && <span className="ml-0.5" aria-hidden>*</span>}
       {optional && <span className="ml-1 font-normal text-muted">(optional)</span>}
     </label>
   );
@@ -285,7 +285,7 @@ function Label({ htmlFor, children, required, optional }: { htmlFor?: string; ch
 
 function ErrorText({ id, error }: { id: string; error?: string }) {
   if (!error) return null;
-  return <p id={id} className="mt-1.5 text-sm text-danger">{error}</p>;
+  return <p id={id} className="status is-danger is-small ps-err flex">{error}</p>;
 }
 
 function Text({
@@ -353,7 +353,7 @@ function Select({ name, options, hint, val, errors }: Common & { name: FieldName
         <option value="">Choose…</option>
         {options.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
       </select>
-      {hint && <p className="mt-1.5 text-sm text-muted">{hint}</p>}
+      {hint && <p className="hint">{hint}</p>}
       <ErrorText id={`${id}-err`} error={err} />
     </div>
   );
@@ -362,30 +362,27 @@ function Select({ name, options, hint, val, errors }: Common & { name: FieldName
 function Group({ label, hint, required, error, children }: { label: string; hint?: string; required?: boolean; error?: string; children: ReactNode }) {
   return (
     <fieldset aria-invalid={error ? true : undefined}>
-      <legend className="mb-1.5 text-sm font-medium">
+      <legend className="label !mb-0">
         {label}
-        {required && <span className="ml-0.5 text-accent" aria-hidden>*</span>}
+        {required && <span className="ml-0.5" aria-hidden>*</span>}
       </legend>
-      {hint && <p className="-mt-0.5 mb-2 text-sm text-muted">{hint}</p>}
+      {hint && <p className="meta mt-0.5">{hint}</p>}
       {children}
-      {error && <p className="mt-1.5 text-sm text-danger" role="alert">{error}</p>}
+      {error && <p className="status is-danger is-small ps-err flex" role="alert">{error}</p>}
     </fieldset>
   );
 }
 
-const pill =
-  "inline-flex min-h-11 cursor-pointer select-none items-center gap-2 rounded-full border border-border bg-surface px-3.5 py-2 text-[15px] transition-colors " +
-  "hover:bg-surface-2 has-[:checked]:border-accent has-[:checked]:bg-accent-soft has-[:focus-visible]:outline has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-accent";
-
+/** Pick any: the ink square and its words; a hint sits under the words. */
 function Chips({ name, options, checked, onChange }: { name: string; options: Option[]; checked: string[]; onChange?: () => void }) {
   return (
-    <div className="flex flex-wrap gap-2">
+    <div className="ps-opts is-2 mt-1">
       {options.map((o) => (
-        <label key={o.value} className={pill} title={o.hint}>
-          <input type="checkbox" name={name} value={o.value} defaultChecked={checked.includes(o.value)} onChange={onChange} className="shrink-0" />
-          <span>
+        <label key={o.value} className="ps-opt" title={o.hint}>
+          <input type="checkbox" name={name} value={o.value} defaultChecked={checked.includes(o.value)} onChange={onChange} className="check" />
+          <span className="min-w-0">
             {o.label}
-            {o.hint && <span className="block text-xs text-muted">{o.hint}</span>}
+            {o.hint && <span className="meta">{o.hint}</span>}
           </span>
         </label>
       ))}
@@ -393,11 +390,12 @@ function Chips({ name, options, checked, onChange }: { name: string; options: Op
   );
 }
 
+/** Pick one: the ink circle and its words. */
 function Radios({ name, options, checked, required, onChange }: { name: string; options: Option[]; checked: string; required?: boolean; onChange?: (v: string) => void }) {
   return (
-    <div className="grid gap-2 sm:grid-cols-2">
+    <div className="ps-opts is-2 mt-1">
       {options.map((o) => (
-        <label key={o.value} className={cx(pill, "rounded-xl")}>
+        <label key={o.value} className="ps-opt">
           <input
             type="radio"
             name={name}
@@ -405,11 +403,11 @@ function Radios({ name, options, checked, required, onChange }: { name: string; 
             required={required}
             defaultChecked={checked === o.value}
             onChange={(e) => e.currentTarget.checked && onChange?.(o.value)}
-            className="shrink-0"
+            className="check"
           />
-          <span>
+          <span className="min-w-0">
             {o.label}
-            {o.hint && <span className="ml-1.5 text-sm text-muted">· {o.hint}</span>}
+            {o.hint && <span className="meta">{o.hint}</span>}
           </span>
         </label>
       ))}
@@ -420,22 +418,21 @@ function Radios({ name, options, checked, required, onChange }: { name: string; 
 function Ack({ name, text, checked, error }: { name: string; text: string; checked: boolean; error?: string }) {
   return (
     <div>
-      <label className="flex min-h-11 cursor-pointer items-start gap-3 py-1 text-[15px] leading-snug">
-        <input type="checkbox" name={name} required defaultChecked={checked} className="mt-0.5 shrink-0" />
+      <label className="ps-opt">
+        <input type="checkbox" name={name} required defaultChecked={checked} className="check" />
         <span>{text}</span>
       </label>
-      {error && <p className="ml-8 text-sm text-danger">{error}</p>}
+      {error && <p className="status is-danger is-small ps-err -mt-1 mb-2 flex pl-[30px]">{error}</p>}
     </div>
   );
 }
 
 function Thanks({ name, email }: { name: string; email: string }) {
   return (
-    <div role="status" className="px-2 py-8 text-center">
-      <span aria-hidden className="mx-auto mb-4 flex size-12 items-center justify-center rounded-full bg-ok-soft text-xl text-ok">✓</span>
-      <h2 className="text-xl font-semibold tracking-tight">{C.thanksTitle(name)}</h2>
-      <p className="mx-auto mt-2 max-w-sm text-[15px] leading-relaxed text-muted">{C.thanksBody(email || "your email")}</p>
-      <p className="mx-auto mt-4 max-w-sm text-sm text-muted">{C.thanksFoot}</p>
+    <div role="status" className="ps-hero">
+      <h2 className="display">{C.thanksTitle(name)}</h2>
+      <p className="sub">{C.thanksBody(email || "your email")}</p>
+      <p className="meta mt-6">{C.thanksFoot}</p>
     </div>
   );
 }

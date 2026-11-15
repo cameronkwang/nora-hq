@@ -423,7 +423,7 @@ function buildMediaKit(p: Record<CreatorPlatform, PlatformSummary>, audience: Cr
   if (parts.length) {
     text = `@noraeatsgood is a food creator with ${parts.join(", ")}.`;
     if (views > 0) text += ` Her content reached ${compact(views)} views in the last month.`;
-    if (cities.length) text += ` Her audience is concentrated in ${cities.length > 1 ? `${cities.slice(0, -1).join(", ")} and ${cities[cities.length - 1]}` : cities[0]} — exactly the local diners a restaurant wants to reach.`;
+    if (cities.length) text += ` Her audience is concentrated in ${cities.length > 1 ? `${cities.slice(0, -1).join(", ")} and ${cities[cities.length - 1]}` : cities[0]}, exactly the local diners a restaurant wants to reach.`;
   }
   return { text, numbers };
 }

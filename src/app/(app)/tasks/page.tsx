@@ -14,7 +14,7 @@ import { TaskSelection, TaskSelectAll, TaskSelectToggle } from "@/components/tas
 import { TaskTable, type TaskLite } from "@/components/task-table";
 import { BoardView } from "@/components/board-view";
 import { ViewToggle } from "@/components/view-toggle";
-import { Card, EmptyState, PageHeader, clientLabel, cx } from "@/components/ui";
+import { Card, Count, EmptyState, PageHeader, Status, clientLabel } from "@/components/ui";
 import { groupPlanTasks, isPlanTask, type PlanGroup } from "@/lib/plan-groups";
 import { PlanTaskGroups } from "@/components/plan-task-groups";
 import {
@@ -82,7 +82,7 @@ export default async function TasksPage({ searchParams }: { searchParams: Promis
     body = (
       <EmptyState title={filtered ? `No ${noun}s match these filters.` : f.scope === "adhoc" ? "No ad hoc tasks. All clear." : f.scope === "plan" ? "No monthly-plan tasks." : "Nothing on the list."}>
         {filtered ? (
-          <Link href={clearHref} className="text-accent hover:underline">Clear filters</Link>
+          <Link href={clearHref} className="link">Clear filters</Link>
         ) : f.scope === "adhoc" ? (
           "One-off jobs land here: add one above, or send an ask to Cameron or Nora."
         ) : f.scope === "plan" ? (
@@ -128,7 +128,7 @@ export default async function TasksPage({ searchParams }: { searchParams: Promis
           </>
         }
         actions={
-          <div className="flex items-center gap-2">
+          <div className="task-head-actions flex flex-wrap items-center gap-1">
             <ViewToggle
               cookieName={cookieName}
               current={f.view}
@@ -150,14 +150,14 @@ export default async function TasksPage({ searchParams }: { searchParams: Promis
       />
 
       {flash && (
-        <p role={flash.tone === "danger" ? "alert" : "status"} className={cx("mb-4 rounded-lg px-3 py-2 text-sm", flash.tone === "danger" ? "bg-danger-soft text-danger" : "bg-ok-soft text-ok")}>
-          {flash.text}
+        <p role={flash.tone === "danger" ? "alert" : "status"} className="notice mt-4">
+          <Status tone={flash.tone}>{flash.text}</Status>
         </p>
       )}
 
       {/* Quick add makes ad hoc tasks (no plan item), so it's hidden on the Monthly plan scope where the new task wouldn't show. */}
       {f.scope !== "plan" && (
-        <Card className="mb-4">
+        <div className="task-add">
           <PhoneDisclosure summary="Ad hoc task">
             <TaskQuickAdd
               clients={clientOpts}
@@ -167,7 +167,7 @@ export default async function TasksPage({ searchParams }: { searchParams: Promis
               label="New ad hoc task"
             />
           </PhoneDisclosure>
-        </Card>
+        </div>
       )}
 
       <TaskFilters
@@ -187,7 +187,7 @@ export default async function TasksPage({ searchParams }: { searchParams: Promis
         filtered={filtered}
       />
 
-      {body}
+      <div className="task-body">{body}</div>
     </div>
   );
 }
@@ -261,49 +261,51 @@ function ListBody({
 
   return (
     <TaskSelection ids={[...tasks.map((t) => t.id), ...planGroups.flatMap((g) => g.tasks.map((t) => t.id))]}>
-      <div className="mb-2 flex min-h-11 items-center justify-between gap-2">
+      <div className="task-selectbar">
         <TaskSelectAll />
-        <span className="ml-auto">
+        <span className="ml-auto -mr-1.5">
           <TaskSelectToggle />
         </span>
       </div>
-      <div className="flex flex-col gap-4">
-        {groups.map((g) => (
-          <Card
-            key={g.key}
-            title={
-              <span className={cx(g.tone === "danger" && "text-danger", g.tone === "warn" && "text-warn")}>
-                {g.label} <span className="font-normal text-muted">· {g.tasks.length + g.plan.reduce((n, p) => n + p.tasks.length, 0)}</span>
-              </span>
-            }
-            actions={
-              g.client && names.has(g.client) ? (
-                <Link href={`/clients/${g.client}`} className="text-xs font-medium text-accent hover:underline">
-                  Business page
-                </Link>
-              ) : undefined
-            }
-            className="overflow-hidden"
-            padded={false}
-          >
-            {g.tasks.length > 0 && (
-              <div className="px-4">
+      <div className="flex flex-col gap-8 md:gap-10">
+        {groups.map((g) => {
+          const n = g.tasks.length + g.plan.reduce((k, p) => k + p.tasks.length, 0);
+          return (
+            <Card
+              key={g.key}
+              // Overdue and Today are waiting on you: their count is the cinnabar numeral. Other groups count quietly.
+              title={
+                <>
+                  {g.label} {g.tone ? <Count n={n} /> : <span className="meta num">{n}</span>}
+                </>
+              }
+              actions={
+                g.client && names.has(g.client) ? (
+                  <Link href={`/clients/${g.client}`} className="link-quiet">
+                    Business page →
+                  </Link>
+                ) : undefined
+              }
+              padded={false}
+            >
+              {g.tasks.length > 0 && (
                 <TaskList>
                   {g.tasks.map((t) => (
                     <TaskRow key={t.id} task={t} clientName={nameOf(t)} showClient={f.group !== "business"} selectable />
                   ))}
                 </TaskList>
-              </div>
-            )}
-            {g.plan.length > 0 && (
-              <div className={cx("px-4 py-1", g.tasks.length > 0 && "border-t border-border")}>
-                {/* Under a business's own tasks the plan needs its own label; a "Monthly plan · …" card already says it. */}
-                {f.group === "business" && <p className="pt-2 text-xs font-semibold uppercase tracking-wide text-muted">Monthly plan</p>}
-                <PlanTaskGroups groups={g.plan} month={month} selectable />
-              </div>
-            )}
-          </Card>
-        ))}
+              )}
+              {g.plan.length > 0 && (
+                <>
+                  {/* Under a business's own tasks the plan needs its own label; a "Monthly plan · …" section already says it. */}
+                  {f.group === "business" && <h3 className={g.tasks.length ? "eyebrow group-label" : "eyebrow group-label mt-2"}>Monthly plan</h3>}
+                  {f.group !== "business" && g.tasks.length > 0 && <div className="border-t border-border" />}
+                  <PlanTaskGroups groups={g.plan} month={month} selectable />
+                </>
+              )}
+            </Card>
+          );
+        })}
       </div>
     </TaskSelection>
   );

@@ -8,7 +8,7 @@ import { INTAKE_LANG_TAG } from "@/lib/intake-copy";
 import { getClientIntake, intakeAccessChecklist, intakeAnswerGroups, intakeAnswersText, type AccessCheck } from "@/lib/ops-intake";
 import { ClientIntakeCard } from "@/components/client-intake-card";
 import { CopyButton } from "@/components/copy-button";
-import { Badge, Card, EmptyState, PageHeader } from "@/components/ui";
+import { Card, EmptyState, PageHeader, Status, Tag } from "@/components/ui";
 
 export const dynamic = "force-dynamic";
 
@@ -25,20 +25,15 @@ export default async function ClientIntakePage({ params }: { params: Promise<{ i
   if (!client) notFound();
   const intake = await getClientIntake(id);
 
-  const back = (
-    <p className="mb-1 text-xs text-muted">
-      <Link href={`/clients/${id}`} className="hover:underline">{client.name}</Link>
-    </p>
-  );
+  const back = <Link href={`/clients/${id}`}>{client.name}</Link>;
 
   if (!intake) {
     return (
       <>
-        {back}
-        <PageHeader title="Onboarding form" subtitle="Nothing sent back yet." />
-        <div className="grid gap-6">
-          <ClientIntakeCard clientId={id} clientName={client.name} />
+        <PageHeader crumb={back} title="Onboarding form" subtitle="Nothing sent back yet." />
+        <div className="biz-measure">
           <EmptyState title="No answers yet">When {client.name} sends the form, their answers show up here and Claude gets an ask to turn them into a brand voice and first-month plan.</EmptyState>
+          <ClientIntakeCard clientId={id} clientName={client.name} />
         </div>
       </>
     );
@@ -50,51 +45,53 @@ export default async function ClientIntakePage({ params }: { params: Promise<{ i
 
   return (
     <>
-      {back}
       <PageHeader
+        crumb={back}
         title="Onboarding form"
         subtitle={
-          <span className="inline-flex flex-wrap items-center gap-2">
+          <span className="flex flex-wrap items-baseline gap-x-2.5">
             <span>Sent by the client {intake.submittedAt ? formatDate(intake.submittedAt, true) : ""}</span>
-            {intake.lang && <Badge tone="info">Answered in {INTAKE_LANG_TAG[intake.lang]}</Badge>}
+            {intake.lang && <Tag bare>Answered in {INTAKE_LANG_TAG[intake.lang]}</Tag>}
           </span>
         }
-        actions={<CopyButton text={all} label="Copy all" variant="primary" />}
+        actions={<CopyButton text={all} label="Copy all" size="sm" />}
       />
-      <p className="-mt-3 mb-5 text-xs text-muted">Typed by the client — shown as written. Labels are in English; answers are in their words.</p>
+      <p className="meta -mt-4 mb-7 max-md:-mt-2 max-md:mb-5">Typed by the client and shown as written. Labels are in English; answers are in their words.</p>
 
-      <div className="grid gap-6">
-        <Card title="Access checklist">
-          <ul className="divide-y divide-border">
-            {access.map((a) => (
-              <li key={a.platform} className="flex flex-wrap items-center justify-between gap-2 py-2 text-sm">
-                <span>{a.platform}</span>
-                <Badge tone={ACCESS_TONE[a.status]}>{a.label}</Badge>
-              </li>
-            ))}
-          </ul>
-        </Card>
-
-        {groups.map((g) => (
-          <Card key={g.title} title={g.title}>
-            <dl className="grid gap-x-6 gap-y-3 sm:grid-cols-[minmax(10rem,14rem)_1fr]">
-              {g.items.map((item, i) => (
-                <div key={`${item.label}-${i}`} className="contents">
-                  <dt className="text-xs font-semibold text-muted sm:pt-0.5">{item.label}</dt>
-                  <dd className={item.multiline ? "whitespace-pre-wrap text-sm leading-relaxed" : "break-words text-sm"}>
-                    {item.href ? (
-                      <a href={item.href} target="_blank" rel="noopener noreferrer nofollow" className="break-all text-accent hover:underline">{item.value}</a>
-                    ) : (
-                      item.value
-                    )}
-                  </dd>
-                </div>
+      <div className="biz-measure">
+        <div>
+          <Card title="Access checklist" padded={false}>
+            <ul className="list">
+              {access.map((a) => (
+                <li key={a.platform} className="row">
+                  <span className="row-title is-plain">{a.platform}</span>
+                  <Status tone={ACCESS_TONE[a.status]} className="whitespace-normal text-right">{a.label}</Status>
+                </li>
               ))}
-            </dl>
+            </ul>
           </Card>
-        ))}
 
-        <ClientIntakeCard clientId={id} clientName={client.name} />
+          {groups.map((g) => (
+            <Card key={g.title} title={g.title} padded={false}>
+              <dl className="kv is-wide">
+                {g.items.map((item, i) => (
+                  <div key={`${item.label}-${i}`}>
+                    <dt>{item.label}</dt>
+                    <dd className={item.multiline ? "whitespace-pre-wrap" : undefined}>
+                      {item.href ? (
+                        <a href={item.href} target="_blank" rel="noopener noreferrer nofollow" className="link break-all">{item.value}</a>
+                      ) : (
+                        item.value
+                      )}
+                    </dd>
+                  </div>
+                ))}
+              </dl>
+            </Card>
+          ))}
+
+          <ClientIntakeCard clientId={id} clientName={client.name} />
+        </div>
       </div>
     </>
   );

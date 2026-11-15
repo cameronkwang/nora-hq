@@ -2,7 +2,7 @@ import Link from "next/link";
 import { requireUser } from "@/lib/auth";
 import { ActionForm, SubmitButton } from "@/components/client-form";
 import { LeadFields } from "@/components/lead-fields";
-import { Card, PageHeader } from "@/components/ui";
+import { PageHeader } from "@/components/ui";
 import { createLeadAction } from "../actions";
 
 export const dynamic = "force-dynamic";
@@ -11,20 +11,16 @@ export default async function NewLeadPage() {
   await requireUser();
   return (
     <>
-      <p className="mb-2 text-sm">
-        <Link href="/leads" className="text-muted hover:underline">← Leads</Link>
-      </p>
       <PageHeader
+        crumb={<Link href="/leads">Leads</Link>}
         title="Add a lead"
-        subtitle="Just the name and city is enough — Claude can fill in the rest. If it’s already on the list, we’ll update it instead of adding a duplicate."
+        subtitle="Just the name and city is enough; Claude can fill in the rest. If it’s already on the list, we’ll update it instead of adding a duplicate."
       />
-      <ActionForm action={createLeadAction} className="max-w-2xl space-y-4" ariaLabel="Add lead">
-        <Card>
-          <LeadFields idPrefix="new" />
-        </Card>
-        <div className="flex flex-wrap items-center gap-2">
+      <ActionForm action={createLeadAction} className="max-w-2xl" ariaLabel="Add lead">
+        <LeadFields idPrefix="new" />
+        <div className="g-bar sticky-actions mt-8">
           <SubmitButton pendingLabel="Adding…">Add lead</SubmitButton>
-          <Link href="/leads" className="inline-flex min-h-11 items-center px-3 text-sm text-muted hover:underline">Cancel</Link>
+          <Link href="/leads" className="btn btn-ghost">Cancel</Link>
         </div>
       </ActionForm>
     </>

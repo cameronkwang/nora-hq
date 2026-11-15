@@ -1,5 +1,5 @@
 import Link from "next/link";
-import type { ComponentProps, ReactNode } from "react";
+import type { ComponentProps, CSSProperties, ReactNode } from "react";
 
 /**
  * Shared presentational primitives. Server-component safe (no hooks).
@@ -168,7 +168,7 @@ export function ProgressBar({ value, max, className }: { value: number; max: num
   if (max > 0 && max <= 12) {
     const done = Math.max(0, Math.min(max, Math.round(value)));
     return (
-      <div className={cx("meter", className)} {...a11y}>
+      <div className={cx("meter", className)} style={{ "--n": max } as CSSProperties} {...a11y}>
         {Array.from({ length: max }, (_, i) => (
           <i key={i} className={i < done ? "on" : undefined} />
         ))}

@@ -10,22 +10,22 @@ export type Option = { value: string; label: string; hint?: string };
 
 export const COLLAB_COPY = {
   pageTitle: "Collab with Nora",
-  metaDescription: "Work with Nora (@noraeatsgood) — tell her about your spot and what you have in mind.",
+  metaDescription: "Work with Nora (@noraeatsgood). Tell her about your spot and what you have in mind.",
   title: "Collab with Nora",
   handle: "@noraeatsgood",
   intro:
-    "I'm Nora, a food creator sharing spots worth the trip. If you'd like to work together, tell me a bit about your place and what you have in mind — I read every request and reply within a few days.",
+    "I'm Nora, a food creator sharing spots worth the trip. If you'd like to work together, tell me a bit about your place and what you have in mind. I read every request and reply within a few days.",
   timeNote: "Takes about 3 minutes.",
   steps: [
     { title: "About you", blurb: "Who you are and where to find you." },
     { title: "The collab", blurb: "What you have in mind. Rough answers are fine." },
-    { title: "Details", blurb: "The good stuff — this is what helps me plan a great visit." },
+    { title: "Details", blurb: "The good stuff: this is what helps me plan a great visit." },
   ],
   acks: {
     disclosure: "Sponsored and gifted content is always clearly disclosed (#ad / Paid partnership / “gifted”) per FTC guidelines.",
-    honest: "Reviews are honest — a collab doesn’t guarantee positive coverage.",
+    honest: "Reviews are honest. A collab doesn’t guarantee positive coverage.",
   },
-  budgetHint: "Paid collabs start at $600 — pick the closest range, or “Custom package” and we’ll shape one together. Paid usage (ads/whitelisting) is priced separately.",
+  budgetHint: "Paid collabs start at $600. Pick the closest range, or “Custom package” and we’ll shape one together. Paid usage (ads/whitelisting) is priced separately.",
   /** Shown under the intro when the media kit's "Show rate" is on (the line itself is set in the media kit settings). */
   mediaKitLink: "See my media kit",
   paidUsageNote: "Paid usage is priced separately.",
@@ -35,8 +35,8 @@ export const COLLAB_COPY = {
   back: "Back",
   thanksTitle: (name: string) => `Thanks, ${name}!`,
   thanksBody: (email: string) => `Nora got your request and will reply to ${email} within a few business days.`,
-  thanksFoot: "In the meantime, say hi on Instagram or TikTok — @noraeatsgood.",
-  rateLimited: "Looks like a few requests came from here already. Nora will be in touch — no need to send it again.",
+  thanksFoot: "In the meantime, say hi on Instagram or TikTok: @noraeatsgood.",
+  rateLimited: "Looks like a few requests came from here already. Nora will be in touch, so no need to send it again.",
   genericError: "Something went wrong sending that. Please try again in a minute.",
   fixErrors: "A couple of things need a look before this can go through.",
   footer: "Your details go only to Nora and are used to reply to your request.",
@@ -67,7 +67,7 @@ export const INTERESTS: Option[] = [
   { value: "event", label: "Event coverage" },
   { value: "product", label: "Packaged product feature" },
   { value: "recurring", label: "Recurring partnership" },
-  { value: "ugc", label: "UGC for your channels", hint: "Content for you to post — not on my page" },
+  { value: "ugc", label: "UGC for your channels", hint: "Content for you to post, not on my page" },
   { value: "giveaway", label: "Giveaway" },
 ];
 
@@ -90,7 +90,7 @@ export const COMPENSATION: Option[] = [
 export const PAID_COMPENSATION = ["paid", "paid_hosted"] as const;
 
 /** Nora's public rate line — the default for the media kit (Settings live in app_settings "media_kit"). */
-export const DEFAULT_RATE_LINE = "Collabs start at $600 — custom packages available; reach out to Nora directly.";
+export const DEFAULT_RATE_LINE = "Collabs start at $600. Custom packages available; reach out to Nora directly.";
 
 /**
  * Budget ranges offered on the form (paid collabs start at $600). "1000_2500" and "2500_plus" keep the values
@@ -100,7 +100,7 @@ export const BUDGETS: Option[] = [
   { value: "600_1000", label: "$600–$1,000" },
   { value: "1000_2500", label: "$1,000–$2,500" },
   { value: "2500_plus", label: "$2,500+" },
-  { value: "custom", label: "Custom package — let’s talk" },
+  { value: "custom", label: "Custom package, let’s talk" },
   { value: "gifted_only", label: "Gifted / hosted only" },
 ];
 
@@ -113,7 +113,7 @@ const LEGACY_LABELS: Record<string, string> = {
 };
 
 export const USAGE: Option[] = [
-  { value: "organic", label: "Organic — shared on Nora’s page only" },
+  { value: "organic", label: "Organic: shared on Nora’s page only" },
   { value: "repost", label: "Reposting on your channels too" },
   { value: "paid_ads", label: "Paid ads / whitelisting", hint: "Priced separately" },
 ];
@@ -141,7 +141,7 @@ export const FIELDS = {
   city: { label: "City / area", placeholder: "e.g. Richmond, VA" },
   address: { label: "Address or neighborhood", placeholder: "Optional" },
   interests: { label: "What are you interested in?", hint: "Pick any that fit." },
-  deliverables: { label: "Deliverables you’re hoping for", hint: "Optional — I can suggest a mix." },
+  deliverables: { label: "Deliverables you’re hoping for", hint: "Optional. I can suggest a mix." },
   compensation: { label: "Compensation" },
   budget: { label: "Budget range" },
   idealDate: { label: "Ideal timing" },
@@ -153,7 +153,7 @@ export const FIELDS = {
   dietary: { label: "Dietary / menu notes", placeholder: "Vegan or gluten-free options, halal, allergens to know about" },
   bestTimes: { label: "Best days / times to visit or film", placeholder: "e.g. weekday afternoons" },
   restrictions: { label: "Any filming restrictions?", placeholder: "Busy hours, staff on camera, lighting" },
-  links: { label: "Links", placeholder: "Menu, press kit, Drive folder — one per line" },
+  links: { label: "Links", placeholder: "Menu, press kit, Drive folder, one per line" },
   heardFrom: { label: "How did you hear about me?" },
   anythingElse: { label: "Anything else?", placeholder: "" },
 } as const;

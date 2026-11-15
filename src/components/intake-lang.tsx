@@ -2,11 +2,10 @@
 
 import { useEffect } from "react";
 import { INTAKE_COPY, INTAKE_LANG_CODES, INTAKE_LANG_COOKIE, type IntakeLangCode } from "@/lib/intake-copy";
-import { cx } from "./ui";
 
 /**
  * English · 简体 · 繁體 switch for the onboarding form. Plain links (?lang=…), so it works without JavaScript;
- * with JavaScript the choice is also remembered in a cookie for the next visit.
+ * with JavaScript the choice is also remembered in a cookie for the next visit. Drawn as chips: the current one is ink.
  */
 export function IntakeLangSwitch({ lang, remember }: { lang: IntakeLangCode; remember: boolean }) {
   useEffect(() => {
@@ -19,20 +18,17 @@ export function IntakeLangSwitch({ lang, remember }: { lang: IntakeLangCode; rem
   }, [lang, remember]);
 
   return (
-    <nav aria-label={INTAKE_COPY[lang].common.language} className="flex justify-center">
-      <ul className="inline-flex rounded-full border border-border bg-surface p-1 shadow-sm">
+    <nav aria-label={INTAKE_COPY[lang].common.language}>
+      <ul className="chips">
         {INTAKE_LANG_CODES.map((code) => (
           <li key={code}>
             <a
               href={`?lang=${code}`}
               lang={INTAKE_COPY[code].htmlLang}
               aria-current={code === lang ? "true" : undefined}
-              className={cx(
-                "flex min-h-11 min-w-16 items-center justify-center rounded-full px-4 text-[16px] font-medium transition-colors",
-                code === lang ? "bg-accent text-accent-fg" : "text-muted hover:bg-surface-2 hover:text-text",
-              )}
+              className="chip"
             >
-              {INTAKE_COPY[code].langName}
+              <span>{INTAKE_COPY[code].langName}</span>
             </a>
           </li>
         ))}

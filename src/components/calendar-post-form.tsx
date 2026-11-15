@@ -5,7 +5,7 @@ import { useState, useTransition, type FormEvent } from "react";
 import { createPostAction, updatePostAction, type PostFormState } from "@/app/(app)/calendar/actions";
 import { UploadPicker, checkFile, uploadFiles } from "./upload-picker";
 import { countHashtags, textLimit } from "./draft-checks";
-import { buttonClass, cx } from "./ui";
+import { Status, buttonClass, cx } from "./ui";
 
 type Opt = { id: string; label: string };
 
@@ -121,7 +121,7 @@ export function CalendarPostForm({
         <div>
           <label htmlFor="pf-client" className="label">Business</label>
           {editing ? (
-            <p className="py-2 text-sm font-medium">{clients.find((c) => c.id === post!.clientId)?.label ?? "Archived business"}</p>
+            <p className="font-medium">{clients.find((c) => c.id === post!.clientId)?.label ?? "Archived business"}</p>
           ) : (
             <select id="pf-client" name="clientId" required defaultValue={defaults?.clientId ?? ""} className="input" disabled={busy}>
               <option value="" disabled>Choose a business…</option>
@@ -134,11 +134,12 @@ export function CalendarPostForm({
         <fieldset>
           <legend className="label">Platform</legend>
           {editing ? (
-            <p className="py-2 text-sm font-medium">{platform === "instagram" ? "Instagram" : "TikTok"}</p>
+            <p className="font-medium">{platform === "instagram" ? "Instagram" : "TikTok"}</p>
           ) : (
-            <div className="flex gap-2">
+            // Two choices drawn as chips: the chosen one is ink.
+            <div className="post-platform chips">
               {(["instagram", "tiktok"] as const).map((p) => (
-                <label key={p} className={cx("flex flex-1 cursor-pointer items-center justify-center gap-2 rounded-lg border px-3 py-2 text-sm", platform === p ? "border-accent bg-accent-soft font-semibold text-accent" : "border-border bg-surface")}>
+                <label key={p} className={cx("chip", platform === p && "is-on")}>
                   <input
                     type="radio"
                     name="platform"
@@ -151,7 +152,7 @@ export function CalendarPostForm({
                     }}
                     className="sr-only"
                   />
-                  {p === "instagram" ? "Instagram" : "TikTok"}
+                  <span>{p === "instagram" ? "Instagram" : "TikTok"}</span>
                 </label>
               ))}
             </div>
@@ -178,21 +179,21 @@ export function CalendarPostForm({
           <input id="pf-time" type="time" name="time" value={time} onChange={(e) => setTime(e.target.value)} className="input" disabled={busy || !date} />
         </div>
       </div>
-      {!date && <p className="-mt-3 text-xs text-muted">Leave the date empty to keep it as an unscheduled idea.</p>}
+      {!date && <p className="hint -mt-4">Leave the date empty to keep it as an unscheduled idea.</p>}
 
       <div>
         <label htmlFor="pf-caption" className="label">Caption</label>
         {captionLockedHref ? (
-          <div className="rounded-lg border border-border bg-surface-2 px-3 py-2 text-sm">
+          <div className="border-l-2 border-border pl-3">
             <p className="whitespace-pre-wrap break-words">{caption || <span className="text-muted">(No caption yet)</span>}</p>
-            <p className="mt-2 text-xs text-muted">
-              A draft of this caption is waiting for review. <Link href={captionLockedHref} className="text-accent hover:underline">Edit or approve it in the review queue</Link>.
+            <p className="meta mt-2">
+              A draft of this caption is waiting for review. <Link href={captionLockedHref} className="link">Edit or approve it in the review queue</Link>.
             </p>
           </div>
         ) : (
           <>
             <textarea id="pf-caption" name="caption" rows={6} value={caption} onChange={(e) => setCaption(e.target.value)} className="input" readOnly={busy} placeholder="Write the caption, or leave it for Claude to draft." />
-            <div className="mt-1 flex flex-wrap justify-between gap-2 text-xs text-muted">
+            <div className="meta mt-1.5 flex flex-wrap justify-between gap-2">
               <span className={cx(tooManyTags && "font-semibold text-danger")}>{platform === "instagram" ? `${tags} hashtag${tags === 1 ? "" : "s"} (30 max)` : `${tags} hashtag${tags === 1 ? "" : "s"}`}</span>
               <span className={cx("tabular-nums", over && "font-semibold text-danger")}>
                 {caption.length.toLocaleString("en-US")} / {lim!.max.toLocaleString("en-US")}
@@ -221,7 +222,7 @@ export function CalendarPostForm({
                   disabled={busy}
                   onClick={() => setKept((k) => k.filter((x) => x !== u))}
                   aria-label="Remove this media"
-                  className="absolute -right-1.5 -top-1.5 flex size-6 items-center justify-center rounded-full border border-border bg-surface text-xs shadow-sm hover:bg-surface-2"
+                  className="tap-target absolute -right-1.5 -top-1.5 flex size-6 items-center justify-center rounded-full border border-border-strong bg-surface text-xs hover:border-text"
                 >
                   ✕
                 </button>
@@ -234,23 +235,23 @@ export function CalendarPostForm({
           <label htmlFor="pf-urls" className="label">…or paste links (one per line)</label>
           <textarea id="pf-urls" name="mediaUrls" rows={2} value={pasted} onChange={(e) => setPasted(e.target.value)} className="input min-h-0" placeholder="https://…" readOnly={busy} />
         </div>
-        {platform === "instagram" && <p className="text-xs text-muted">Instagram needs public links (JPEG photos, MP4/MOV videos) to auto-publish.</p>}
+        {platform === "instagram" && <p className="meta">Instagram needs public links (JPEG photos, MP4/MOV videos) to auto-publish.</p>}
       </div>
 
-      <fieldset className="flex flex-col gap-2">
+      <fieldset className="flex flex-col">
         <legend className="label">How it gets posted</legend>
-        <label className={cx("flex cursor-pointer items-start gap-3 rounded-lg border p-3 text-sm", effectiveMode === "manual" ? "border-accent bg-accent-soft" : "border-border")}>
-          <input type="radio" name="publishMode" value="manual" checked={effectiveMode === "manual"} onChange={() => setMode("manual")} disabled={busy} className="mt-0.5" />
+        <label className="post-choice">
+          <input type="radio" name="publishMode" value="manual" checked={effectiveMode === "manual"} onChange={() => setMode("manual")} disabled={busy} className="check" />
           <span>
             <span className="font-medium">Post it myself from the app</span>
-            <span className="block text-xs text-muted">You get a reminder on the calendar; mark it published when it&apos;s live.</span>
+            <span className="meta block">You get a reminder on the calendar; mark it published when it&apos;s live.</span>
           </span>
         </label>
-        <label className={cx("flex items-start gap-3 rounded-lg border p-3 text-sm", platform === "tiktok" ? "cursor-not-allowed opacity-60" : "cursor-pointer", effectiveMode === "auto" ? "border-accent bg-accent-soft" : "border-border")}>
-          <input type="radio" name="publishMode" value="auto" checked={effectiveMode === "auto"} onChange={() => setMode("auto")} disabled={busy || platform === "tiktok"} className="mt-0.5" />
+        <label className={cx("post-choice", platform === "tiktok" && "is-off")}>
+          <input type="radio" name="publishMode" value="auto" checked={effectiveMode === "auto"} onChange={() => setMode("auto")} disabled={busy || platform === "tiktok"} className="check" />
           <span>
             <span className="font-medium">Auto-publish to Instagram</span>
-            <span className="block text-xs text-muted">
+            <span className="meta block">
               {platform === "tiktok"
                 ? "Not available for TikTok: its API keeps posts from unaudited apps private, so TikTok posts go up from the TikTok app."
                 : "Publishes at the date and time above once it's scheduled. Needs the business's Instagram connected."}
@@ -270,21 +271,23 @@ export function CalendarPostForm({
             </select>
           </div>
           {effectiveMode === "auto" && (
-            <label className={cx("flex items-center gap-2 self-end rounded-lg border border-border px-3 py-2 text-sm", !canAutoSchedule && "opacity-60")}>
-              <input type="checkbox" name="scheduleNow" value="1" disabled={busy || !canAutoSchedule} />
+            <label className={cx("flex min-h-11 flex-wrap items-center gap-x-3 self-end", !canAutoSchedule && "opacity-60")}>
+              <input type="checkbox" name="scheduleNow" value="1" disabled={busy || !canAutoSchedule} className="check" />
               Schedule auto-publish now
-              {!canAutoSchedule && <span className="text-xs text-muted">(needs date + media)</span>}
+              {!canAutoSchedule && <span className="meta">(needs date + media)</span>}
             </label>
           )}
         </div>
       )}
 
       {error && (
-        <p role="alert" className="rounded-lg bg-danger-soft px-3 py-2 text-sm text-danger">{error}</p>
+        <p role="alert" className="notice">
+          <Status tone="danger" className="whitespace-normal">{error}</Status>
+        </p>
       )}
 
       <div className="flex flex-wrap items-center gap-3">
-        <button type="submit" disabled={busy} className={cx(buttonClass("primary"), "w-full py-3 text-base sm:w-auto sm:py-2 sm:text-sm")}>
+        <button type="submit" disabled={busy} className={cx(buttonClass("primary"), "w-full sm:w-auto")}>
           {phase === "uploading" && files.length
             ? `Uploading ${Math.min(progress + 1, files.length)} of ${files.length}…`
             : busy

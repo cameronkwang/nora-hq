@@ -45,7 +45,7 @@ export function SaveDot({ state, error }: { state: SaveState; error: string | nu
         aria-hidden
         title={state === "error" ? (error ?? "Not saved") : state === "saved" ? "Saved" : undefined}
         className={cx(
-          "pointer-events-none absolute right-1 top-1 size-1.5 rounded-full transition-opacity",
+          "pointer-events-none absolute right-1 top-1 size-[7px] rounded-full transition-opacity",
           state === "idle" && "opacity-0",
           state === "saving" && "animate-pulse bg-muted",
           state === "saved" && "bg-ok",
@@ -55,16 +55,15 @@ export function SaveDot({ state, error }: { state: SaveState; error: string | nu
       <span className="sr-only" aria-live="polite">
         {state === "saved" ? "Saved" : state === "error" ? `Not saved: ${error}` : ""}
       </span>
-      {state === "error" && error && <span className="mt-0.5 block text-xs text-danger">{error}</span>}
+      {state === "error" && error && <span className="mt-1 block text-sm text-danger">{error}</span>}
     </>
   );
 }
 
-/** Spreadsheet-feel control: a plain field on phones, borderless until hover/focus on desktop. */
+/** Spreadsheet-feel control: a plain field (.input) on phones, borderless until hover or focus on desktop. */
 export const cellControl = cx(
-  "w-full min-w-0 rounded-md border border-border bg-surface px-3 py-2 text-base text-text min-h-11",
-  "md:min-h-0 md:border-transparent md:bg-transparent md:px-2 md:py-1.5 md:text-sm md:hover:border-border md:focus:border-accent md:focus:bg-surface",
-  "focus:outline-2 focus:outline-accent focus:-outline-offset-1",
+  "input min-w-0",
+  "md:pointer-fine:h-8 md:pointer-fine:border-transparent md:pointer-fine:bg-transparent md:pl-2 md:hover:border-border-strong md:focus:bg-surface",
 );
 
 type Common = { id: string; field: EditableTaskField; label: string; className?: string; refresh?: boolean };

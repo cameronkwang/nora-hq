@@ -35,33 +35,36 @@ export function FactsCard({ client }: { client: schema.Client }) {
     const src = info.sources?.[key];
     if (facts[key] && src) {
       return (
-        <p className="mt-1 text-xs text-muted">
+        <p className="hint">
           Source:{" "}
-          {src === OWNER_SOURCE ? sourceLabel(src) : <a href={src} target="_blank" rel="noopener noreferrer nofollow" className="text-accent hover:underline">{sourceLabel(src)}</a>}
+          {src === OWNER_SOURCE ? sourceLabel(src) : <a href={src} target="_blank" rel="noopener noreferrer nofollow" className="link">{sourceLabel(src)}</a>}
         </p>
       );
     }
-    if (!facts[key] && notFound.has(key)) return <p className="mt-1 text-xs text-muted">Looked for, not found.</p>;
+    if (!facts[key] && notFound.has(key)) return <p className="hint">Looked for, not found.</p>;
     return null;
   };
 
   return (
-    <Card title="Public facts">
-      <p className="mb-3 text-xs text-muted">
+    <Card title="Public facts" padded={false}>
+      <p className="sec-note">
         What anyone can find on Google Maps, their website or their socials. The onboarding form shows these to the owner as one “Is this right?” card, so they never have to type them. Claude looks them up before the form is sent; fix anything here.
       </p>
-      <p data-facts-status="" className="mb-4 rounded-lg bg-surface-2 px-3 py-2 text-xs">
-        {check.checkedAt ? <>Checked {formatDate(check.checkedAt)} by {checkerName(check.checkedBy)}. </> : <>Not researched yet. </>}
-        {check.missing.length ? <>Still missing: {check.missing.map((m) => m.label).join(", ")}.</> : <>Nothing missing.</>}
-      </p>
+      {/* Where the research stands: a dot and plain words between two hairlines. */}
+      <div className="notice mb-5">
+        <p data-facts-status="" className={`status ${check.checkedAt && !check.missing.length ? "is-ok" : "is-warn"}`}>
+          {check.checkedAt ? <>Checked {formatDate(check.checkedAt)} by {checkerName(check.checkedBy)}. </> : <>Not researched yet. </>}
+          {check.missing.length ? <>Still missing: {check.missing.map((m) => m.label).join(", ")}.</> : <>Nothing missing.</>}
+        </p>
+      </div>
 
-      <ActionForm action={saveBusinessFactsAction.bind(null, client.id)} className="flex flex-col gap-3" ariaLabel="Public facts">
+      <ActionForm action={saveBusinessFactsAction.bind(null, client.id)} className="flex flex-col gap-4" ariaLabel="Public facts">
         <div>
           <label className="label" htmlFor="pf-address">{FACT_LABEL.address}</label>
           <input id="pf-address" name="address" defaultValue={facts.address ?? ""} maxLength={300} className="input" placeholder={PLACEHOLDER.address} autoComplete="off" />
           {under("address")}
         </div>
-        <div className="grid gap-3 sm:grid-cols-2">
+        <div className="grid gap-x-3 gap-y-4 sm:grid-cols-2">
           <div>
             <label className="label" htmlFor="pf-phone">{FACT_LABEL.phone}</label>
             <input id="pf-phone" name="phone" defaultValue={facts.phone ?? ""} maxLength={40} className="input" placeholder={PLACEHOLDER.phone} inputMode="tel" autoComplete="off" />
@@ -88,7 +91,7 @@ export function FactsCard({ client }: { client: schema.Client }) {
           <input id="pf-sells" name="sells" defaultValue={facts.sells ?? ""} maxLength={300} className="input" placeholder={PLACEHOLDER.sells} autoComplete="off" />
           {under("sells")}
         </div>
-        <div className="grid gap-3 sm:grid-cols-2">
+        <div className="grid gap-x-3 gap-y-4 sm:grid-cols-2">
           <div>
             <label className="label" htmlFor="pf-facebook">{FACT_LABEL.facebook}</label>
             <input id="pf-facebook" name="facebook" defaultValue={facts.facebook ?? ""} maxLength={300} className="input" placeholder={PLACEHOLDER.facebook} inputMode="url" autoCapitalize="none" autoComplete="off" />
@@ -100,15 +103,15 @@ export function FactsCard({ client }: { client: schema.Client }) {
             {under("googleListing")}
           </div>
         </div>
-        <p className="text-xs text-muted">Also shown to the owner, edited under Details: {elsewhere}.</p>
+        <p className="meta">Also shown to the owner, edited under Details: {elsewhere}.</p>
         {check.missing.length > 0 && (
-          <label className="inline-flex items-start gap-2 text-sm">
-            <input type="checkbox" name="markRestNotFound" className="mt-0.5 size-4 accent-[var(--accent)]" />
+          <label className="flex min-h-9 cursor-pointer items-start gap-2.5 pointer-coarse:min-h-11 pointer-coarse:items-center">
+            <input type="checkbox" name="markRestNotFound" className="check mt-0.5 pointer-coarse:mt-0" />
             <span>We looked: mark the ones still empty as “not found”</span>
           </label>
         )}
         <div>
-          <SubmitButton size="sm">Save facts</SubmitButton>
+          <SubmitButton variant="secondary">Save facts</SubmitButton>
         </div>
       </ActionForm>
     </Card>

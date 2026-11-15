@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { addScheduleItemAction, deleteScheduleItemAction, makeDealFromScheduleAction, updateScheduleItemAction } from "@/app/(app)/calendar/schedule-actions";
 import { ScheduleSheet } from "./schedule-sheet";
-import { Button, buttonClass } from "./ui";
+import { Button, Status, buttonClass, cx } from "./ui";
 import type { ScheduleEntry } from "./schedule-board";
 
 const monthName = (month: string) => {
@@ -87,24 +87,30 @@ export function ScheduleItemForm({ month, item, onDone }: { month: string; item?
           disabled={noDay}
           onChange={(e) => setDate(e.currentTarget.value)}
         />
-        <label className="mt-1 flex min-h-11 items-center gap-2 text-sm">
-          <input type="checkbox" checked={noDay} onChange={(e) => setNoDay(e.currentTarget.checked)} />
-          No set day yet — sometime in {monthName(itemMonth)}
+        <label className="mt-1 flex min-h-11 items-center gap-3">
+          <input type="checkbox" className="check" checked={noDay} onChange={(e) => setNoDay(e.currentTarget.checked)} />
+          No set day yet, sometime in {monthName(itemMonth)}
         </label>
       </div>
 
-      <div className="flex flex-col">
-        <label className="flex min-h-11 items-center gap-2 text-sm">
-          <input type="checkbox" checked={isFree} onChange={(e) => setFree(e.currentTarget.checked)} />
+      <div className="flex flex-col border-t border-border pt-1">
+        <label className="flex min-h-11 items-center gap-3">
+          <input type="checkbox" className="check" checked={isFree} onChange={(e) => setFree(e.currentTarget.checked)} />
           Free
         </label>
-        <label className="flex min-h-11 items-center gap-2 text-sm">
-          <input type="checkbox" checked={needsReel} onChange={(e) => setReel(e.currentTarget.checked)} />
-          <span aria-hidden>📸</span> Needs a reel
+        <label className="flex min-h-11 items-center gap-3">
+          <input type="checkbox" className="check" checked={needsReel} onChange={(e) => setReel(e.currentTarget.checked)} />
+          <span>
+            <span className="emoji" aria-hidden>📸</span> Needs a reel
+          </span>
         </label>
       </div>
 
-      {error && <p role="alert" className="rounded-lg bg-danger-soft px-3 py-2 text-sm text-danger">{error}</p>}
+      {error && (
+        <p role="alert" className="notice">
+          <Status tone="danger" className="whitespace-normal">{error}</Status>
+        </p>
+      )}
 
       <div className="flex flex-wrap items-center gap-2">
         <Button type="submit" variant="primary" disabled={pending} className="flex-1 sm:flex-none">
@@ -114,35 +120,38 @@ export function ScheduleItemForm({ month, item, onDone }: { month: string; item?
           (confirmDelete ? (
             <span className="flex items-center gap-2">
               <Button type="button" variant="danger" disabled={pending} onClick={remove}>Remove it</Button>
-              <button type="button" className="min-h-11 px-2 text-sm text-muted" onClick={() => setConfirmDelete(false)}>Keep</button>
+              <Button type="button" variant="ghost" onClick={() => setConfirmDelete(false)}>Keep</Button>
             </span>
           ) : (
-            <Button type="button" variant="ghost" className="text-danger" onClick={() => setConfirmDelete(true)}>Remove</Button>
+            <Button type="button" variant="ghost" className={cx("text-danger hover:text-danger")} onClick={() => setConfirmDelete(true)}>Remove</Button>
           ))}
       </div>
 
       {item?.dealId ? (
-        <div className="border-t border-border pt-3">
+        <div className="border-t border-border pt-4">
           <Link href={`/deals/${item.dealId}`} className={buttonClass("secondary")}>Open the deal</Link>
-          <p className="mt-1 text-xs text-muted">The fee and payment live on the deal. The schedule only shows Paid or Not paid.</p>
+          <p className="hint">The fee and payment live on the deal. The schedule only shows Paid or Not paid.</p>
         </div>
       ) : item && !item.isFree && !isFree ? (
-        <div className="border-t border-border pt-3">
+        <div className="border-t border-border pt-4">
           <Button type="button" variant="secondary" disabled={pending} onClick={makeDeal}>Make it a deal</Button>
-          <p className="mt-1 text-xs text-muted">Track the fee, deliverables and payment on a deal. The schedule only shows Paid or Not paid, never an amount.</p>
+          <p className="hint">Track the fee, deliverables and payment on a deal. The schedule only shows Paid or Not paid, never an amount.</p>
         </div>
       ) : null}
     </form>
   );
 }
 
-/** "+ Add" button in the schedule header → quick form in a sheet. */
+/** "+ Add" in the schedule header (a quiet ink button; the screen's one primary is "New ask") → quick form in a sheet. */
 export function ScheduleAddButton({ month }: { month: string }) {
   const [open, setOpen] = useState(false);
   return (
     <>
-      <button type="button" className={buttonClass("primary")} onClick={() => setOpen(true)} aria-haspopup="dialog">
-        + Add
+      <button type="button" className={cx(buttonClass("ghost", "sm"), "text-text")} onClick={() => setOpen(true)} aria-haspopup="dialog">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeLinecap="round" aria-hidden className="size-3.5!">
+          <path d="M12 5v14M5 12h14" />
+        </svg>
+        Add
       </button>
       <ScheduleSheet open={open} onClose={() => setOpen(false)} title="Add to the schedule" subtitle={`For ${monthName(month)}. Pick a day if there is one.`}>
         <ScheduleItemForm month={month} onDone={() => setOpen(false)} />

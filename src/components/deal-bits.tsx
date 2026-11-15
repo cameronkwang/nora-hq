@@ -1,7 +1,7 @@
 import type { Deal, DealComp, DealStatus, PaymentStatus } from "@/lib/schema";
 import { APP_TZ, formatDate, today as todayNY } from "@/lib/dates";
 import { isOverdue } from "@/lib/ops-deals";
-import { Badge } from "./ui";
+import { Status, Tag, type Tone } from "./ui";
 
 /** Small presentational pieces for collab deals. Server components (they read lib/ops-deals helpers). */
 
@@ -11,12 +11,13 @@ export const DEAL_STATUS_LABEL: Record<DealStatus, string> = {
 };
 export const PAYMENT_LABEL: Record<PaymentStatus, string> = { not_requested: "Not invoiced", requested: "Invoiced", paid: "Paid", not_applicable: "No payment" };
 
-const STATUS_TONE: Record<DealStatus, "neutral" | "accent" | "ok" | "info" | "warn"> = {
+const STATUS_TONE: Record<DealStatus, Tone> = {
   planning: "neutral", scheduled: "info", shot: "accent", posted: "ok", complete: "ok", cancelled: "neutral",
 };
 
-export function DealStatusBadge({ status }: { status: DealStatus }) {
-  return <Badge tone={STATUS_TONE[status]}>{DEAL_STATUS_LABEL[status]}</Badge>;
+/** The deal's state: a dot and the word (Planning and Cancelled are the hollow "resting" dot). */
+export function DealStatusBadge({ status, small = true }: { status: DealStatus; small?: boolean }) {
+  return <Status tone={STATUS_TONE[status]} small={small}>{DEAL_STATUS_LABEL[status]}</Status>;
 }
 
 /** "$600" / "$1,250.50" — whole dollars drop the cents. */
@@ -37,14 +38,14 @@ export function compText(d: Pick<Deal, "compType" | "amountCents">): string {
   return [COMP_LABEL[d.compType], amt].filter(Boolean).join(" · ");
 }
 
-/** Payment chip. Requested and past its due date → red "Overdue". */
-export function PaymentChip({ deal, today = todayNY() }: { deal: Pick<Deal, "paymentStatus" | "paymentDueDate" | "compType" | "status">; today?: string }) {
-  if (deal.paymentStatus === "not_applicable" || (deal.compType === "gifted" && deal.paymentStatus !== "paid")) return <Badge>Gifted</Badge>;
-  if (deal.paymentStatus === "paid") return <Badge tone="ok">Paid</Badge>;
-  if (isOverdue(deal, today)) return <Badge tone="danger">Overdue · was due {formatDate(deal.paymentDueDate)}</Badge>;
-  if (deal.paymentStatus === "requested") return <Badge tone="warn">Invoiced{deal.paymentDueDate ? ` · due ${formatDate(deal.paymentDueDate)}` : ""}</Badge>;
-  if (deal.status === "planning" || deal.status === "scheduled" || deal.status === "cancelled") return <Badge>Not invoiced</Badge>;
-  return <Badge tone="warn">To invoice</Badge>;
+/** Where the money stands: a dot and words (requested and past its due date → "Overdue"). Gifted is a fact, so a tag. */
+export function PaymentChip({ deal, today = todayNY(), small = true }: { deal: Pick<Deal, "paymentStatus" | "paymentDueDate" | "compType" | "status">; today?: string; small?: boolean }) {
+  if (deal.paymentStatus === "not_applicable" || (deal.compType === "gifted" && deal.paymentStatus !== "paid")) return <Tag bare>Gifted</Tag>;
+  if (deal.paymentStatus === "paid") return <Status tone="ok" small={small}>Paid</Status>;
+  if (isOverdue(deal, today)) return <Status tone="danger" small={small}>Overdue · was due {formatDate(deal.paymentDueDate)}</Status>;
+  if (deal.paymentStatus === "requested") return <Status tone="warn" small={small}>Invoiced{deal.paymentDueDate ? ` · due ${formatDate(deal.paymentDueDate)}` : ""}</Status>;
+  if (deal.status === "planning" || deal.status === "scheduled" || deal.status === "cancelled") return <Status tone="neutral" small={small}>Not invoiced</Status>;
+  return <Status tone="warn" small={small}>To invoice</Status>;
 }
 
 /** "Sat, Nov 14 · 7:30 PM" in New York time; "Today · 7:30 PM" / "Tomorrow · …" when close. */
@@ -69,16 +70,13 @@ export function telHref(phone: string, kind: "tel" | "sms" = "tel") {
 
 /** The FTC line for this comp type. */
 export function disclosureLine(comp: DealComp): string {
-  if (comp === "gifted") return "Disclose: “gifted” / #gifted — on screen and in the caption.";
-  if (comp === "affiliate") return "Disclose: #ad + say it’s an affiliate/commission link — on screen and in the caption.";
-  return "Disclose: #ad + turn on the Paid partnership label — on screen and in the caption.";
+  if (comp === "gifted") return "Disclose: “gifted” / #gifted, on screen and in the caption.";
+  if (comp === "affiliate") return "Disclose: #ad + say it’s an affiliate/commission link, on screen and in the caption.";
+  return "Disclose: #ad + turn on the Paid partnership label, on screen and in the caption.";
 }
 
+/** "2/3 posted" in the size of the line it sits in; ink once everything is posted. */
 export function DeliverablesProgress({ posted, total }: { posted: number; total: number }) {
-  if (!total) return <span className="text-xs text-muted">No deliverables</span>;
-  return (
-    <span className={posted === total ? "text-xs font-medium text-ok" : "text-xs text-muted"}>
-      {posted}/{total} posted
-    </span>
-  );
+  if (!total) return <span>No deliverables</span>;
+  return <span className={posted === total ? "text-text" : undefined}>{posted}/{total} posted</span>;
 }

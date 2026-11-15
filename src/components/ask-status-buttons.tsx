@@ -19,15 +19,18 @@ const MOVES: Record<AskStatus, Array<{ to: AskStatus; label: string; primary?: b
   archived: [{ to: "new", label: "Restore" }],
 };
 
-/** Small forms that move an ask between statuses. */
+/**
+ * Small forms that move an ask between statuses. The main move is outlined and the rest are quiet text buttons:
+ * moving an ask along is housekeeping, so none of them takes the accent.
+ */
 export function AskStatusButtons({ id, status }: { id: string; status: AskStatus }) {
   return (
-    <div className="flex flex-wrap gap-2">
+    <div className="flex flex-wrap items-center gap-x-1 gap-y-2">
       {MOVES[status].map((m) => (
         <form key={m.to} action={setAskStatus}>
           <input type="hidden" name="id" value={id} />
           <input type="hidden" name="status" value={m.to} />
-          <button className={buttonClass(m.primary ? "primary" : "secondary", "sm")}>{m.label}</button>
+          <button className={buttonClass(m.primary ? "secondary" : "ghost", "sm")}>{m.label}</button>
         </form>
       ))}
     </div>

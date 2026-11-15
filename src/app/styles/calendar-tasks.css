@@ -1,47 +1,154 @@
 /* Calendar (month grid, tabs), Nora's Schedule, Tasks. Rules here sit in the "pages" layer: above the shared
-   classes in globals.css, below Tailwind utilities. The classes below are the mockup's task rows (drawn on Home)
-   and its Schedule screen, as a starting point. Nora's Schedule never shows money. */
+   classes in globals.css, below Tailwind utilities. Only layout a shared class or a utility cannot say lives here.
+   Nora's Schedule never shows money: there is no slot for an amount anywhere below. */
 @layer pages {
-  /* ---- Task rows (Home shows them too). Same right-hand columns as .approve-row in home-inbox.css: keep them equal. */
-  .task-link, .group-row { display: grid; grid-template-columns: minmax(0, 1fr) 10.5rem 4.75rem 14px; column-gap: 16px; align-items: baseline; }
-  .task-link .row-meta { display: contents; }
-  .task-link .when { text-align: right; }
-
-  .task-row { column-gap: 16px; padding: 0; }      /* the link carries the row padding, so the whole row height is the target */
+  /* ============================================================ TASK ROWS (Home, the business page and /tasks show them)
+     The tick, then one link that carries the title and its facts, so the whole row is the target.
+     Wide (1024px and up): one line. Title and its small facts (platform, who, state) on the left, then the business and
+     the due date in fixed columns that match .approve-row in home-inbox.css (business 10.5rem, when 4.75rem, then the
+     14px chevron column), so task rows and the To approve rows line up. Narrow: the title, then one meta line joined by "·". */
+  .task-row { column-gap: 16px; padding: 0; }
+  .task-row > form { display: contents; }          /* the tick is the row's own flex item; the form still submits it */
   .task-link { flex: 1; min-width: 0; padding: calc((var(--row-h) - var(--leading-base)) / 2) 0; text-decoration: none; border-radius: var(--radius-xs); }
   .task-link:hover .row-title { text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 3px; }
-  .due { font-size: var(--text-sm); font-weight: 500; white-space: nowrap; }
-  .due.is-today { color: var(--warn); }
-  .due.is-over { color: var(--danger); }
-  /* A plan group: a collapsed row with a segment meter and "0 of 8". */
-  .group-row { grid-template-columns: var(--tick-w) minmax(0, 1fr) 10.5rem 4.75rem 14px; cursor: pointer; list-style: none; }
-  .group-row::-webkit-details-marker { display: none; }
-  .group-row .disc { align-self: center; width: 18px; height: 18px; margin-left: -3px; color: var(--faint); stroke-width: 2; }
-  .group-row .meter { width: 4.5rem; }
-  .group-row .n { text-align: right; }
+  .task-main { display: block; min-width: 0; overflow-wrap: anywhere; }
+  .task-main .row-title { display: inline; }
+  .task-notes { margin-left: 8px; font-size: var(--text-sm); color: var(--muted); }
+  .task-notes > *, .facts-line > * { white-space: nowrap; }
+  .task-notes > :not(:last-child)::after, .facts-line > :not(:last-child)::after { content: "·"; margin: 0 2px 0 6px; color: var(--muted); font-weight: 400; }
+  .task-row.is-done .row-title { color: var(--muted); font-weight: 400; text-decoration: line-through; text-decoration-thickness: 1px; }
+  .due { font-size: var(--text-sm); color: var(--muted); white-space: nowrap; }
+  .due.is-today { color: var(--warn); font-weight: 500; }
+  .due.is-over { color: var(--danger); font-weight: 500; }
+  /* While the done toggle is saving, it shows the state it is going to. */
+  .tick.is-undo i { border-color: var(--border-strong); background-color: var(--surface); background-image: none; }
+  .tick:disabled { cursor: default; opacity: 0.6; }
+  /* The bulk-select box takes the tick's place, at the tick's size. */
+  .pick { flex: none; align-self: center; display: grid; place-items: center; width: 28px; height: 28px; margin: -3px 2px -3px -5px; cursor: pointer; border-radius: var(--radius-sm); }
 
+  @media (min-width: 1024px) {
+    /* The date's column keeps the chevron column's room (30px) on its right, like the other lists; a long
+       "Overdue · Nov 12" runs on into it. */
+    .task-link { display: grid; grid-template-columns: minmax(0, 1fr) 10.5rem calc(4.75rem + 30px); column-gap: 16px; align-items: baseline; }
+    .task-link .row-meta { display: contents; }
+    .task-link .where { grid-column: 2; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .task-link .when { grid-column: 3; padding-right: 30px; text-align: right; }
+  }
   @media (max-width: 1023px) {
-    .task-link .row-meta { display: flex; flex-wrap: wrap; align-items: baseline; line-height: 1.375rem; }
-    .task-link .when { text-align: left; }
-    .task-row .tick { align-self: flex-start; margin-top: var(--tick-top); margin-bottom: 0; }
     .task-link { display: block; padding: 10px 0; }
-    .task-link .row-title { display: block; }
-    .group-row { grid-template-columns: var(--tick-w) minmax(0, 1fr) auto auto; }
+    .task-link .row-meta { display: flex; flex-wrap: wrap; align-items: baseline; font-size: var(--text-sm); line-height: 1.375rem; color: var(--muted); }
+    .task-link .row-meta .where { white-space: normal; overflow-wrap: anywhere; }
+    .task-row .tick, .task-row .pick { align-self: flex-start; margin-top: var(--tick-top); margin-bottom: 0; }
+  }
+  @media (max-width: 767px), (pointer: coarse) {
+    .pick { width: 44px; height: 44px; margin: -11px -13px -11px -11px; }
   }
 
-  /* ---- Schedule */
+  /* ---- A plan group: a collapsed row, a segment meter and "0 of 8". Its slots open underneath, indented to the title. */
+  .group-row { display: grid; grid-template-columns: var(--tick-w) minmax(0, 1fr) 10.5rem 4.75rem 14px; column-gap: 16px; align-items: baseline; cursor: pointer; list-style: none; user-select: none; }
+  .group-row::-webkit-details-marker { display: none; }
+  .group-row .disc { grid-column: 1; align-self: center; width: 18px; height: 18px; margin-left: -3px; color: var(--faint); stroke-width: 2; transition: transform 0.15s; }
+  details[open] > .group-row .disc { transform: rotate(90deg); }
+  .group-row .group-title { grid-column: 2; }
+  .group-row:hover .group-title { text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 3px; }
+  .group-row .meter, .group-row .bar { grid-column: 3; width: 4.5rem; }
+  .group-row .meter { width: clamp(4.5rem, calc(var(--n, 8) * 0.5625rem), 100%); }   /* about 6px a segment, so 12 items don't read as dots */
+  .group-row .n { grid-column: 4; text-align: right; white-space: nowrap; }
+  .group-row .n.is-wide { grid-column: 3 / 5; }            /* "2 done · as needed" has no meter */
+  .group-row .group-extra { grid-column: 2 / -1; grid-row: 2; display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; padding-bottom: 2px; }
+  .group-row .group-extra .over { color: var(--danger); font-weight: 500; }
+  .group-tasks { margin-left: calc(var(--tick-w) + 16px); border-top: var(--rule); }
+  @media (max-width: 399px) {                       /* the narrowest phones: the words "3 of 8" stay, the meter goes */
+    .group-row .meter, .group-row .bar { display: none; }
+  }
+  @media (max-width: 1023px) {
+    .group-row { grid-template-columns: var(--tick-w) minmax(0, 1fr) auto auto; }
+    .group-row .disc { margin-left: 0; }
+  }
+  @media (prefers-reduced-motion: reduce) { .group-row .disc { transition: none; } }
+
+  /* ---- /tasks: the select bar above the lists, the quick add, the more-filters drawer */
+  .task-add { margin-top: 20px; }
+  .task-filters { margin-top: 20px; }
+  .task-more { margin-top: 12px; padding-top: 12px; border-top: var(--rule); }
+  .task-body { margin-top: 24px; }
+  .task-selectbar { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: var(--control-h); margin: -12px 0 4px; }
+  .task-menu-btn { width: var(--h); padding: 0; }
+  .task-head-actions .btn { flex-shrink: 0; }      /* List / Board / Table keep their icon beside the word */
+  @media (max-width: 359px) { .task-head-actions [role="group"] svg { display: none; } }   /* the narrowest phones: the words, not the pictures */
+  .task-menu { position: absolute; right: 0; top: 100%; z-index: 30; width: 15rem; margin-top: 4px; padding: 4px 0; }
+  .task-menu a { display: block; padding: 8px 12px; text-decoration: none; }
+  .task-menu a:hover, .task-menu a:focus-visible { background: var(--surface-2); outline: none; }
+  .task-menu a + a { border-top: var(--rule); }
+  @media (max-width: 767px), (pointer: coarse) { .task-menu a { padding: 11px 14px; } }
+  @media (max-width: 767px) { .task-add, .task-filters { margin-top: 16px; } .task-body { margin-top: 20px; } }
+
+  /* The bulk bar floats (a .pop): above the tab bar on phones, sticky at the top of the list on desktop. */
+  .bulk-bar { padding: 8px 10px; }
+  .bulk-bar .input { width: auto; height: 1.75rem; font-size: var(--text-sm); padding-left: 10px; }
+  @media (max-width: 767px), (pointer: coarse) { .bulk-bar .input { height: var(--control-h); width: 100%; } }
+  @media (min-width: 640px) { .bulk-bar .input { width: auto; } }
+
+  /* ---- Board: five columns of plain rows on hairlines. A card is a row you can drag. */
+  .board { display: grid; grid-template-columns: repeat(5, minmax(11.5rem, 1fr)); column-gap: 16px; overflow-x: auto; padding-bottom: 4px; }
+  .board-col { display: flex; flex-direction: column; min-width: 0; border-radius: var(--radius-sm); transition: background-color 0.15s; }
+  .board-col.is-over { background: var(--surface-2); }
+  .board-head { display: flex; align-items: baseline; gap: 8px; padding: 12px 0 8px; border-top: var(--rule-ink); border-bottom: var(--rule); }
+  .board-head .num { margin-left: auto; font-size: var(--text-sm); color: var(--muted); }
+  .board-cards { display: flex; flex-direction: column; min-height: 10rem; }
+  .board-card { padding: 10px 0 12px; border-bottom: var(--rule); }
+  .board-card.is-dragging { opacity: 0.4; }
+  .board-card .row-title { display: block; text-decoration: none; }
+  .board-card a.row-title:hover { text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 3px; }
+  .board-card.is-done .row-title { color: var(--muted); font-weight: 400; text-decoration: line-through; }
+  .board-card .facts-line { margin-top: 2px; font-size: var(--text-sm); color: var(--muted); }
+  .board-status { width: auto; max-width: 100%; height: 1.75rem; margin-top: 8px; padding-left: 8px; font-size: var(--text-sm); color: var(--muted); }
+  .board-status:hover, .board-status:focus { color: var(--text); }
+  .board-more { display: block; padding: 10px 0; font-size: var(--text-sm); color: var(--muted); text-decoration: none; }
+  .board-more:hover { color: var(--text); }
+  .board-tabs { overflow-x: auto; scrollbar-width: none; }
+  .board-tabs::-webkit-scrollbar { display: none; }
+  @media (min-width: 1024px) and (pointer: fine) {
+    .board-card { cursor: grab; }
+    .board-card:active { cursor: grabbing; }
+    .board-status { margin-left: -9px; border-color: transparent; background-color: transparent; }   /* its words line up with the card's */
+    .board-card:hover .board-status, .board-status:focus { border-color: var(--border-strong); }
+  }
+  @media (max-width: 767px), (pointer: coarse) { .board-status { height: var(--control-h); } }
+  @media (max-width: 1023px) { .board-col .board-cards { min-height: 0; } }
+
+  /* ---- Table: an eyebrow head on a hairline, rows on hairlines, scrolls sideways inside itself. Phone: stacked rows. */
+  .task-table-head { border-bottom: var(--rule); }
+  .task-table-head a { color: var(--muted); text-decoration: none; }
+  .task-table-head a:hover, .task-table-head [aria-sort="ascending"] a, .task-table-head [aria-sort="descending"] a { color: var(--text); }
+  .task-table-row + .task-table-row { border-top: var(--rule); }
+  .task-table-row.is-done .cell-title { text-decoration: line-through; color: var(--muted); }
+
+  /* ============================================================ CALENDAR: tabs, the bar under them */
+  .sched-head .page-head { margin-bottom: 12px; }
   .sched-head .head-actions { gap: 4px; margin-right: -6px; }
   .sched-bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px 24px; margin: 8px 0 4px; }
   .sched-bar .monthpick { margin-left: -8px; }
+  .sched-bar.is-form { align-items: flex-end; margin-bottom: 12px; }
+
+  /* ---- Nora's schedule: day groups, an eyebrow on a hairline, then one line per visit. */
   .sched-list { max-width: 45rem; }
-  .group-label { display: flex; align-items: baseline; justify-content: space-between; margin-top: 22px; padding-bottom: 8px; border-bottom: var(--rule); }
+  .group-label { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-top: 22px; padding-bottom: 8px; border-bottom: var(--rule); }
   .group-label b { font-weight: inherit; color: var(--accent); }
   .group-label.is-today { color: var(--text); }
   /* One line per visit: name, the reel checkbox, Edit. Every control is the same height, so every row is. */
   .sched-row { column-gap: 8px; padding: 6px 0; }
+  .sched-row .row-title { display: flex; flex-wrap: wrap; align-items: baseline; column-gap: 8px; }
+  .sched-row .row-title .tag { margin-left: 0; top: 0; }
+  .sched-name { text-decoration: none; }
+  .sched-name:hover { text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 3px; }
+  .sched-deal { text-decoration: none; }
+  .sched-deal:hover .status { text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 3px; }
   .reel-check { display: inline-flex; align-items: baseline; gap: 8px; padding: 5px 6px; font-size: var(--text-sm); line-height: 1.375rem; white-space: nowrap; cursor: pointer; border-radius: var(--radius-sm); }
   .reel-check .check { align-self: center; }
   .reel-check.is-done { color: var(--muted); }
+  .reel-check.is-busy { opacity: 0.6; }
+  .reel-check [role="alert"] { color: var(--danger); white-space: normal; }
   .sched-row .btn-ghost { --h: 2rem; margin-right: -6px; font-size: var(--text-sm); }
   @media (max-width: 767px), (pointer: coarse) {     /* touch: every control in the row is 44px */
     .sched-head .head-actions { margin-right: -10px; }
@@ -52,8 +159,69 @@
   }
   @media (max-width: 767px) {
     .sched-head .head-row { gap: 0 12px; }
-    .sched-head .head-actions { flex-wrap: nowrap; }
     .sched-bar { margin: 4px 0 0; }
+    .sched-bar.is-form { margin-bottom: 8px; }
     .group-label { margin-top: 18px; }
   }
+  @media (max-width: 359px) {                         /* the narrowest phones: the reel words go, the box and 📸 stay */
+    .reel-check .reel-words { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  }
+
+  /* ---- Month grid (the Schedule's month at a glance and the Posts calendar): an open grid on hairlines, no box. */
+  .mgrid-head, .mgrid-body { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); }
+  .mgrid-head { border-bottom: var(--rule); }
+  .mgrid-head > div { padding: 0 8px 8px; }
+  .mgrid-cell { min-width: 0; min-height: 5.5rem; padding: 6px 8px 10px; border-bottom: var(--rule); }
+  .mgrid-cell:not(:nth-child(7n)) { border-right: var(--rule); }
+  .mgrid-head > div:nth-child(7n + 1), .mgrid-cell:nth-child(7n + 1) { padding-left: 0; }   /* the first column starts on the page's left edge */
+  .mgrid-day { display: flex; align-items: baseline; justify-content: space-between; gap: 4px; margin-bottom: 4px; font-size: var(--text-sm); line-height: 1.25rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .mgrid-cell.is-today .mgrid-day > span:first-child { color: var(--accent); font-weight: 600; }   /* a red-letter day */
+  .mgrid-items { display: flex; flex-direction: column; gap: 4px; }
+  .mgrid-item { display: block; width: 100%; min-width: 0; padding: 0; border: 0; background: none; border-radius: var(--radius-xs); color: var(--text); font: inherit; font-size: var(--text-sm); line-height: 1.125rem; text-align: left; text-decoration: none; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .mgrid-item:hover { text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 3px; }
+  .mgrid-item.is-owed { font-weight: 500; }
+  .mgrid-post .l1 { display: flex; align-items: baseline; gap: 6px; min-width: 0; font-weight: 500; }
+  .mgrid-post .l1 > span:last-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  .mgrid-post .l2 { display: block; overflow: hidden; text-overflow: ellipsis; font-size: 0.75rem; color: var(--muted); }
+  .mgrid-more { font-size: 0.75rem; color: var(--muted); }
+  .mgrid-add { display: grid; place-items: center; width: 22px; height: 22px; margin: -2px -4px -2px 0; border-radius: var(--radius-xs); color: var(--muted); text-decoration: none; opacity: 0; }
+  .mgrid-cell:hover .mgrid-add, .mgrid-add:focus-visible { opacity: 1; }
+  .mgrid-add:hover { background: var(--surface-2); color: var(--text); }
+  @media (pointer: coarse) {                          /* no hover on a touch tablet: the + is always there, and finger-sized */
+    .mgrid-add { opacity: 1; width: 44px; height: 44px; margin: -12px -8px -12px 0; }
+  }
+  .cal-legend { display: flex; flex-wrap: wrap; gap: 4px 16px; margin-top: 12px; }
+
+  /* ---- Posts: the agenda (phones) and the Unscheduled list. Time in the margin, then the business and one meta line. */
+  .cal-post { display: flex; align-items: baseline; column-gap: 12px; padding: 10px 0; text-decoration: none; }
+  .cal-post .time { flex: none; width: 3.75rem; }
+  .cal-post .main { flex: 1; min-width: 0; }
+  .cal-post .row-title { display: block; }
+  .cal-post:hover .row-title { text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 3px; }
+  .cal-post .facts-line { display: block; }
+  .cal-post .caption { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; overflow-wrap: anywhere; margin-top: 2px; }
+
+  /* ---- Choices drawn as chips (the post form's platform), radios as rows (how it gets posted) */
+  .post-platform .chip:has(input:focus-visible) > span { outline: var(--focus-ring); outline-offset: 2px; }
+  .post-platform .chip:has(input:disabled) { cursor: default; opacity: 0.6; }
+  .post-choice { display: flex; align-items: baseline; gap: 12px; padding: 10px 0; cursor: pointer; }
+  .post-choice + .post-choice { border-top: var(--rule); }
+  .post-choice .check { align-self: flex-start; margin-top: 2px; }
+  .post-choice.is-off { cursor: not-allowed; opacity: 0.6; }
+  @media (max-width: 767px), (pointer: coarse) { .post-choice .check { margin-top: 1px; } }
+
+  /* ---- Sheets (schedule add / edit / paste): a raised surface, the title in the serif. */
+  .sched-sheet .sheet-panel { background: var(--surface); box-shadow: var(--shadow-pop); }
+  .sheet-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 16px; }
+  .sheet-head .btn { margin: -4px -8px 0 0; }
+  .paste-head { display: flex; flex-wrap: wrap; gap: 4px 16px; padding: 12px 0 8px; border-top: var(--rule-ink); }
+  .paste-row { display: flex; align-items: baseline; gap: 12px; padding: 8px 0; }
+  .paste-row .what { flex: none; width: 5.5rem; }
+  .paste-row.is-same { color: var(--muted); }
+  .paste-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding-top: 12px; border-top: var(--rule); }
+
+  /* ---- Task import preview */
+  .import-row { display: flex; align-items: baseline; gap: 12px; padding: 10px 0; }
+  .import-row .line { flex: none; width: 2rem; text-align: right; }
+  .import-row .main { flex: 1; min-width: 0; }
 }

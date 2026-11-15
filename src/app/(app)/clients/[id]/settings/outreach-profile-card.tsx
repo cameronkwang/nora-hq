@@ -13,12 +13,12 @@ import { saveOutreachProfileAction } from "./outreach-profile-actions";
 export function OutreachProfileCard({ client }: { client: schema.Client }) {
   const ownHandle = client.instagramHandle ? `@${client.instagramHandle}` : client.tiktokHandle ? `@${client.tiktokHandle}` : "@theirhandle";
   return (
-    <Card title="Outreach profile">
-      <p className="mb-3 text-xs text-muted">
+    <Card title="Outreach profile" padded={false}>
+      <p className="sec-note">
         Messages to creators are written as {client.name} and sent from {client.name}&apos;s own account, not Nora&apos;s. Claude uses the offer below in every outreach draft, and each draft shows which account to send it from.
       </p>
       <ActionForm action={saveOutreachProfileAction.bind(null, client.id)} className="flex flex-col gap-3" ariaLabel="Outreach profile">
-        <div className="grid gap-3 sm:grid-cols-[9rem_minmax(0,1fr)]">
+        <div className="grid grid-cols-[minmax(0,8rem)_minmax(0,1fr)] gap-2">
           <div>
             <label className="label" htmlFor="op-kind">Send from</label>
             <select id="op-kind" name="sendFromKind" defaultValue={client.sendFrom ? (client.sendFromKind ?? "other") : "instagram"} className="input">
@@ -43,14 +43,14 @@ export function OutreachProfileCard({ client }: { client: schema.Client }) {
             />
           </div>
         </div>
-        <p className="-mt-1 text-xs text-muted">The @handle or email address only. Never a password: logins stay in a password manager.</p>
+        <p className="hint -mt-1.5">The @handle or email address only. Never a password: logins stay in a password manager.</p>
         <div>
           <label className="label" htmlFor="op-offer">Standing offer for creators</label>
           <input id="op-offer" name="creatorOffer" defaultValue={client.creatorOffer ?? ""} maxLength={300} className="input" placeholder="Free all-you-can-eat seafood boil for 2" autoComplete="off" />
-          <p className="mt-1 text-xs text-muted">What the owner agreed to give a creator who visits. Leave empty if there isn&apos;t one yet.</p>
+          <p className="hint">What the owner agreed to give a creator who visits. Leave empty if there isn&apos;t one yet.</p>
         </div>
         <div>
-          <SubmitButton size="sm">Save outreach profile</SubmitButton>
+          <SubmitButton size="sm" variant="secondary">Save outreach profile</SubmitButton>
         </div>
       </ActionForm>
     </Card>

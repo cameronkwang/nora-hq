@@ -10,7 +10,7 @@ type Opt = { id: string; label: string };
 
 /** Rotating examples in the empty box — shows the range of things you can drop in. */
 const EXAMPLES = [
-  "Poke Bros wants a holiday promo — can we plan something by Friday?",
+  "Poke Bros wants a holiday promo. Can we plan something by Friday?",
   "Idea: weekly crab-cracking reel",
   "FYI: Max's is closed Monday",
   "Cameron, can you reset the TikTok password?",
@@ -76,7 +76,7 @@ export function AskForm({
   }
 
   return (
-    <form onSubmit={submit} className="flex flex-col gap-4">
+    <form onSubmit={submit} className="flex flex-col gap-5">
       <div>
         <label htmlFor="ask-body" className="sr-only">
           What&rsquo;s on your mind?
@@ -95,18 +95,12 @@ export function AskForm({
 
       <fieldset disabled={busy} className="min-w-0">
         <legend className="label">Who&rsquo;s it for?</legend>
-        <div className="flex flex-wrap gap-2">
+        {/* Choice chips: each wraps a radio; the checked one is ink (see .ask-chips in home-inbox.css). */}
+        <div className="chips ask-chips">
           {routes.map((r) => (
-            <label
-              key={r}
-              className={cx(
-                "inline-flex min-h-9 cursor-pointer select-none items-center rounded-full border border-border bg-surface px-3 text-sm font-medium text-muted transition pointer-coarse:min-h-11",
-                "hover:text-text has-[:checked]:border-accent has-[:checked]:bg-accent-soft has-[:checked]:text-accent",
-                "has-[:focus-visible]:outline has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-accent",
-              )}
-            >
+            <label key={r} className="chip select-none">
               <input type="radio" name="route" value={r} defaultChecked={r === "auto"} className="sr-only" />
-              {ROUTE_LABEL[r]}
+              <span>{ROUTE_LABEL[r]}</span>
             </label>
           ))}
         </div>
@@ -114,7 +108,7 @@ export function AskForm({
 
       <div>
         <label htmlFor="ask-client" className="label">
-          Business <span className="font-normal">(optional)</span>
+          Business <span className="font-normal text-muted">(optional)</span>
         </label>
         <select id="ask-client" name="clientId" defaultValue={defaultClientId ?? ""} className="input" disabled={busy}>
           <option value="">Not sure / several</option>
@@ -129,14 +123,14 @@ export function AskForm({
       <UploadPicker files={files} onChange={setFiles} disabled={busy} />
 
       {error && (
-        <p role="alert" className="rounded-lg bg-danger-soft px-3 py-2 text-sm text-danger">
+        <p role="alert" className="status is-danger whitespace-normal">
           {error}
         </p>
       )}
 
-      {/* Phones: the one button stays in reach, just above the tab bar. */}
-      <div className="sticky-actions -mx-4 border-t border-border bg-bg/95 px-4 py-3 backdrop-blur md:static md:mx-0 md:border-0 md:bg-transparent md:p-0 md:backdrop-blur-none">
-        <button type="submit" disabled={busy} className={buttonClass("primary") + " w-full py-3 text-base md:w-auto md:px-6"}>
+      {/* Phones: the one button stays in reach, just above the tab bar (a solid bar with a hairline on top). */}
+      <div className="ask-bar md:static md:border-0 md:p-0">
+        <button type="submit" disabled={busy} className={cx(buttonClass("primary"), "w-full md:w-auto md:px-6")}>
           {phase === "uploading" && files.length
             ? `Uploading ${Math.min(progress + 1, files.length)} of ${files.length}…`
             : busy

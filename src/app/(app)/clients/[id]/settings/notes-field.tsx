@@ -22,9 +22,11 @@ export function NotesField({ defaultValue }: { defaultValue: string }) {
         placeholder="Contacts, Facebook Page link, owner preferences, posting rules… (never passwords)"
       />
       {matches.length > 0 && (
-        <p id="s-notes-warn" role="alert" className="mt-1.5 rounded-lg bg-warn-soft px-3 py-2 text-sm text-warn">
-          {PASSWORD_WARNING}{" "}
-          <span className="text-xs">Looks like: {matches.slice(0, 3).map((m) => m.hint).join(", ")}</span>
+        <p id="s-notes-warn" role="alert" className="status is-warn is-small mt-2 flex whitespace-normal">
+          <span>
+            {PASSWORD_WARNING}{" "}
+            <span className="text-muted">Looks like: {matches.slice(0, 3).map((m) => m.hint).join(", ")}</span>
+          </span>
         </p>
       )}
     </div>

@@ -6,7 +6,7 @@ import { removeDeviceAction, setTopicsAction } from "@/app/(app)/settings/notifi
 import { ConfirmButton } from "./client-form";
 import { NOTIFY_TOPIC_INFO } from "./notify-topics";
 import { currentSubscription, endpointKey } from "./notify-enable";
-import { cx } from "./ui";
+import { Tag, cx } from "./ui";
 
 export type DeviceRow = { id: string; endpointKey: string; label: string; topics: NotifyTopic[]; added: string; lastSent: string | null };
 
@@ -31,38 +31,39 @@ function Device({ d, mine }: { d: DeviceRow; mine: boolean }) {
   }
 
   return (
-    <li className="py-4">
-      <div className="flex items-start justify-between gap-3">
+    <li className="py-3">
+      <div className="flex items-baseline justify-between gap-3">
         <div className="min-w-0">
-          <p className="flex flex-wrap items-center gap-2 font-medium">
+          <p className="row-title">
             {d.label}
-            {mine && <span className="rounded-full bg-accent-soft px-2 py-0.5 text-xs font-medium text-accent">This device</span>}
+            {mine && <Tag>This device</Tag>}
           </p>
-          <p className="text-xs text-muted">Added {d.added}{d.lastSent ? ` · last notified ${d.lastSent}` : ""}</p>
+          <p className="meta">Added {d.added}{d.lastSent ? ` · last notified ${d.lastSent}` : ""}</p>
         </div>
         <form action={removeDeviceAction}>
           <input type="hidden" name="id" value={d.id} />
           <ConfirmButton confirm={`Stop notifications on ${d.label}?`} variant="ghost" size="sm">Remove</ConfirmButton>
         </form>
       </div>
-      <fieldset className="mt-2" aria-label={`What ${d.label} gets`}>
+      <fieldset className="mt-1" aria-label={`What ${d.label} gets`}>
         <ul className="flex flex-col">
           {NOTIFY_TOPIC_INFO.map((t) => {
             const id = `t-${d.id}-${t.topic}`;
             const on = topics.includes(t.topic);
             return (
               <li key={t.topic}>
-                <label htmlFor={id} className="flex min-h-11 cursor-pointer items-center gap-3 rounded-lg px-1 py-1.5 hover:bg-surface-2">
+                {/* Saves as you tap, so a switch (the input is the same checkbox, drawn as a track). */}
+                <label htmlFor={id} className="switch ps-switch w-full py-2">
                   <input
                     id={id}
                     type="checkbox"
                     checked={on}
                     onChange={(e) => toggle(t.topic, e.currentTarget.checked)}
-                    className="size-5 shrink-0"
                   />
+                  <span aria-hidden className="switch-track" />
                   <span className="min-w-0">
-                    <span className="block text-sm font-medium">{t.label}</span>
-                    <span className="block text-xs text-muted">{t.hint}</span>
+                    <span className="t">{t.label}</span>
+                    <span className="meta">{t.hint}</span>
                   </span>
                 </label>
               </li>
@@ -70,7 +71,7 @@ function Device({ d, mine }: { d: DeviceRow; mine: boolean }) {
           })}
         </ul>
       </fieldset>
-      <p role="status" aria-live="polite" className={cx("mt-1 text-xs", error ? "text-danger" : "text-muted")}>
+      <p role="status" aria-live="polite" className={cx("meta", error && "text-danger")}>
         {error ?? (pending ? "Saving…" : "")}
       </p>
     </li>
@@ -93,7 +94,7 @@ export function NotifyDevices({ devices }: { devices: DeviceRow[] }) {
   // This device first.
   const sorted = [...devices].sort((a, b) => Number(b.endpointKey === mine) - Number(a.endpointKey === mine));
   return (
-    <ul className="divide-y divide-border">
+    <ul className="list">
       {sorted.map((d) => <Device key={d.id} d={d} mine={d.endpointKey === mine} />)}
     </ul>
   );

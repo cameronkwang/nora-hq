@@ -4,7 +4,7 @@ import { OUTREACH_STAGES } from "@/lib/schema";
 import { formatDate } from "@/lib/dates";
 import { OutreachBoard } from "./outreach-board";
 import { OutreachStageSelect } from "./outreach-stage-select";
-import { Badge, PlatformTag, formatNumber, humanize } from "./ui";
+import { PlatformTag, Status, Tag, formatNumber, humanize } from "./ui";
 
 export type PipelineRow = Outreach & { creator: Creator };
 
@@ -30,7 +30,7 @@ export function OutreachPipeline({
   const byStage = (s: string) => rows.filter((r) => r.stage === s);
   const closed = rows.filter((r) => CLOSED.includes(r.stage));
   return (
-    <div className="space-y-4">
+    <div>
       <OutreachBoard
         columns={MAIN.map((stage) => {
           const items = byStage(stage);
@@ -38,32 +38,32 @@ export function OutreachPipeline({
             stage,
             label: humanize(stage),
             count: items.length,
-            content: (
-              <ul className="flex flex-1 flex-col gap-2">
-                {items.length === 0 ? (
-                  <li className="rounded-lg border border-dashed border-border px-2 py-4 text-center text-xs text-muted">Nobody here</li>
-                ) : (
-                  items.map((r) => <PipelineCard key={r.id} row={r} back={back} moveAction={moveAction} now={now} />)
-                )}
-              </ul>
-            ),
+            content:
+              items.length === 0 ? (
+                <p key={stage} className="g-col-empty">Nobody here</p>
+              ) : (
+                <ul key={stage} className="list">
+                  {items.map((r) => <PipelineCard key={r.id} row={r} back={back} moveAction={moveAction} now={now} />)}
+                </ul>
+              ),
           };
         })}
       />
 
-      <details className="rounded-xl border border-border bg-surface">
-        <summary className="cursor-pointer px-4 py-3 text-sm font-medium">
-          Declined or no response <span className="tabular-nums text-muted">({closed.length})</span>
+      <details className="sec g-fold">
+        <summary className="sec-head">
+          <span className="title">
+            Declined or no response<span className="meta num">{closed.length}</span>
+          </span>
+          <svg viewBox="0 0 16 16" aria-hidden fill="none" stroke="currentColor" strokeWidth={1.8}><path d="M6 3.5 10.5 8 6 12.5" strokeLinecap="round" strokeLinejoin="round" /></svg>
         </summary>
-        <div className="border-t border-border p-3">
-          {closed.length === 0 ? (
-            <p className="text-sm text-muted">No closed-out creators for this business.</p>
-          ) : (
-            <ul className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-              {closed.map((r) => <PipelineCard key={r.id} row={r} back={back} moveAction={moveAction} now={now} />)}
-            </ul>
-          )}
-        </div>
+        {closed.length === 0 ? (
+          <p className="empty meta">No closed-out creators for this business.</p>
+        ) : (
+          <ul className="g-cards grid gap-x-8 sm:grid-cols-2 lg:grid-cols-3">
+            {closed.map((r) => <PipelineCard key={r.id} row={r} back={back} moveAction={moveAction} now={now} />)}
+          </ul>
+        )}
       </details>
     </div>
   );
@@ -74,26 +74,22 @@ function PipelineCard({ row: r, back, moveAction, now }: { row: PipelineRow; bac
   const due = !!r.nextFollowUpAt && r.nextFollowUpAt <= now && (r.stage === "contacted" || r.stage === "followed_up");
   const followers = Math.max(c.instagramFollowers ?? 0, c.tiktokFollowers ?? 0);
   return (
-    <li className="rounded-lg border border-border bg-surface p-2.5 shadow-sm">
-      <div className="flex items-start justify-between gap-2">
-        <Link href={`/creators/${c.id}`} className="min-w-0 truncate text-sm font-medium hover:underline">
-          {c.name}
-        </Link>
-        {followers > 0 && <span className="shrink-0 text-xs tabular-nums text-muted">{formatNumber(followers)}</span>}
-      </div>
-      <p className="mt-0.5 truncate text-xs text-muted">
+    <li className="g-card">
+      <Link href={`/creators/${c.id}`}>{c.name}</Link>
+      <p className="more truncate">
         {c.instagramHandle ? `@${c.instagramHandle}` : c.tiktokHandle ? `@${c.tiktokHandle}` : (c.email ?? "")}
+        {followers > 0 && <span className="num"> · {formatNumber(followers)}</span>}
       </p>
-      <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+      <div className="facts">
         <PlatformTag platform={r.channel} />
-        {COMP_SHORT[r.compType] && <Badge>{COMP_SHORT[r.compType]}</Badge>}
-        {c.doNotContact && <Badge tone="danger">Do not contact</Badge>}
-        {due && <Badge tone="warn">Follow up due</Badge>}
+        {COMP_SHORT[r.compType] && <Tag bare>{COMP_SHORT[r.compType]}</Tag>}
+        {c.doNotContact && <Status tone="danger" small>Do not contact</Status>}
+        {due && <Status tone="warn" small>Follow up due</Status>}
         {!due && r.nextFollowUpAt && !CLOSED.includes(r.stage) && r.stage !== "posted" && (
-          <span className="text-xs text-muted">Follow up {formatDate(r.nextFollowUpAt)}</span>
+          <span>Follow up {formatDate(r.nextFollowUpAt)}</span>
         )}
       </div>
-      <form action={moveAction} className="mt-2">
+      <form action={moveAction}>
         <input type="hidden" name="clientId" value={r.clientId} />
         <input type="hidden" name="creatorId" value={r.creatorId} />
         <input type="hidden" name="channel" value={r.channel} />

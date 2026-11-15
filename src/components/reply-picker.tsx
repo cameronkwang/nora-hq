@@ -98,10 +98,10 @@ export function ReplyPicker({
         className="sheet fixed inset-x-0 top-auto bottom-0 w-full md:inset-0 md:m-auto md:h-fit md:max-w-lg"
       >
         <div className="sheet-panel mx-auto flex max-h-[85dvh] flex-col overflow-hidden rounded-t-2xl bg-surface shadow-xl md:max-h-[80dvh] md:rounded-2xl">
-          <div className="border-b border-border px-4 pb-3 pt-3 md:px-5 md:pt-4">
-            <div className="mb-2 flex items-center justify-between gap-3">
-              <h2 id={titleId} className="text-base font-semibold">Saved replies</h2>
-              <button type="button" onClick={close} className="-mr-2 flex h-11 shrink-0 items-center rounded-lg px-3 text-sm font-medium text-accent">
+          <div className="border-b border-border px-4 pb-3 pt-4 md:px-6 md:pt-5">
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <h2 id={titleId} className="title">Saved replies</h2>
+              <button type="button" onClick={close} className={cx(buttonClass("ghost"), "-mr-2 shrink-0")}>
                 Close
               </button>
             </div>
@@ -118,45 +118,36 @@ export function ReplyPicker({
               autoComplete="off"
             />
             {presentCats.length > 1 && (
-              <div className="-mx-4 mt-2 flex gap-1.5 overflow-x-auto px-4 md:mx-0 md:px-0" role="group" aria-label="Category">
+              <div className="chips -mx-4 mt-3 flex-nowrap overflow-x-auto px-4 md:mx-0 md:px-0" role="group" aria-label="Category">
                 {[{ key: "" as const, label: "All" }, ...presentCats.map((c) => ({ key: c, label: REPLY_CATEGORY_LABEL[c] }))].map((c) => (
-                  <button
-                    key={c.key || "all"}
-                    type="button"
-                    aria-pressed={cat === c.key}
-                    onClick={() => setCat(c.key)}
-                    className={cx(
-                      "min-h-11 shrink-0 rounded-full border px-3 text-sm md:min-h-8",
-                      cat === c.key ? "border-accent bg-accent-soft font-medium text-accent" : "border-border text-muted hover:text-text",
-                    )}
-                  >
-                    {c.label}
+                  <button key={c.key || "all"} type="button" aria-pressed={cat === c.key} onClick={() => setCat(c.key)} className="chip shrink-0">
+                    <span>{c.label}</span>
                   </button>
                 ))}
               </div>
             )}
           </div>
 
-          <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-3 md:px-5">
-            {error && <p role="alert" className="rounded-lg bg-danger-soft px-3 py-2 text-sm text-danger">{error}</p>}
-            {!error && replies === null && <p className="py-6 text-center text-sm text-muted">Loading…</p>}
+          <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-2 md:px-6">
+            {error && <p role="alert" className="status is-danger mt-3 whitespace-normal">{error}</p>}
+            {!error && replies === null && <p className="meta py-6">Loading…</p>}
             {!error && replies && shown.length === 0 && (
-              <p className="py-6 text-center text-sm text-muted">
+              <p className="meta py-6">
                 {replies.length === 0 ? "No saved replies yet." : "Nothing matches."}{" "}
-                <Link href="/replies" className="text-accent hover:underline">Add one</Link>
+                <Link href="/replies" className="link">Add one</Link>
               </p>
             )}
-            <ul className="flex flex-col gap-2">
+            <ul className="list">
               {shown.map((r) => {
                 const text = fillReply(r.body, context);
                 const missing = missingPlaceholders(text);
                 const state = copied === r.id ? "ok" : copied === `fail:${r.id}` ? "fail" : null;
                 return (
-                  <li key={r.id} className="rounded-lg border border-border p-3">
-                    <p className="text-sm font-semibold">{r.title}</p>
-                    <p className="mt-1 line-clamp-3 whitespace-pre-line text-sm text-muted">{text}</p>
+                  <li key={r.id} className="py-3">
+                    <p className="font-medium">{r.title}</p>
+                    <p className="meta mt-0.5 line-clamp-3 whitespace-pre-line">{text}</p>
                     {missing.length > 0 && (
-                      <p className="mt-1 text-xs text-warn">Fill in: {missing.map((m) => `{${m}}`).join(" ")}</p>
+                      <p className="status is-warn is-small mt-1 whitespace-normal">Fill in: {missing.map((m) => `{${m}}`).join(" ")}</p>
                     )}
                     <div className="mt-2 flex flex-wrap gap-2">
                       {onPick && (
@@ -164,7 +155,7 @@ export function ReplyPicker({
                           Insert
                         </button>
                       )}
-                      <button type="button" onClick={() => use(r, "copy")} className={buttonClass(onPick ? "ghost" : "primary", "sm")}>
+                      <button type="button" onClick={() => use(r, "copy")} className={buttonClass(onPick ? "ghost" : "secondary", "sm")}>
                         <span aria-live="polite">{state === "ok" ? "Copied ✓" : state === "fail" ? "Copy failed" : "Copy"}</span>
                       </button>
                     </div>
@@ -174,8 +165,8 @@ export function ReplyPicker({
             </ul>
           </div>
 
-          <div className="border-t border-border px-4 py-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] md:px-5">
-            <Link href="/replies" className="inline-flex min-h-11 items-center text-sm text-accent hover:underline md:min-h-0">
+          <div className="border-t border-border px-4 py-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] md:px-6 md:py-3">
+            <Link href="/replies" className="link-quiet inline-flex min-h-11 items-center md:pointer-fine:min-h-0">
               Manage saved replies →
             </Link>
           </div>

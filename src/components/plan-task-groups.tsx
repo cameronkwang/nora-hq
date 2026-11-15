@@ -2,40 +2,50 @@ import { monthLabel } from "@/lib/dates";
 import { planGroupProgress, type PlanGroup } from "@/lib/plan-groups";
 import { PlanTaskGroup } from "./plan-task-group";
 import { TaskRow, isOverdue } from "./task-row";
-import { Badge } from "./ui";
+import { ProgressBar, Tag, cx } from "./ui";
 
 /**
  * Monthly-plan tasks condensed to one collapsible row per plan item:
- *   Instagram feed posts · 3 of 8 ▸
+ *   ›  Instagram feed posts            ▬▬▬▭▭▭▭▭   3 of 8
  * (done of the monthly target; the slots are inside). Groups from another month than the one being looked at
- * carry that month ("From Oct"). Build `groups` with groupPlanTasks() from lib/plan-groups.
+ * carry that month ("From Oct") on a second line. Build `groups` with groupPlanTasks() from lib/plan-groups.
  * Server component; `selectable` passes through to the rows inside a <TaskSelection> (the /tasks bulk bar).
  */
 export function PlanTaskGroups({ groups, month, selectable = false }: { groups: PlanGroup[]; month: string; selectable?: boolean }) {
   if (groups.length === 0) return null;
   return (
-    <ul className="divide-y divide-border">
+    <ul className="list">
       {groups.map((g) => {
         const overdue = g.tasks.filter((t) => isOverdue(t)).length;
+        const other = g.month !== month;
         return (
           <li key={g.key}>
             <PlanTaskGroup
               summary={
-                <span className="flex min-w-0 flex-1 flex-wrap items-baseline gap-x-2 gap-y-0.5">
-                  <span className="min-w-0 break-words text-sm font-medium">{g.title}</span>
-                  <span className="shrink-0 text-sm tabular-nums text-muted">· {planGroupProgress(g)}</span>
-                  {g.month !== month && (
-                    <Badge tone={g.month < month ? "warn" : "neutral"}>{g.month < month ? `From ${monthLabel(g.month, "short")}` : monthLabel(g.month, "short")}</Badge>
+                <>
+                  {/* The hidden "·" keeps the summary reading "Title · 3 of 8" for screen readers and copy-paste. */}
+                  <span className="group-title row-title is-plain">
+                    {g.title}
+                    <span className="sr-only"> ·</span>
+                  </span>
+                  {g.target > 0 && <ProgressBar value={g.done} max={g.target} />}
+                  <span className={cx("meta num n", g.target === 0 && "is-wide")}>{planGroupProgress(g)}</span>
+                  {(other || overdue > 0) && (
+                    <span className="group-extra meta">
+                      {other && <Tag bare>{g.month < month ? `From ${monthLabel(g.month, "short")}` : monthLabel(g.month, "short")}</Tag>}
+                      {overdue > 0 && <span className="over">{overdue} overdue</span>}
+                    </span>
                   )}
-                  {overdue > 0 && <span className="shrink-0 text-xs font-medium text-danger">{overdue} overdue</span>}
-                </span>
+                </>
               }
             >
-              <div className="divide-y divide-border border-t border-border pl-2">
+              <ul className="list group-tasks">
                 {g.tasks.map((t) => (
-                  <TaskRow key={t.id} task={t} showClient={false} selectable={selectable} />
+                  <li key={t.id}>
+                    <TaskRow task={t} showClient={false} selectable={selectable} />
+                  </li>
                 ))}
-              </div>
+              </ul>
             </PlanTaskGroup>
           </li>
         );

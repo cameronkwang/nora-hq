@@ -5,7 +5,7 @@ import { requireUser } from "@/lib/auth";
 import { getDb, schema } from "@/lib/db";
 import { listBusinesses } from "@/lib/data";
 import { getLead } from "@/lib/ops-leads";
-import { Card, PageHeader } from "@/components/ui";
+import { PageHeader } from "@/components/ui";
 import { OnboardForm, type OnboardPrefill, type PlanSource } from "@/components/onboard-form";
 
 export const dynamic = "force-dynamic";
@@ -48,17 +48,13 @@ export default async function NewClientPage({ searchParams }: { searchParams: Pr
     : {};
 
   return (
-    <div className="mx-auto w-full max-w-xl">
-      <p className="mb-2 text-sm">
-        <Link href={lead ? `/leads/${lead.id}` : "/clients"} className="text-muted hover:underline">← {lead ? lead.name : "Businesses"}</Link>
-      </p>
+    <div className="w-full max-w-xl">
       <PageHeader
+        crumb={<Link href={lead ? `/leads/${lead.id}` : "/clients"}>{lead ? lead.name : "Businesses"}</Link>}
         title={lead ? `Start managing ${lead.name}` : "New client"}
         subtitle={lead ? "Check the details, tap once. The lead is marked Won." : "Name or link, tap once. Claude does the homework."}
       />
-      <Card>
-        <OnboardForm prefill={prefill} planSources={await planSources()} />
-      </Card>
+      <OnboardForm prefill={prefill} planSources={await planSources()} />
     </div>
   );
 }

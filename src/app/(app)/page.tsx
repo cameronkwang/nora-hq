@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { and, asc, desc, eq, inArray, isNotNull, lt, lte, ne, notInArray, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, isNotNull, lt, lte, ne, notInArray, or, sql } from "drizzle-orm";
 import { assigneeFor, requireUser } from "@/lib/auth";
 import { getDb, schema } from "@/lib/db";
 import { countNewCollabRequests, isCreatorClient, listClients } from "@/lib/data";
@@ -11,9 +11,10 @@ import { TaskList, TaskRow, isOverdue } from "@/components/task-row";
 import { blobEnabled } from "@/lib/uploads";
 import { QuickAsk } from "@/components/quick-ask";
 import { NotifyHomeCard } from "@/components/notify-home-card";
-import { NewClientLink } from "@/components/onboard-link";
+import { NEW_CLIENT_HREF } from "@/components/onboard-link";
 import { ClientHealth } from "@/components/client-health-strip";
-import { Badge, Card, EmptyState, PageHeader, ProgressBar, clientLabel, cx, formatNumber, humanize } from "@/components/ui";
+import { KIND_LABELS } from "@/components/draft-checks";
+import { Card, Count, EmptyState, PageHeader, ProgressBar, Status, Tag, clientLabel, formatNumber, humanize } from "@/components/ui";
 
 export const dynamic = "force-dynamic";
 
@@ -65,8 +66,8 @@ function addDays(date: string, n: number): string {
 const SENT: Record<AskRoute, string> = {
   auto: "Sent. Claude will sort it out.",
   claude: "Sent to Claude.",
-  cameron: "Sent to Cameron — it’s on his task list.",
-  nora: "Sent to Nora — it’s on her task list.",
+  cameron: "Sent to Cameron. It’s on his task list.",
+  nora: "Sent to Nora. It’s on her task list.",
   idea: "Saved to Ideas.",
   fyi: "Noted. Claude will take it from here.",
 };
@@ -104,7 +105,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<Rec
   const forYou = await getForYou(user.email, me, now);
   const forYouTaskIds = new Set(forYou.tasks.map((t) => t.id));
 
-  // Nora's own workspace always leads the grid.
+  // Nora's own workspace always leads the Businesses ledger.
   const months = cms.filter((x): x is ClientMonth => !!x).sort((a, b) => Number(isCreatorClient(b.client)) - Number(isCreatorClient(a.client)));
   const names = new Map(clients.map((c) => [c.id, clientLabel(c)]));
   const first = user.name.split(" ")[0];
@@ -116,141 +117,161 @@ export default async function Home({ searchParams }: { searchParams: Promise<Rec
   const hasForYou = forYou.asks.length > 0 || forYou.tasks.length > 0;
   const caughtUp = drafts.length === 0 && tasks.length === 0 && !hasForYou;
 
+  const asksLink = asksWaiting.n > 0 ? (
+    <Link href="/asks" className="link-quiet">
+      {asksWaiting.n} {asksWaiting.n === 1 ? "ask" : "asks"} waiting →
+    </Link>
+  ) : undefined;
+
   return (
-    <div className="flex flex-col gap-6">
-      {/* Drop anything in — first thing on screen. */}
-      <QuickAsk me={me} directUpload={blobEnabled()} />
-
-      {/* One-time "turn on phone alerts" prompt; hides itself once handled. */}
-      <NotifyHomeCard />
-
+    <div>
       <PageHeader title={`${greeting()}, ${first}`} subtitle={todayLabel()} />
 
-      {sent && (
-        <p role="status" className="-mt-2 flex flex-wrap items-center justify-between gap-x-3 rounded-lg bg-ok-soft px-3 py-1 text-sm text-ok">
-          <span className="py-1.5">{SENT[sent]}</span>
-          <Link href="/asks/new" className="inline-flex min-h-11 items-center font-semibold hover:underline md:min-h-8">
-            Add another
-          </Link>
-        </p>
-      )}
+      {/* Drop anything in: the first thing under the greeting. */}
+      <QuickAsk me={me} directUpload={blobEnabled()} />
 
-      {/* One compact row: the three things that can be waiting on you. */}
-      <div className="-mt-2 grid grid-cols-3 gap-2 sm:gap-3">
-        <Tile
-          href="/review"
-          value={draftCount.n}
-          label="Drafts to review"
-          primary
-        />
-        <Tile href="/asks" value={asksWaiting.n} label="Asks waiting" />
-        <Tile
-          href="/tasks?scope=all"
-          value={dueCount.n}
-          label="Tasks due"
-          hint={overdueCount.n > 0 ? <span className="font-semibold text-danger">{overdueCount.n} overdue</span> : null}
-        />
+      <div className="home-notes">
+        {/* One-time "turn on phone alerts" prompt; hides itself once handled. */}
+        <NotifyHomeCard />
+        {sent && (
+          <p role="status" className="notice">
+            <Status tone="ok" className="whitespace-normal">{SENT[sent]}</Status>
+            <Link href="/asks/new" className="link inline-flex min-h-11 items-center md:min-h-0">
+              Add another
+            </Link>
+          </p>
+        )}
+        {/* One row per business: a colored dot and its single worst issue (or "All good"). */}
+        <ClientHealth />
       </div>
 
-      <Card title="Needs you">
-        {caughtUp ? (
-          <EmptyState title="You’re all caught up.">No drafts waiting and nothing due today.</EmptyState>
-        ) : (
-          <div className="flex flex-col gap-5">
-            {hasForYou && (
-              <section>
-                <SectionHead title="For you" href={me ? "/asks?tab=me" : "/asks"} total={forYou.askTotal} shown={forYou.asks.length} />
-                {forYou.asks.length > 0 && (
-                  <ul className="divide-y divide-border">
-                    {forYou.asks.map((a) => (
-                      <li key={a.id}>
-                        <Link href={`/asks/${a.id}`} className="-mx-2 flex min-h-11 items-center gap-3 rounded-lg px-2 py-2.5 hover:bg-surface-2">
-                          <span className="min-w-0 flex-1">
-                            <span className="block truncate text-sm font-medium">{a.title}</span>
-                            <span className="mt-0.5 flex flex-wrap items-center gap-x-1.5 gap-y-1 text-xs text-muted">
-                              {a.claudeAsked ? <Badge tone="warn">Claude asked a question</Badge> : <Badge tone="info">Ask for you</Badge>}
-                              <span className="truncate">
-                                {a.clientId && names.get(a.clientId) ? `${names.get(a.clientId)} · ` : ""}
-                                {relativeTime(a.at)}
-                              </span>
-                            </span>
-                          </span>
-                          <span aria-hidden className="shrink-0 text-muted">›</span>
-                        </Link>
-                      </li>
+      {/* What is waiting, by kind. Each count sits in its section title (and in the sidebar), not in a tile. */}
+      <div className="cols">
+        <div>
+          {caughtUp ? (
+            <Card title="Needs you" actions={asksLink}>
+              <EmptyState title="You’re all caught up.">No drafts waiting and nothing due today.</EmptyState>
+            </Card>
+          ) : (
+            <>
+              {(hasForYou || asksWaiting.n > 0) && (
+                <Card title="For you" actions={asksLink} padded={false}>
+                  {hasForYou ? (
+                    <div className="approve-stack">
+                      {forYou.asks.length > 0 && (
+                        <ul className="list">
+                          {forYou.asks.map((a) => (
+                            <QueueRow
+                              key={a.id}
+                              href={`/asks/${a.id}`}
+                              title={a.title}
+                              clamp
+                              note={a.claudeAsked ? <Status tone="warn" small>Claude asked a question</Status> : <Status tone="info" small>Ask for you</Status>}
+                              business={a.clientId ? names.get(a.clientId) : null}
+                              when={relativeTime(a.at)}
+                            />
+                          ))}
+                          {forYou.askTotal > forYou.asks.length && (
+                            <li>
+                              <Link href={me ? "/asks?tab=me" : "/asks"} className="row link-quiet">
+                                See all {forYou.askTotal} asks for you →
+                              </Link>
+                            </li>
+                          )}
+                        </ul>
+                      )}
+                      {forYou.tasks.length > 0 && (
+                        <TaskList>
+                          {forYou.tasks.map((t) => (
+                            <TaskRow key={t.id} task={t} clientName={t.clientId ? names.get(t.clientId) : null} />
+                          ))}
+                        </TaskList>
+                      )}
+                    </div>
+                  ) : (
+                    <EmptyState title="Nothing routed to you">Asks for you and your own tasks due soon show up here.</EmptyState>
+                  )}
+                </Card>
+              )}
+              {drafts.length > 0 && (
+                <Card
+                  title={<>To approve <Count n={draftCount.n} /></>}
+                  actions={<Link href="/review" className="link-quiet">See all {draftCount.n} →</Link>}
+                  padded={false}
+                >
+                  <ul className="list">
+                    {drafts.map((d) => (
+                      <QueueRow
+                        key={d.id}
+                        href={`/review?draft=${d.id}`}
+                        title={d.title}
+                        note={<span className="meta">{KIND_LABELS[d.kind] ?? humanize(d.kind)}</span>}
+                        business={d.clientId ? names.get(d.clientId) : null}
+                        when={relativeTime(d.createdAt)}
+                      />
                     ))}
                   </ul>
-                )}
-                {forYou.tasks.length > 0 && (
-                  <TaskList>
-                    {forYou.tasks.map((t) => (
-                      <TaskRow key={t.id} task={t} clientName={t.clientId ? names.get(t.clientId) : null} />
-                    ))}
-                  </TaskList>
-                )}
-              </section>
-            )}
-            {drafts.length > 0 && (
-              <section>
-                <SectionHead title="To review" href="/review" total={draftCount.n} shown={drafts.length} />
-                <ul className="divide-y divide-border">
-                  {drafts.map((d) => (
-                    <li key={d.id}>
-                      <Link
-                        href={`/review?draft=${d.id}`}
-                        className="-mx-2 flex min-h-11 items-center gap-3 rounded-lg px-2 py-2.5 hover:bg-surface-2"
-                      >
-                        <span className="min-w-0 flex-1">
-                          <span className="block break-words text-sm font-medium">{d.title}</span>
-                          <span className="mt-0.5 block truncate text-xs text-muted">
-                            {humanize(d.kind)}
-                            {d.clientId && names.get(d.clientId) ? ` · ${names.get(d.clientId)}` : ""} · {relativeTime(d.createdAt)}
-                          </span>
-                        </span>
-                        <span aria-hidden className="shrink-0 text-muted">›</span>
-                      </Link>
-                    </li>
-                  ))}
-                </ul>
-              </section>
-            )}
-            {tasks.length > 0 && (
-              <section>
-                <SectionHead title="Due today or overdue" href="/tasks?scope=all" total={dueCount.n} shown={tasks.length} />
-                <TaskList>
-                  {tasks.map((t) => (
-                    <TaskRow key={t.id} task={t} clientName={t.clientId ? names.get(t.clientId) : null} />
-                  ))}
-                </TaskList>
-              </section>
-            )}
-          </div>
-        )}
-      </Card>
-
-      {/* One row per business: a colored dot and its single worst issue (or "All good"). */}
-      <ClientHealth />
-
-      <section>
-        <div className="mb-3 flex items-end justify-between gap-2">
-          <h2 className="text-lg font-semibold">Businesses</h2>
-          <div className="flex items-center gap-3">
-            <span className="text-sm text-muted">{monthLabel(month)}</span>
-            <NewClientLink />
-          </div>
+                </Card>
+              )}
+              {dueCount.n > 0 && (
+                <Card
+                  title={
+                    <>
+                      Tasks <Count n={dueCount.n} />
+                      {overdueCount.n > 0 && <span className="meta text-danger">{overdueCount.n} overdue</span>}
+                    </>
+                  }
+                  actions={<Link href="/tasks?scope=all" className="link-quiet">All tasks →</Link>}
+                  padded={false}
+                >
+                  {tasks.length > 0 ? (
+                    <TaskList>
+                      {tasks.map((t) => (
+                        <TaskRow key={t.id} task={t} clientName={t.clientId ? names.get(t.clientId) : null} />
+                      ))}
+                    </TaskList>
+                  ) : (
+                    <p className="sec-note">Due today or overdue. They are listed under For you.</p>
+                  )}
+                </Card>
+              )}
+            </>
+          )}
         </div>
+
+        <aside>
+          <NoraWeek now={now} />
+        </aside>
+      </div>
+
+      <Card
+        title="Businesses"
+        className="[&>.sec-head]:flex-wrap"
+        actions={
+          <span className="flex items-baseline gap-4">
+            <span className="meta whitespace-nowrap">{monthLabel(month)}</span>
+            <Link href={NEW_CLIENT_HREF} className="link-quiet inline-flex items-baseline gap-1">
+              <svg viewBox="0 0 16 16" aria-hidden className="size-3 self-center" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round">
+                <path d="M8 3v10M3 8h10" />
+              </svg>
+              New client
+            </Link>
+          </span>
+        }
+        padded={false}
+      >
         {months.length === 0 ? (
           <EmptyState title="No businesses yet.">
-            <Link href="/clients/new" className="text-accent hover:underline">Add your first business</Link> to start tracking its monthly plan.
+            <Link href="/clients/new" className="link">Add your first business</Link> to start tracking its monthly plan.
           </EmptyState>
         ) : (
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+          <ul className="list">
             {months.map((cm) => (
-              <BusinessCard key={cm.client.id} cm={cm} now={now} newCollabs={isCreatorClient(cm.client) ? newCollabs : 0} />
+              <BusinessRow key={cm.client.id} cm={cm} now={now} newCollabs={isCreatorClient(cm.client) ? newCollabs : 0} />
             ))}
-          </div>
+          </ul>
         )}
-      </section>
+      </Card>
     </div>
   );
 }
@@ -290,40 +311,105 @@ async function getForYou(email: string, me: "cameron" | "nora" | null, now: stri
   return { asks: asks.slice(0, FOR_YOU_MAX), askTotal: asks.length, tasks };
 }
 
-function Tile({ href, value, label, hint, primary }: { href: string; value: number; label: string; hint?: React.ReactNode; primary?: boolean }) {
-  const hot = primary && value > 0;
+/**
+ * One thing waiting (an ask, a draft): title, one more fact, the business, when. One line wide, two lines narrow.
+ * `clamp` is for a title that is free text (an ask's first line): one line with an ellipsis wide, two lines narrow.
+ */
+function QueueRow({ href, title, note, business, when, clamp }: { href: string; title: string; note?: React.ReactNode; business?: string | null; when: string; clamp?: boolean }) {
   return (
-    <Link
-      href={href}
-      className={cx(
-        "flex min-h-11 flex-col justify-between rounded-xl border p-3 transition sm:p-4",
-        hot ? "border-accent bg-accent text-accent-fg hover:opacity-90" : "border-border bg-surface hover:bg-surface-2",
-      )}
-    >
-      <span className={cx("text-xs font-medium leading-tight", hot ? "opacity-90" : "text-muted")}>{label}</span>
-      {/* hint sits beside the number so every tile's number lines up */}
-      <span className="mt-1 flex flex-wrap items-baseline gap-x-2">
-        <span className="text-2xl font-semibold tabular-nums">{value}</span>
-        {hint ? <span className="text-xs leading-tight">{hint}</span> : null}
-      </span>
-    </Link>
+    <li>
+      <Link href={href} className="row approve-row">
+        <span className={clamp ? "approve-main is-clamp" : "approve-main"}>
+          <span className="row-title">{title}</span>
+          {note && <span className="approve-note max-lg:hidden">{note}</span>}
+        </span>
+        <span className="row-meta">
+          {note && <span className="lg:hidden">{note}</span>}
+          {business && <span className="meta where" title={business}>{business}</span>}
+          <span className="meta when">{when}</span>
+        </span>
+        <Chevron />
+      </Link>
+    </li>
   );
 }
 
-function SectionHead({ title, href, total, shown }: { title: string; href: string; total: number; shown: number }) {
+function Chevron() {
   return (
-    <div className="mb-1 flex items-center justify-between gap-2">
-      <h3 className="text-xs font-semibold uppercase tracking-wide text-muted">{title}</h3>
-      {total > shown && (
-        <Link href={href} className="-my-2 flex min-h-11 items-center text-xs font-medium text-accent hover:underline">
-          See all {total} →
-        </Link>
-      )}
-    </div>
+    <svg className="chev" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="m9 6 6 6-6 6" />
+    </svg>
   );
 }
 
-function BusinessCard({ cm, now, newCollabs = 0 }: { cm: ClientMonth; now: string; newCollabs?: number }) {
+const utc = (date: string) => new Date(`${date}T12:00:00Z`);
+const dayPart = (date: string, opts: Intl.DateTimeFormatOptions) => new Intl.DateTimeFormat("en-US", { timeZone: "UTC", ...opts }).format(utc(date));
+
+/**
+ * Nora's week: the next seven days of her schedule as an agenda (the day in the margin, the visits beside it).
+ * Read-only, and never an amount: the schedule has no money in it. A failure here never takes Home down.
+ */
+async function NoraWeek({ now }: { now: string }) {
+  const end = addDays(now, 6);
+  let rows: schema.ScheduleItem[];
+  try {
+    const db = await getDb();
+    rows = await db
+      .select()
+      .from(schema.scheduleItems)
+      .where(and(gte(schema.scheduleItems.date, now), lte(schema.scheduleItems.date, end)))
+      .orderBy(asc(schema.scheduleItems.date), asc(schema.scheduleItems.businessName));
+  } catch (e) {
+    console.error("[home] week failed", e);
+    return null;
+  }
+  const days = new Map<string, schema.ScheduleItem[]>();
+  for (const r of rows) if (r.date) days.set(r.date, [...(days.get(r.date) ?? []), r]);
+  const sameMonth = now.slice(0, 7) === end.slice(0, 7);
+  const range = `${dayPart(now, { month: "short", day: "numeric" })} – ${sameMonth ? dayPart(end, { day: "numeric" }) : dayPart(end, { month: "short", day: "numeric" })}`;
+
+  return (
+    <Card title={<>Nora’s week <span className="meta whitespace-nowrap">{range}</span></>} actions={<Link href="/calendar" className="link-quiet">Schedule →</Link>} padded={false}>
+      {days.size === 0 ? (
+        <EmptyState title="Nothing on the schedule this week" />
+      ) : (
+        <ol className="agenda">
+          {[...days].map(([date, items]) => (
+            <li key={date} className={date === now ? "is-today" : undefined}>
+              <div className="day-date" aria-label={`${dayPart(date, { weekday: "long", month: "long", day: "numeric" })}${date === now ? ", today" : ""}`}>
+                <span className="eyebrow dow">{dayPart(date, { weekday: "short" })}</span>
+                <span className="dom">{dayPart(date, { day: "numeric" })}</span>
+              </div>
+              <ul className="list">
+                {items.map((it) => (
+                  <li key={it.id} className="row">
+                    <span className="row-title">
+                      {it.businessName}
+                      {it.isFree && <Tag>Free</Tag>}
+                    </span>
+                    {it.needsReel && !it.reelPostedAt &&
+                      (date <= now ? (
+                        <span className="reel">
+                          <span className="emoji" aria-hidden>📸</span> Reel to post
+                        </span>
+                      ) : (
+                        <span className="reel is-later">
+                          <span className="emoji" role="img" aria-label="Reel">📸</span>
+                        </span>
+                      ))}
+                  </li>
+                ))}
+              </ul>
+            </li>
+          ))}
+        </ol>
+      )}
+    </Card>
+  );
+}
+
+/** One business in the ledger: its name (and what is waiting there), this month's plan, open tasks, latest views. */
+function BusinessRow({ cm, now, newCollabs = 0 }: { cm: ClientMonth; now: string; newCollabs?: number }) {
   const creator = isCreatorClient(cm.client);
   const { done, target } = planProgress(cm);
   const views = latestViews(cm);
@@ -331,73 +417,59 @@ function BusinessCard({ cm, now, newCollabs = 0 }: { cm: ClientMonth; now: strin
   const overdue = cm.openTasks.filter((t) => isOverdue(t, now)).length;
   const open = cm.openTasks.length;
   const chips = [
-    { n: newCollabs, label: newCollabs === 1 ? "new collab request" : "new collab requests", href: "/collabs", cls: "text-accent" },
-    { n: cm.pendingDrafts, label: cm.pendingDrafts === 1 ? "draft" : "drafts", href: `/review?client=${id}`, cls: "text-accent" },
-    { n: cm.unrepliedReviews, label: cm.unrepliedReviews === 1 ? "review" : "reviews", href: `/reviews?client=${id}`, cls: "text-google" },
-    { n: overdue, label: "overdue", href: `/tasks?client=${id}&scope=all`, cls: "text-danger" },
+    { n: newCollabs, label: newCollabs === 1 ? "new collab request" : "new collab requests", href: "/collabs" },
+    { n: cm.pendingDrafts, label: cm.pendingDrafts === 1 ? "draft" : "drafts", href: `/review?client=${id}` },
+    { n: cm.unrepliedReviews, label: cm.unrepliedReviews === 1 ? "review" : "reviews", href: `/reviews?client=${id}` },
+    { n: overdue, label: "overdue", href: `/tasks?client=${id}&scope=all` },
   ].filter((c) => c.n > 0);
 
   return (
-    <article
-      className={cx(
-        "relative flex flex-col rounded-xl border p-4 transition",
-        creator ? "border-accent/40 bg-accent-soft hover:border-accent" : "border-border bg-surface hover:border-muted/50",
-      )}
-    >
-      <div className="flex items-baseline justify-between gap-3">
-        <h3 className="flex min-w-0 items-baseline gap-2 font-semibold">
-          {/* The whole card opens the business; the chips below stay their own links. */}
-          <Link href={`/clients/${id}`} className="truncate after:absolute after:inset-0 after:rounded-xl">
+    <li className="ledger-row">
+      <div className="ledger-main">
+        <span className="ledger-name">
+          <Link href={`/clients/${id}`} className="row-title">
             {cm.client.name}
           </Link>
-          {creator && <span className="shrink-0 rounded-full bg-surface px-2 py-0.5 text-xs font-medium text-accent">Creator</span>}
-        </h3>
-        {cm.client.location && <span className="shrink-0 truncate text-xs text-muted">{cm.client.location}</span>}
-      </div>
-
-      <div className="mt-3">
-        {target > 0 ? (
-          <>
-            <div className="mb-1 flex items-baseline justify-between text-xs">
-              <span className="text-muted">Monthly plan</span>
-              <span className="font-semibold tabular-nums">
-                {done}/{target}
+          {creator && <Tag>Creator</Tag>}
+          {cm.client.location && <span className="meta">{cm.client.location}</span>}
+        </span>
+        {chips.length > 0 && (
+          <span className="ledger-wait">
+            {chips.map((c) => (
+              <span key={c.label}>
+                <Link href={c.href} className="link">
+                  {c.n} {c.label}
+                </Link>
               </span>
-            </div>
-            <ProgressBar value={done} max={target} />
-          </>
-        ) : (
-          <p className="text-xs text-muted">No monthly plan yet.</p>
+            ))}
+          </span>
         )}
       </div>
-
-      <div className="mt-3 flex flex-wrap items-center justify-between gap-x-3 gap-y-1 text-xs text-muted">
-        <span>
-          <span className="font-semibold tabular-nums text-text">{open}</span> open {open === 1 ? "task" : "tasks"}
+      <div className="ledger-stats">
+        {target > 0 ? (
+          <div className="ledger-plan meta">
+            <span>Plan</span>{" "}
+            <ProgressBar value={done} max={target} />
+            <span className="num">
+              <b>{done}</b> of {target}
+            </span>
+          </div>
+        ) : (
+          <span className="meta">No monthly plan yet.</span>
+        )}
+        <span className="meta num">
+          <b>{open}</b> open {open === 1 ? "task" : "tasks"}
         </span>
-        <span>
+        <span className="meta ledger-views">
           {views ? (
             <>
-              <span className="font-semibold tabular-nums text-text">{formatNumber(views.views)}</span> views · {monthLabel(views.month, "short")}
+              <b>{formatNumber(views.views)}</b> views · {monthLabel(views.month, "short")}
             </>
           ) : (
             "No views logged"
           )}
         </span>
       </div>
-
-      {chips.length > 0 && (
-        <p className="relative z-10 mt-3 flex flex-wrap items-center gap-x-1.5 border-t border-border pt-2 text-xs">
-          {chips.map((c, i) => (
-            <span key={c.label} className="inline-flex items-center gap-1.5">
-              {i > 0 && <span aria-hidden className="text-muted">·</span>}
-              <Link href={c.href} className={cx("inline-flex min-h-11 items-center font-semibold md:min-h-7 hover:underline", c.cls)}>
-                {c.n} {c.label}
-              </Link>
-            </span>
-          ))}
-        </p>
-      )}
-    </article>
+    </li>
   );
 }

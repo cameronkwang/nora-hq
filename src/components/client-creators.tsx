@@ -1,7 +1,7 @@
 import Link from "next/link";
 import type { ClientMonth } from "@/lib/reports";
 import { formatDate, relativeTime } from "@/lib/dates";
-import { Badge, EmptyState, PlatformTag, StatusBadge, cx } from "./ui";
+import { EmptyState, PlatformTag, Status, StatusBadge } from "./ui";
 
 export type CreatorFilter = "all" | "month" | "active" | "posted";
 
@@ -24,93 +24,90 @@ export function filterOutreach(rows: Row[], filter: CreatorFilter, monthStart: D
   }
 }
 
-/** Filter chips as links (no client JS). `href` builds the URL for a given filter. */
+/** Filter chips as links (no client JS). `href` builds the URL for a given filter. The current one is filled with ink. */
 export function CreatorFilterChips({ current, counts, href }: { current: CreatorFilter; counts: Record<CreatorFilter, number>; href: (f: CreatorFilter) => string }) {
   const items: Array<[CreatorFilter, string]> = [["all", "All"], ["month", "Contacted this month"], ["active", "Active"], ["posted", "Posted"]];
   return (
-    <nav aria-label="Filter creators" className="relative -mx-1 flex gap-1.5 overflow-x-auto px-1 pb-1">
+    <nav aria-label="Filter creators" className="chips pb-1 pt-1">
       {items.map(([f, label]) => (
-        <Link
-          key={f}
-          href={href(f)}
-          scroll={false}
-          aria-current={current === f ? "true" : undefined}
-          className={cx(
-            "inline-flex items-center whitespace-nowrap rounded-full border px-3 py-1 text-xs font-medium pointer-coarse:min-h-11 pointer-coarse:px-4",
-            current === f ? "border-accent bg-accent-soft text-accent" : "border-border text-muted hover:bg-surface-2",
-          )}
-        >
-          {label} <span className="tabular-nums opacity-70">{counts[f]}</span>
+        <Link key={f} href={href(f)} scroll={false} aria-current={current === f ? "true" : undefined} className="chip">
+          <span>
+            {label} <i>{counts[f]}</i>
+          </span>
         </Link>
       ))}
     </nav>
   );
 }
 
+/**
+ * The creators for one business as a small ledger. Each creator is two lines: the name and where they stand,
+ * then one muted line of facts (what they get, their handle, when we wrote). In a wide column the channel, the
+ * next follow-up and the stage line up under a caps header.
+ */
 export function CreatorList({ rows, emptyHint, now = new Date() }: { rows: Row[]; emptyHint: React.ReactNode; now?: Date }) {
   if (rows.length === 0) return <EmptyState title="No creators here">{emptyHint}</EmptyState>;
   return (
-    <ul className="divide-y divide-border">
-      {rows.map((r) => {
-        const overdue = !!r.nextFollowUpAt && r.nextFollowUpAt < now && !CLOSED_STAGES.has(r.stage);
-        const c = r.creator;
-        return (
-          <li key={r.id} className="grid gap-2 py-3 md:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)_minmax(0,1.2fr)_minmax(0,1fr)] md:items-start md:gap-4">
-            <div className="min-w-0">
-              <Link href={`/creators/${c.id}`} className="font-medium hover:underline">
-                {c.name}
-              </Link>
-              {c.doNotContact && <Badge tone="danger" className="ml-2">Do not contact</Badge>}
-              {r.priorPostUrl && <Badge tone="danger" className="ml-2">Already featured</Badge>}
-              <p className="mt-0.5 flex flex-wrap gap-x-2 text-xs text-muted">
-                {c.instagramHandle && <span>IG @{c.instagramHandle}</span>}
-                {c.tiktokHandle && <span>TT @{c.tiktokHandle}</span>}
-                {!c.instagramHandle && !c.tiktokHandle && c.email && <span className="truncate">{c.email}</span>}
-              </p>
-            </div>
+    <>
+      <div className="row creator-row creator-head eyebrow" aria-hidden>
+        <span>Creator</span>
+        <span>Channel</span>
+        <span>Follow up</span>
+        <span>Stage</span>
+      </div>
+      <ul className="list is-ruled border-b-0">
+        {rows.map((r) => {
+          const overdue = !!r.nextFollowUpAt && r.nextFollowUpAt < now && !CLOSED_STAGES.has(r.stage);
+          const c = r.creator;
+          return (
+            <li key={r.id} className="row creator-row">
+              <div className="who">
+                <Link href={`/creators/${c.id}`} className="row-title">
+                  {c.name}
+                </Link>
+                {c.doNotContact && <Status tone="danger" small>Do not contact</Status>}
+                {r.priorPostUrl && <Status tone="danger" small>Already featured</Status>}
+              </div>
 
-            <div className="flex flex-wrap items-center gap-2">
-              <StatusBadge status={r.stage} />
-              <PlatformTag platform={r.channel} />
-            </div>
+              <span className="stage"><StatusBadge status={r.stage} /></span>
 
-            <dl className="grid grid-cols-[auto_1fr] gap-x-2 text-xs">
-              <dt className="text-muted">Contacted</dt>
-              <dd>{r.contactedAt ? formatDate(r.contactedAt) : "Not yet"}</dd>
-              <dt className="text-muted">Last activity</dt>
-              <dd>{r.lastActivityAt ? relativeTime(r.lastActivityAt, now) : "—"}</dd>
-              <dt className="text-muted">Follow up</dt>
-              <dd>
-                {r.nextFollowUpAt ? (
-                  overdue ? (
-                    <Badge tone="danger">Overdue · {formatDate(r.nextFollowUpAt)}</Badge>
-                  ) : (
-                    formatDate(r.nextFollowUpAt)
-                  )
-                ) : (
-                  "—"
+              <div className="rest">
+                {r.channel && <span className="ch"><PlatformTag platform={r.channel} inherit /></span>}
+                {r.nextFollowUpAt && (
+                  <span className="fu num">
+                    <span className="k">Follow up </span>
+                    {overdue ? <span className="is-over">Overdue · {formatDate(r.nextFollowUpAt)}</span> : formatDate(r.nextFollowUpAt)}
+                  </span>
                 )}
-              </dd>
-            </dl>
-
-            <div className="flex flex-wrap items-center gap-2 text-xs">
-              <Badge>{COMP_LABEL[r.compType] ?? r.compType}</Badge>
-              {r.postUrl ? (
-                <>
-                  <a href={r.postUrl} target="_blank" rel="noopener noreferrer" className="text-accent hover:underline">
-                    View post ↗
-                  </a>
-                  {r.disclosureOk === true && <Badge tone="ok">✓ Disclosed</Badge>}
-                  {r.disclosureOk === false && <Badge tone="danger">✕ No #ad disclosure</Badge>}
-                  {r.disclosureOk == null && <Badge tone="warn">Check disclosure</Badge>}
-                </>
-              ) : r.stage === "posted" ? (
-                <span className="text-muted">Add the post link</span>
-              ) : null}
-            </div>
-          </li>
-        );
-      })}
-    </ul>
+                <span className="more">
+                  <span>{COMP_LABEL[r.compType] ?? r.compType}</span>
+                  {c.instagramHandle && <span>IG @{c.instagramHandle}</span>}
+                  {c.tiktokHandle && <span>TT @{c.tiktokHandle}</span>}
+                  {!c.instagramHandle && !c.tiktokHandle && c.email && <span>{c.email}</span>}
+                  <span>{r.contactedAt ? `Contacted ${formatDate(r.contactedAt)}` : "Not contacted yet"}</span>
+                  {r.lastActivityAt && <span>Last activity {relativeTime(r.lastActivityAt, now)}</span>}
+                  {r.postUrl ? (
+                    <>
+                      <span>
+                        <a href={r.postUrl} target="_blank" rel="noopener noreferrer" className="link">
+                          View post ↗
+                        </a>
+                      </span>
+                      <span>
+                        {r.disclosureOk === true && <Status tone="ok">Disclosed</Status>}
+                        {r.disclosureOk === false && <Status tone="danger" className="text-text">No #ad disclosure</Status>}
+                        {r.disclosureOk == null && <Status tone="warn" className="text-text">Check disclosure</Status>}
+                      </span>
+                    </>
+                  ) : r.stage === "posted" ? (
+                    <span>Add the post link</span>
+                  ) : null}
+                </span>
+              </div>
+            </li>
+          );
+        })}
+      </ul>
+    </>
   );
 }
