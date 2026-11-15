@@ -3162,6 +3162,8 @@ async function v10Flows(browser) {
     const open = page.locator("main button", { hasText: "They're open" });
     await open.click();
     await open.waitFor({ state: "detached", timeout: 30000 });
+    // While the action runs the button reads "Saving…" (so the locator above detaches at once); reload only once it is done.
+    await page.locator("main button", { hasText: "Saving…" }).waitFor({ state: "detached", timeout: 30000 });
     await page.reload({ waitUntil: "networkidle" });
     if (await card(page, /^Launch checklist$/).count()) throw new Error("still showing the launch checklist after 'They're open'");
     if ((await tool("list_clients", {})).find((x) => x.id === depotId)?.prelaunch) throw new Error("list_clients still says pre-launch");
