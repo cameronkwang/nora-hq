@@ -17,8 +17,13 @@ export const ROUTE_FIELDS: Record<AskRoute, { kind: AskKind; forWho: AskFor }> =
   fyi: { kind: "update", forWho: "anyone" },
 };
 
+/**
+ * People only ever pick a person: Cameron or Nora. "Cameron" is stored as auto: Claude works it in the background,
+ * does what it can (drafts, research, notes) and hands the rest to Cameron. The other routes stay for older asks
+ * and for Claude's own triage.
+ */
 export const ROUTE_LABEL: Record<AskRoute, string> = {
-  auto: "Claude decides",
+  auto: "Cameron",
   claude: "Claude",
   cameron: "Cameron",
   nora: "Nora",
@@ -30,18 +35,15 @@ export function isAskRoute(v: unknown): v is AskRoute {
   return typeof v === "string" && (ASK_ROUTES as readonly string[]).includes(v);
 }
 
-/** The chips to offer: everyone except the person signed in (you don't route things to yourself). */
-export function routesFor(me: string | null): AskRoute[] {
-  const other: AskRoute = me === "cameron" ? "nora" : "cameron";
-  return ["auto", "claude", other, "idea", "fyi"];
+/** The chips to offer: just the two people. Claude delegates in the background. */
+export function routesFor(_me: string | null): AskRoute[] {
+  return ["auto", "nora"];
 }
 
 /** Which chip an existing ask matches. */
 export function routeOf(a: Pick<Ask, "kind" | "forWho">): AskRoute {
-  if (a.kind === "idea") return "idea";
-  if (a.kind === "update") return "fyi";
-  if (a.forWho === "claude" || a.forWho === "cameron" || a.forWho === "nora") return a.forWho;
-  return "auto";
+  // Only two chips now: anything that isn't Nora's is on Cameron's side (with Claude helping).
+  return a.forWho === "nora" ? "nora" : "auto";
 }
 
 /** Small badges once an ask is sorted ("Claude", "For Cameron", "Idea", "FYI", "Question"). Nothing while unsorted. */
@@ -50,7 +52,7 @@ export function AskRouteBadges({ ask }: { ask: Pick<Ask, "kind" | "forWho"> }) {
   if (ask.kind === "idea") out.push({ key: "k", label: "Idea", tone: "ok" });
   else if (ask.kind === "update") out.push({ key: "k", label: "FYI", tone: "neutral" });
   else if (ask.kind === "question") out.push({ key: "k", label: "Question", tone: "neutral" });
-  if (ask.forWho === "claude") out.push({ key: "f", label: "Claude", tone: "accent" });
+  if (ask.forWho === "claude") out.push({ key: "f", label: "Claude is on it", tone: "accent" });
   else if (ask.forWho === "cameron") out.push({ key: "f", label: "For Cameron", tone: "info" });
   else if (ask.forWho === "nora") out.push({ key: "f", label: "For Nora", tone: "info" });
   if (!out.length) return null;

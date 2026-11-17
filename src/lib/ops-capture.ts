@@ -235,7 +235,7 @@ export async function captureAsk(input: z.input<typeof CaptureInput>, actor: str
 
   const { id } = await createRoutedAsk({ body, clientId: client?.id ?? null, attachments: v.attachments as Attachment[] }, ROUTE_FIELDS[route], actor);
   const msg: Record<Exclude<CaptureRoute, "adhoc">, string> = {
-    auto: "Sent ✓ Claude will sort it",
+    auto: "Sent to Cameron ✓ Claude helps where it can",
     claude: "Sent to Claude ✓",
     cameron: "Sent to Cameron ✓",
     nora: "Sent to Nora ✓",
