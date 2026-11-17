@@ -42,10 +42,13 @@ export const DEFAULT_DELIVERABLES: Record<ContractKind, string> = {
   monthly: "8 Instagram feed posts or Reels per month\n12 Instagram Stories per month\nReplies to Google reviews\nLocal creator outreach",
 };
 
+/** Nora's legal name: the default "Creator" on every contract (she can still change it). */
+export const CREATOR_LEGAL_NAME = "Nora Chen";
+
 export function defaultFields(today: string): ContractFields {
   return {
     kind: "collab",
-    creatorName: "",
+    creatorName: CREATOR_LEGAL_NAME,
     creatorEmail: "",
     clientBusiness: "",
     clientContact: "",
@@ -197,7 +200,7 @@ export function buildContract(f: ContractFields): ContractDoc {
       pay.push(`The fee is due within ${plural(payDays, "day")} after the content is posted.`);
     }
   }
-  if (fee > 0) pay.push("Payment can be made by check, Zelle or another method both parties agree on. Creator is responsible for her own taxes and will provide a W-9 on request.");
+  if (fee > 0) pay.push("Creator prefers payment by Zelle or cash; a check is also accepted. Creator is responsible for her own taxes and will provide a W-9 on request.");
   sections.push({ heading: monthly ? "Fees and payment" : "Fee and payment", paragraphs: pay });
 
   // 4. Review and revisions
@@ -297,4 +300,50 @@ export function buildContract(f: ContractFields): ContractDoc {
 export function contractFileName(f: ContractFields): string {
   const who = f.clientBusiness.trim().replace(/[^\w &'.-]+/g, "").trim() || "Client";
   return `Contract - ${who} - ${f.agreementDate || "undated"}.pdf`;
+}
+
+/* ------------------------------------------------------- from a collab deal */
+
+type DealLike = {
+  businessName: string;
+  contactName: string | null;
+  contactEmail: string | null;
+  compType: string;
+  amountCents: number | null;
+  visitAt: Date | null;
+  deliverables: { kind: string; dueDate: string | null }[];
+};
+
+const DEAL_DELIVERABLE: Record<string, string> = {
+  ig_reel: "Instagram Reel",
+  ig_post: "Instagram post",
+  ig_story: "Instagram Stories",
+  tiktok: "TikTok video",
+  photos: "Photos",
+  other: "Other content (see notes)",
+};
+
+/** The contract fields a collab deal already knows, so "Make contract" opens pre-filled. */
+export function fieldsFromDeal(deal: DealLike, timeZone: string): Partial<ContractFields> {
+  // "2 Instagram Reel" reads badly, so count each kind and pluralise simply.
+  const counts = new Map<string, number>();
+  for (const d of deal.deliverables) counts.set(d.kind, (counts.get(d.kind) ?? 0) + 1);
+  const deliverables = [...counts].map(([k, n]) => {
+    const label = DEAL_DELIVERABLE[k] ?? k;
+    if (label.endsWith("s")) return n > 1 ? `${n} sets of ${label}` : label; // "Instagram Stories", "Photos"
+    return n > 1 ? `${n} ${label}s` : `1 ${label}`;
+  });
+  const dues = deal.deliverables.map((d) => d.dueDate).filter((d): d is string => !!d).sort();
+  const visitDate = deal.visitAt ? new Intl.DateTimeFormat("en-CA", { timeZone }).format(deal.visitAt) : "";
+  const paid = deal.compType === "paid" || deal.compType === "paid_hosted";
+  return {
+    kind: "collab",
+    clientBusiness: deal.businessName,
+    clientContact: deal.contactName ?? "",
+    clientEmail: deal.contactEmail ?? "",
+    ...(deliverables.length ? { deliverables: deliverables.join("\n") } : {}),
+    visitDate,
+    postBy: dues.length ? dues[dues.length - 1] : "",
+    fee: paid && deal.amountCents ? String(deal.amountCents / 100) : "",
+  };
 }

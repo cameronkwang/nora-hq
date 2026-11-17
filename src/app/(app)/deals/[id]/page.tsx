@@ -73,7 +73,12 @@ export default async function DealPage({ params, searchParams }: { params: Promi
       <PageHeader
         title={<span className="flex flex-wrap items-center gap-2">{deal.businessName}<DealStatusBadge status={deal.status} /></span>}
         subtitle={[deal.visitAt ? formatVisit(deal.visitAt) : "No visit date yet", compText(deal)].filter(Boolean).join(" · ")}
-        actions={<LinkButton href={`/deals/${deal.id}/visit`} variant="primary">Visit mode</LinkButton>}
+        actions={
+          <>
+            <LinkButton href={`/contracts?deal=${deal.id}`}>Make contract</LinkButton>
+            <LinkButton href={`/deals/${deal.id}/visit`} variant="primary">Visit mode</LinkButton>
+          </>
+        }
       />
 
       {flash && <p role="status" className="mb-4 rounded-lg bg-ok-soft px-3 py-2 text-sm text-ok">{flash}</p>}
