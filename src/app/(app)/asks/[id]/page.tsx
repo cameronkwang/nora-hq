@@ -2,7 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { asc, desc, eq } from "drizzle-orm";
 import { getDb, schema } from "@/lib/db";
-import { assigneeFor, requireUser } from "@/lib/auth";
+import { assigneeFor, requireUser, seesDrafts } from "@/lib/auth";
 import { listClients } from "@/lib/data";
 import { formatDate, relativeTime } from "@/lib/dates";
 import { AskAttachments } from "@/components/ask-attachments";
@@ -151,6 +151,14 @@ export default async function AskPage({ params }: { params: Promise<{ id: string
             </details>
           </Card>
 
+          {!seesDrafts(user) ? (
+            // Nora doesn't wade through drafts: one line says where things stand; Cameron reviews them.
+            drafts.length > 0 && (
+              <p className="rounded-xl border border-border bg-surface px-4 py-3 text-sm text-muted">
+                Claude wrote {drafts.length === 1 ? "a draft" : `${drafts.length} drafts`} for this. Cameron is reviewing.
+              </p>
+            )
+          ) : (
           <Card title={`Drafts from this ask${drafts.length ? ` · ${drafts.length}` : ""}`}>
             {drafts.length ? (
               <ul className="divide-y divide-border">
@@ -173,6 +181,7 @@ export default async function AskPage({ params }: { params: Promise<{ id: string
               <EmptyState title="No drafts yet">Anything Claude writes for this ask shows up here and in the review queue.</EmptyState>
             )}
           </Card>
+          )}
         </div>
       </div>
     </div>

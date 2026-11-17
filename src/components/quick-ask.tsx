@@ -10,13 +10,13 @@ import { buttonClass, cx } from "./ui";
 type Chip = AskRoute | "adhoc";
 
 /** Compact chip labels for the composer. */
-const LABEL = (r: Chip, other: string) => (r === "adhoc" ? "Ad hoc task" : r === "idea" ? "Idea" : r === "cameron" || r === "nora" ? other : ROUTE_LABEL[r]);
+const LABEL = (r: Chip, other: string) => (r === "adhoc" ? `Task for ${other}` : r === "idea" ? "Idea" : r === "cameron" || r === "nora" ? other : ROUTE_LABEL[r]);
 
 const MAX_HEIGHT = 240;
 
 /**
  * The composer at the very top of Home: type (or dictate) a line, optionally pick who it's for,
- * optionally add a photo, Send. Stays on Home and confirms inline. "Ad hoc task" puts a task straight
+ * optionally add a photo, Send. Stays on Home and confirms inline. "Task for <other person>" puts a task straight
  * on the other person's list instead of making an ask.
  */
 export function QuickAsk({ me, directUpload }: { me: "cameron" | "nora" | null; directUpload: boolean }) {
