@@ -849,3 +849,27 @@ export const dropLinks = pgTable(
 );
 
 export type DropLink = typeof dropLinks.$inferSelect;
+
+/* ───────────────────────── Contracts (Nora's client agreements) ───────────────────────── */
+
+/**
+ * A contract Nora downloaded from /contracts. `fields` is the whole form (lib/contract ContractFields),
+ * so a past contract re-downloads word for word or starts a new one. People only: no Claude tool reads these.
+ */
+export const contracts = pgTable(
+  "contracts",
+  {
+    id: text("id").primaryKey(),
+    kind: text("kind").$type<"collab" | "monthly">().notNull(),
+    clientBusiness: text("client_business").notNull(),
+    clientContact: text("client_contact"),
+    agreementDate: text("agreement_date"), // "YYYY-MM-DD"
+    feeCents: integer("fee_cents"), // null = no fee (gifted)
+    dealId: text("deal_id").references(() => deals.id, { onDelete: "set null" }),
+    fields: jsonb("fields").$type<Record<string, string>>().notNull(),
+    createdBy: text("created_by").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("contracts_created_idx").on(t.createdAt)],
+);
+export type ContractRow = typeof contracts.$inferSelect;

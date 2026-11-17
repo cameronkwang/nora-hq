@@ -6,21 +6,64 @@ import {
   buildContract,
   contractFileName,
   defaultFields,
+  longDate,
   missingFields,
+  money,
   type ContractFields,
   type ContractKind,
 } from "@/lib/contract";
+import { deleteContractAction, saveContractAction } from "@/app/(app)/contracts/actions";
 import { Button, Card, cx } from "./ui";
+
+/** A past contract as the page hands it over (dates as strings so it crosses the server/client line). */
+export type PastContract = {
+  id: string;
+  kind: ContractKind;
+  clientBusiness: string;
+  clientContact: string | null;
+  agreementDate: string | null;
+  feeCents: number | null;
+  createdBy: string;
+  createdAt: string;
+  fields: ContractFields;
+};
+
+async function downloadPdf(fields: ContractFields) {
+  const { contractPdf } = await import("@/lib/contract-pdf");
+  const bytes = await contractPdf(buildContract(fields));
+  const blob = new Blob([bytes as BlobPart], { type: "application/pdf" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = contractFileName(fields);
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 10_000);
+}
 
 /** Nora's own name and email are remembered on this device so she types them once. */
 const ME_KEY = "nora-hq:contract-me";
 
-export function ContractBuilder({ today, businesses, initial }: { today: string; businesses: string[]; initial?: Partial<ContractFields> }) {
+export function ContractBuilder({
+  today,
+  businesses,
+  initial,
+  dealId,
+  history,
+}: {
+  today: string;
+  businesses: string[];
+  initial?: Partial<ContractFields>;
+  dealId?: string | null;
+  history: PastContract[];
+}) {
   const [f, setF] = useState<ContractFields>(() => ({ ...defaultFields(today), ...initial }));
   const [busy, setBusy] = useState(false);
   // Phones: the preview sits below a long form, so it's hidden until she asks for it.
   const [showPreview, setShowPreview] = useState(false);
   const [error, setError] = useState("");
+  const [note, setNote] = useState("");
 
   useEffect(() => {
     try {
@@ -47,28 +90,29 @@ export function ContractBuilder({ today, businesses, initial }: { today: string;
   async function download() {
     setBusy(true);
     setError("");
+    setNote("");
     try {
       try {
         localStorage.setItem(ME_KEY, JSON.stringify({ name: f.creatorName.trim(), email: f.creatorEmail.trim() }));
       } catch {
         /* ignore */
       }
-      const { contractPdf } = await import("@/lib/contract-pdf");
-      const bytes = await contractPdf(doc);
-      const blob = new Blob([bytes as BlobPart], { type: "application/pdf" });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = contractFileName(f);
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      setTimeout(() => URL.revokeObjectURL(url), 10_000);
+      // Save first so history matches what she sends; a failed save still lets her download.
+      const saved = await saveContractAction({ ...f }, dealId ?? null).catch(() => ({ ok: false as const, error: "Couldn't save it to history." }));
+      await downloadPdf(f);
+      setNote(saved.ok ? "Downloaded and saved to Past contracts." : `Downloaded. ${saved.error}`);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Couldn't make the PDF.");
     } finally {
       setBusy(false);
     }
+  }
+
+  /** "Start from this": load a past contract into the form with today's date. */
+  function startFrom(c: PastContract) {
+    setF({ ...defaultFields(today), ...c.fields, agreementDate: today });
+    setNote(`Loaded ${c.clientBusiness}. Change what's different, then download.`);
+    window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
   const collab = f.kind === "collab";
@@ -216,11 +260,15 @@ export function ContractBuilder({ today, businesses, initial }: { today: string;
 
         <div className="grid gap-2">
           {/* Desktop: the button sits under the form. Phones use the sticky bar below. */}
-          <Button variant="primary" onClick={download} disabled={busy} className="hidden lg:inline-flex">
-            {busy ? "Making PDF…" : "Download PDF"}
-          </Button>
+          {/* Wrapped: Button's own inline-flex would beat a "hidden" class on it. */}
+          <div className="hidden lg:grid">
+            <Button variant="primary" onClick={download} disabled={busy}>
+              {busy ? "Making PDF…" : "Download PDF"}
+            </Button>
+          </div>
           {missing.length > 0 && <p className="text-xs text-warn">Still blank: {missing.join(", ")}. The PDF shows [brackets] there.</p>}
           {error && <p role="alert" className="text-xs text-danger">{error}</p>}
+          {note && <p role="status" className="text-xs text-ok">{note}</p>}
           <p className="text-xs text-muted">This is a plain-English starting template, not legal advice. Have a lawyer look it over once before you use it widely.</p>
         </div>
       </div>
@@ -265,6 +313,8 @@ export function ContractBuilder({ today, businesses, initial }: { today: string;
         </div>
       </section>
 
+      <PastContracts history={history} onStartFrom={startFrom} />
+
       {/* Phones: Preview + Download stay in reach above the bottom tab bar while she scrolls the form. */}
       <div className="fixed inset-x-0 bottom-[var(--tabbar-h)] z-20 border-t border-border bg-surface/95 px-4 py-2 backdrop-blur lg:hidden">
         <div className="mx-auto flex max-w-md gap-2">
@@ -302,5 +352,68 @@ function Field({ label, hint, optional, children }: { label: string; hint?: stri
       {children}
       {hint && <span className="text-xs text-muted">{hint}</span>}
     </label>
+  );
+}
+
+function PastContracts({ history, onStartFrom }: { history: PastContract[]; onStartFrom: (c: PastContract) => void }) {
+  const [busyId, setBusyId] = useState("");
+  return (
+    <section id="past-contracts" aria-label="Past contracts" className="scroll-mt-4 lg:col-span-2">
+      <Card title={<>Past contracts{history.length > 0 && <span className="font-normal text-muted"> · {history.length}</span>}</>} padded={false}>
+        {history.length === 0 ? (
+          <p className="p-4 text-sm text-muted">Contracts you download show up here, so you can see who got what and download them again.</p>
+        ) : (
+          <ul className="divide-y divide-border">
+            {history.map((c) => (
+              <li key={c.id} className="flex flex-col gap-2 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+                <div className="min-w-0">
+                  <p className="truncate font-medium">{c.clientBusiness}</p>
+                  <p className="text-xs text-muted">
+                    {[
+                      c.kind === "monthly" ? "Monthly" : "Collab",
+                      c.feeCents ? `${money(c.feeCents / 100)}${c.kind === "monthly" ? "/mo" : ""}` : "No fee",
+                      longDate(c.agreementDate ?? "") || null,
+                      c.createdBy,
+                    ]
+                      .filter(Boolean)
+                      .join(" · ")}
+                  </p>
+                </div>
+                <div className="flex shrink-0 gap-2">
+                  <Button
+                    size="sm"
+                    disabled={busyId === c.id}
+                    onClick={async () => {
+                      setBusyId(c.id);
+                      try {
+                        await downloadPdf(c.fields);
+                      } finally {
+                        setBusyId("");
+                      }
+                    }}
+                  >
+                    Download
+                  </Button>
+                  <Button size="sm" onClick={() => onStartFrom(c)}>
+                    Start from this
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    aria-label={`Remove ${c.clientBusiness} from history`}
+                    onClick={async () => {
+                      if (!window.confirm(`Remove the ${c.clientBusiness} contract from history? The PDF you sent isn't affected.`)) return;
+                      await deleteContractAction(c.id);
+                    }}
+                  >
+                    Remove
+                  </Button>
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </Card>
+    </section>
   );
 }
