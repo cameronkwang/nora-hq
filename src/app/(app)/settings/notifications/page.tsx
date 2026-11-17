@@ -1,11 +1,12 @@
 import Link from "next/link";
 import { headers } from "next/headers";
-import { requireUser } from "@/lib/auth";
+import { assigneeFor, requireUser } from "@/lib/auth";
 import { relativeTime } from "@/lib/dates";
 import { appUrl } from "@/lib/integrations/oauth";
-import { pushConfigured, vapidPublicKey } from "@/lib/notify";
+import { noraNotificationsPaused, pushConfigured, vapidPublicKey } from "@/lib/notify";
+import { setNoraPausedAction } from "./actions";
 import { getCalendarFeed, listPushDevices } from "@/lib/ops-notify";
-import { Badge, Card, EmptyState, PageHeader } from "@/components/ui";
+import { Badge, Button, Card, EmptyState, PageHeader } from "@/components/ui";
 import { ConfirmButton } from "@/components/client-form";
 import { NotifyEnable } from "@/components/notify-enable";
 import { NotifyDevices, type DeviceRow } from "@/components/notify-devices";
@@ -16,7 +17,8 @@ export const dynamic = "force-dynamic";
 
 export default async function NotificationSettingsPage() {
   const user = await requireUser();
-  const [devices, feed] = await Promise.all([listPushDevices(user.email), getCalendarFeed(user.email)]);
+  const isCameron = assigneeFor(user) === "cameron";
+  const [devices, feed, noraPaused] = await Promise.all([listPushDevices(user.email), getCalendarFeed(user.email), noraNotificationsPaused()]);
   const ready = pushConfigured();
   // APP_URL when set; otherwise the address this page was opened on (so the link is always usable).
   const h = await headers();
@@ -33,6 +35,22 @@ export default async function NotificationSettingsPage() {
       <PageHeader title="Notifications & calendar" subtitle="Phone alerts for what needs you, and your Nora HQ dates in Apple or Google Calendar." />
 
       <div className="flex flex-col gap-6">
+        {isCameron && (
+          <Card title="Nora's notifications" actions={<Badge tone={noraPaused ? "warn" : "ok"}>{noraPaused ? "Paused" : "On"}</Badge>}>
+            <p className="mb-3 text-sm text-muted">
+              {noraPaused
+                ? "Nothing is sent to Nora's phone right now: no asks, reminders, collab alerts or tests from the app. Turn them on when she's ready."
+                : "Nora gets the phone notifications she picked on her devices."}
+            </p>
+            <form action={setNoraPausedAction}>
+              <input type="hidden" name="paused" value={noraPaused ? "0" : "1"} />
+              <Button type="submit" variant={noraPaused ? "primary" : "secondary"}>
+                {noraPaused ? "Turn Nora's notifications on" : "Pause Nora's notifications"}
+              </Button>
+            </form>
+          </Card>
+        )}
+
         <Card title="Phone notifications" actions={ready ? undefined : <Badge tone="warn">Not set up</Badge>}>
           {!ready && (
             <p className="mb-3 rounded-lg bg-warn-soft px-3 py-2 text-xs text-warn">
