@@ -5,6 +5,7 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useRef, useState, type ReactNode } from "react";
 import { cx } from "./ui";
 import { NewClientLink } from "./onboard-link";
+import { ThemeChoice } from "./theme-choice";
 import { sectionOf, type SectionKey } from "./section-tabs";
 
 type NavClient = { id: string; name: string; location: string | null; kind?: string | null };
@@ -140,6 +141,8 @@ function DesktopSidebar({ user, creator, businesses, inactiveCount, counts }: Na
             );
           })}
         </div>
+
+        <ThemeChoice className="mx-1 mt-3" />
 
         <div className="mt-2 border-t border-border px-3 pt-4 text-xs text-muted">
           <p className="font-medium text-text">{user.name}</p>
@@ -354,6 +357,11 @@ function MobileNav({ user, creator, businesses, inactiveCount, counts }: NavProp
                 </SheetLink>
               ))}
             </SheetGroup>
+
+            <div className="px-3">
+              <p className="pb-1 text-xs font-semibold uppercase tracking-wide text-muted">Appearance</p>
+              <ThemeChoice />
+            </div>
 
             <div className="flex items-center justify-between gap-3 border-t border-border px-3 pt-4 text-sm">
               <div className="min-w-0">

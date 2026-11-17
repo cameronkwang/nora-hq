@@ -11,7 +11,7 @@
   --accent: #c2410c;        /* warm "food" orange */
   --accent-fg: #ffffff;
   --accent-soft: #fdeee4;
-  --ok: #15803d;
+  --ok: #147a3b;            /* a touch darker so "Free" badges read on their pale green */
   --ok-soft: #e6f4ea;
   --warn: #b45309;
   --warn-soft: #fdf3e1;
@@ -26,22 +26,24 @@
   color-scheme: light;
 }
 
+/* Night: warm, low-glare dark. Follows the phone's own light/dark setting ("Auto"), unless the person picked
+   Light or Dark in the menu (data-theme on <html>, set before first paint by the script in app/layout). */
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]) {
     --bg: #141311;
     --surface: #1c1b18;
     --surface-2: #24221f;
     --border: #34312c;
-    --text: #f1eee8;
+    --text: #e8e3da;          /* softer than pure white: less glare at night */
     --muted: #a39e94;
     --accent: #fb8a4c;
     --accent-fg: #1a0f08;
     --accent-soft: #3a2316;
-    --ok: #4ade80;
+    --ok: #62c98a;
     --ok-soft: #14301d;
-    --warn: #fbbf24;
+    --warn: #e8b24f;
     --warn-soft: #36290f;
-    --danger: #f87171;
+    --danger: #ef8c8c;
     --danger-soft: #3b1717;
     --info: #93b4fd;
     --info-soft: #1a2442;
@@ -50,6 +52,42 @@
     --google: #8ab4f8;
     --facebook: #6ea8ff;
     color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #141311;
+  --surface: #1c1b18;
+  --surface-2: #24221f;
+  --border: #34312c;
+  --text: #e8e3da;          /* softer than pure white: less glare at night */
+  --muted: #a39e94;
+  --accent: #fb8a4c;
+  --accent-fg: #1a0f08;
+  --accent-soft: #3a2316;
+  --ok: #62c98a;
+  --ok-soft: #14301d;
+  --warn: #e8b24f;
+  --warn-soft: #36290f;
+  --danger: #ef8c8c;
+  --danger-soft: #3b1717;
+  --info: #93b4fd;
+  --info-soft: #1a2442;
+  --ig: #f472b6;
+  --tt: #e5e5e5;
+  --google: #8ab4f8;
+  --facebook: #6ea8ff;
+  color-scheme: dark;
+}
+
+/* Tailwind's dark: variant follows the same choice. */
+@custom-variant dark {
+  @media (prefers-color-scheme: dark) {
+    &:where(:root:not([data-theme="light"]) *) {
+      @slot;
+    }
+  }
+  &:where(:root[data-theme="dark"] *) {
+    @slot;
   }
 }
 
