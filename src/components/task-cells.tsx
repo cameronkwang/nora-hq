@@ -62,7 +62,8 @@ export function SaveDot({ state, error }: { state: SaveState; error: string | nu
 
 /** Spreadsheet-feel control: a plain field (.input) on phones, borderless until hover or focus on desktop. */
 export const cellControl = cx(
-  "input min-w-0",
+  // text-ellipsis: a long title or business ends in "…" instead of being cut mid-word (the full text shows while editing)
+  "input min-w-0 text-ellipsis",
   "md:pointer-fine:h-8 md:pointer-fine:border-transparent md:pointer-fine:bg-transparent md:pl-2 md:hover:border-border-strong md:focus:bg-surface",
 );
 

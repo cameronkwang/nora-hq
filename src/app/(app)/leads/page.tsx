@@ -61,6 +61,17 @@ export default async function LeadsPage({ searchParams }: { searchParams: Promis
         subtitle="Places that could use us. Claude does the research, you pick who to pitch."
         actions={
           <>
+            {/* The view switch sits in the head, as on /tasks (only once there are leads to show two ways). */}
+            {all.length > 0 && (
+              <ViewToggle
+                cookieName={VIEW_COOKIE}
+                current={view}
+                options={[
+                  { value: "list", label: "List", href: href({ view: "list" }) },
+                  { value: "board", label: "Board", href: href({ view: "board" }) },
+                ]}
+              />
+            )}
             <LeadMenu exportHref={`/leads/export${exportQs ? `?${exportQs}` : ""}`} />
             <FindLeads defaultArea={city || topCity} autoOpen={one(sp.find) === "1"} />
           </>
@@ -92,16 +103,6 @@ export default async function LeadsPage({ searchParams }: { searchParams: Promis
                 hrefs={Object.fromEntries([["", href({ city: "" })], ...cities.map((c) => [c, href({ city: c })])])}
               />
             )}
-            <div className="ml-auto">
-              <ViewToggle
-                cookieName={VIEW_COOKIE}
-                current={view}
-                options={[
-                  { value: "list", label: "List", href: href({ view: "list" }) },
-                  { value: "board", label: "Board", href: href({ view: "board" }) },
-                ]}
-              />
-            </div>
           </div>
 
           {leads.length === 0 ? (

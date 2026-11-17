@@ -12,7 +12,7 @@ export function PaymentLineForm({ line, id = "payment-line" }: { line: string | 
     <ActionForm action={savePaymentLineAction} className="min-w-0">
       <label className="label" htmlFor={id}>How Nora gets paid</label>
       <div className="flex flex-col gap-2 sm:flex-row">
-        <input id={id} name="line" defaultValue={line ?? ""} maxLength={200} placeholder="Zelle: 804-555-0123" className="input min-w-0 flex-1" autoComplete="off" />
+        <input id={id} name="line" defaultValue={line ?? ""} maxLength={200} placeholder="Zelle: 804-555-0123" className="input min-w-0 sm:flex-1" autoComplete="off" />
         <SubmitButton variant="secondary" className="shrink-0">Save</SubmitButton>
       </div>
       <p className="hint">Printed on payment requests. Zelle, Venmo, PayPal or “check payable to…”. Never a password.</p>

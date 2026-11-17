@@ -182,7 +182,7 @@ export default async function TaskPage({ params, searchParams }: { params: Promi
 
         {/* Phones: the bar sticks above the tab bar, on solid paper with a hairline on top. */}
         <div className="sticky-actions -mt-2 flex items-center gap-2 border-t border-border bg-bg py-3 lg:col-span-2 lg:static lg:border-0 lg:py-0">
-          <Button type="submit" variant="primary" className="flex-1 sm:flex-none">Save</Button>
+          <Button type="submit" variant="secondary" className="flex-1 sm:flex-none">Save</Button>
           <Link href={back} className={buttonClass("ghost")}>
             Cancel
           </Link>

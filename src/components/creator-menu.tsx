@@ -35,7 +35,7 @@ export function CreatorMenu({ exportHref }: { exportHref: string }) {
       <button
         ref={btn}
         type="button"
-        className={buttonClass("secondary")}
+        className={buttonClass("secondary", "sm")}
         aria-haspopup="menu"
         aria-expanded={open}
         onClick={() => setOpen((o) => !o)}

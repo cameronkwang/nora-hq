@@ -161,7 +161,7 @@ function BoardCard({
       onDragEnd={onDragEnd}
       className={cx("board-card", dragging && "is-dragging", done && "is-done")}
     >
-      <Link href={`/tasks/${t.id}`} draggable={false} className="row-title break-words">
+      <Link href={`/tasks/${t.id}`} draggable={false} className="row-title tap-target break-words">
         {t.title}
       </Link>
       {/* The facts, a "·" after each; the spaces between them are where the line may break. */}

@@ -86,7 +86,7 @@ export function TaskImport({ exampleBusiness, exampleDue }: { exampleBusiness: s
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
-            <Button type="button" variant={preview ? "secondary" : "primary"} disabled={!csv.trim() || checking} onClick={() => check(csv)}>
+            <Button type="button" variant="secondary" disabled={!csv.trim() || checking} onClick={() => check(csv)}>
               {checking ? "Checking…" : preview ? "Check again" : "Check rows"}
             </Button>
             {!csv && (
@@ -148,7 +148,7 @@ export function TaskImport({ exampleBusiness, exampleDue }: { exampleBusiness: s
             })}
           </ul>
           <div className="sticky-actions border-t border-border bg-bg py-3">
-            <Button type="button" variant="primary" disabled={valid === 0 || importing || checking} onClick={doImport} className="w-full sm:w-auto">
+            <Button type="button" variant="secondary" disabled={valid === 0 || importing || checking} onClick={doImport} className="w-full sm:w-auto">
               {importing ? "Importing…" : `Import ${valid} task${valid === 1 ? "" : "s"}`}
             </Button>
           </div>

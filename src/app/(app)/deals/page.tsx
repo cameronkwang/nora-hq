@@ -80,8 +80,8 @@ export default async function DealsPage({ searchParams }: { searchParams: Promis
         );
       })}
 
-      <Card title="Add a deal" className="max-w-3xl">
-        <form action={createDealAction} className="flex flex-col gap-3 sm:flex-row sm:items-end">
+      <Card title="Add a deal">
+        <form action={createDealAction} className="flex max-w-3xl flex-col gap-3 sm:flex-row sm:items-end">
           <div className="min-w-0 flex-1">
             <label className="label" htmlFor="new-deal-name">Business name</label>
             <input id="new-deal-name" name="businessName" required maxLength={160} className="input" placeholder="e.g. Lucia’s Trattoria" autoComplete="off" />

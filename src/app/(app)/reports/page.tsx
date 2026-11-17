@@ -112,7 +112,8 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
 
       <section className="sec mt-8">
         {/* Tabs */}
-        <div role="tablist" aria-label="Audience" className="tabs grid grid-cols-2 gap-6">
+        {/* Packed from the left like every other .tabs row; on a phone the two (each two lines) share the width. */}
+        <div role="tablist" aria-label="Audience" className="tabs max-sm:grid max-sm:grid-cols-2 max-sm:gap-6">
           {(["external", "internal"] as const).map((t) => {
             const r = t === "internal" ? internal : external;
             const on = t === tab;
@@ -156,7 +157,7 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
                 </p>
                 <CopyButton text={markdownToPlainText(body)} label="Copy as text" className="lg:w-full" />
                 {current.audience === "external" && current.status === "draft" && current.draftId && (
-                  <LinkButton href={`/review?client=${encodeURIComponent(client.id)}#d-${current.draftId}`} variant="primary" className="lg:w-full">
+                  <LinkButton href={`/review?client=${encodeURIComponent(client.id)}#d-${current.draftId}`} variant="secondary" className="lg:w-full">
                     {current.draftStatus === "rejected" ? "See it in Review" : "Review & approve"}
                   </LinkButton>
                 )}

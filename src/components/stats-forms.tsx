@@ -42,7 +42,7 @@ export function StatsManualForm({ show }: { show: { instagram: boolean; tiktok: 
         ))}
       </div>
       <div className="flex flex-wrap items-center gap-3">
-        <Button type="submit" variant="primary" disabled={pending}>{pending ? "Saving…" : "Save today's numbers"}</Button>
+        <Button type="submit" variant="secondary" disabled={pending}>{pending ? "Saving…" : "Save today's numbers"}</Button>
         <Note state={state} />
       </div>
     </form>

@@ -22,7 +22,7 @@ export type CalendarItem = {
 export const STATUS_TONE: Record<string, Tone> = {
   idea: "neutral",
   drafted: "warn",
-  approved: "accent",
+  approved: "ink", // "Ready": an ink dot, so it can never be mistaken for Failed (danger) in either scheme
   scheduled: "info",
   publishing: "info",
   published: "ok",

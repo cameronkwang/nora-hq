@@ -75,7 +75,7 @@ export default async function ActivityPage({ searchParams }: { searchParams: Pro
                 </p>
                 <p className="row-meta meta">
                   {biz ? (
-                    <Link href={`/activity?client=${a.clientId}`} className="biz hover:text-text hover:underline">
+                    <Link href={`/activity?client=${a.clientId}`} className="biz tap-target hover:text-text hover:underline">
                       {biz}
                     </Link>
                   ) : (

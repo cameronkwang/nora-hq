@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { and, asc, desc, eq, gte, inArray, isNotNull, lt, lte, ne, notInArray, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, isNotNull, lte, ne, notInArray, or, sql } from "drizzle-orm";
 import { assigneeFor, requireUser } from "@/lib/auth";
 import { getDb, schema } from "@/lib/db";
 import { countNewCollabRequests, isCreatorClient, listClients } from "@/lib/data";
@@ -90,14 +90,12 @@ export default async function Home({ searchParams }: { searchParams: Promise<Rec
 
   const openDue = and(ne(schema.tasks.status, "done"), isNotNull(schema.tasks.dueDate), lte(schema.tasks.dueDate, now));
   const clients = await listClients();
-  const [newCollabs, cms, [asksWaiting], [draftCount], [dueCount], [overdueCount], pendingDrafts, dueTasks] = await Promise.all([
+  const [newCollabs, cms, [asksWaiting], [draftCount], [dueCount], pendingDrafts, dueTasks] = await Promise.all([
     countNewCollabRequests(),
     Promise.all(clients.map((c) => getClientMonth(c.id, month))),
     db.select({ n: sql<number>`count(*)::int` }).from(schema.asks).where(and(eq(schema.asks.status, "new"), ne(schema.asks.kind, "idea"))),
     db.select({ n: sql<number>`count(*)::int` }).from(schema.drafts).where(eq(schema.drafts.status, "needs_review")),
     db.select({ n: sql<number>`count(*)::int` }).from(schema.tasks).where(openDue),
-    db.select({ n: sql<number>`count(*)::int` }).from(schema.tasks)
-      .where(and(ne(schema.tasks.status, "done"), isNotNull(schema.tasks.dueDate), lt(schema.tasks.dueDate, now))),
     db.select().from(schema.drafts).where(eq(schema.drafts.status, "needs_review")).orderBy(asc(schema.drafts.createdAt)).limit(NEEDS_YOU_MAX),
     db.select().from(schema.tasks).where(openDue).orderBy(asc(schema.tasks.dueDate), asc(schema.tasks.createdAt)).limit(NEEDS_YOU_MAX),
   ]);
@@ -111,6 +109,9 @@ export default async function Home({ searchParams }: { searchParams: Promise<Rec
   const first = user.name.split(" ")[0];
   // Tasks already shown under "For you" aren't repeated below.
   const otherDue = dueTasks.filter((t) => !forYouTaskIds.has(t.id));
+  // The Tasks title counts what that section lists: every task due today or overdue, less the ones under For you.
+  const dueElsewhere = forYou.tasks.filter((t) => t.status !== "done" && !!t.dueDate && t.dueDate <= now).length;
+  const dueHere = Math.max(0, dueCount.n - dueElsewhere);
   const slots = splitSlots(pendingDrafts.length, otherDue.length);
   const drafts = pendingDrafts.slice(0, slots.d);
   const tasks = otherDue.slice(0, slots.t);
@@ -205,6 +206,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<Rec
                         key={d.id}
                         href={`/review?draft=${d.id}`}
                         title={d.title}
+                        clamp
                         note={<span className="meta">{KIND_LABELS[d.kind] ?? humanize(d.kind)}</span>}
                         business={d.clientId ? names.get(d.clientId) : null}
                         when={relativeTime(d.createdAt)}
@@ -215,12 +217,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<Rec
               )}
               {dueCount.n > 0 && (
                 <Card
-                  title={
-                    <>
-                      Tasks <Count n={dueCount.n} />
-                      {overdueCount.n > 0 && <span className="meta text-danger">{overdueCount.n} overdue</span>}
-                    </>
-                  }
+                  title={<>Tasks {dueHere > 0 && <Count n={dueHere} />}</>}
                   actions={<Link href="/tasks?scope=all" className="link-quiet">All tasks →</Link>}
                   padded={false}
                 >
@@ -250,7 +247,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<Rec
         actions={
           <span className="flex items-baseline gap-4">
             <span className="meta whitespace-nowrap">{monthLabel(month)}</span>
-            <Link href={NEW_CLIENT_HREF} className="link-quiet inline-flex items-baseline gap-1">
+            <Link href={NEW_CLIENT_HREF} className="link-quiet tap-target inline-flex items-baseline gap-1">
               <svg viewBox="0 0 16 16" aria-hidden className="size-3 self-center" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round">
                 <path d="M8 3v10M3 8h10" />
               </svg>
@@ -320,7 +317,7 @@ function QueueRow({ href, title, note, business, when, clamp }: { href: string; 
     <li>
       <Link href={href} className="row approve-row">
         <span className={clamp ? "approve-main is-clamp" : "approve-main"}>
-          <span className="row-title">{title}</span>
+          <span className="row-title" title={clamp ? title : undefined}>{title}</span>
           {note && <span className="approve-note max-lg:hidden">{note}</span>}
         </span>
         <span className="row-meta">
@@ -427,7 +424,7 @@ function BusinessRow({ cm, now, newCollabs = 0 }: { cm: ClientMonth; now: string
     <li className="ledger-row">
       <div className="ledger-main">
         <span className="ledger-name">
-          <Link href={`/clients/${id}`} className="row-title">
+          <Link href={`/clients/${id}`} className="row-title tap-target">
             {cm.client.name}
           </Link>
           {creator && <Tag>Creator</Tag>}

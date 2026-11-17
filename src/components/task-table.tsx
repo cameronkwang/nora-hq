@@ -32,7 +32,7 @@ const COLS: Array<{ key: SortCol; label: string }> = [
 ];
 
 // checkbox | title | business | status | assignee | due | platform | month | open
-const GRID = "md:grid md:grid-cols-[2.5rem_minmax(11rem,2fr)_minmax(9rem,1.2fr)_8.5rem_7rem_8.5rem_7rem_5rem_2.25rem] md:items-center";
+const GRID = "md:grid md:grid-cols-[2.5rem_minmax(11rem,2fr)_minmax(9rem,1.2fr)_8.5rem_7rem_9.5rem_8.25rem_5rem_2.25rem] md:items-center";
 
 export const STATUS_OPTIONS = TASK_STATUSES.map((s) => ({ value: s, label: humanize(s) }));
 const ASSIGNEE_OPTIONS = ASSIGNEES.map((a) => ({ value: a, label: humanize(a) }));
@@ -90,7 +90,7 @@ export function TaskTable({
       </div>
 
       <div className="border-t border-border md:relative md:overflow-x-auto md:border-t-0">
-        <div role="table" aria-label="Tasks" aria-rowcount={rows.length + 1} className="md:min-w-[60.75rem]">
+        <div role="table" aria-label="Tasks" aria-rowcount={rows.length + 1} className="md:min-w-[63rem]">
           <div role="row" className={cx("task-table-head eyebrow hidden", GRID)}>
             <div role="columnheader" className="flex items-center justify-center py-2">
               <TaskSelectAll bare />

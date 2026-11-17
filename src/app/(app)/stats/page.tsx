@@ -37,7 +37,7 @@ function Mini({ label, value, hint }: { label: string; value: ReactNode; hint?: 
     <div className="min-w-0">
       <p className="eyebrow">{label}</p>
       <p className="mt-0.5 font-medium tabular-nums">{value}</p>
-      {hint && <p className="meta truncate" title={hint}>{hint}</p>}
+      {hint && <p className="meta [overflow-wrap:anywhere]">{hint}</p>}
     </div>
   );
 }
@@ -183,7 +183,7 @@ export default async function StatsPage({ searchParams }: { searchParams: Promis
   const genderTotal = stats.audience ? stats.audience.genders.reduce((a, c) => a + c.value, 0) : 0;
 
   const manual = (
-    <Card title="Log today's numbers">
+    <Card title="Log today’s numbers">
       <p className="meta mb-4">Takes 20 seconds: open each app, copy the follower count (and views if you like). Saved for {formatDate(stats.today)}.</p>
       <StatsManualForm show={manualFor} />
     </Card>
@@ -237,8 +237,8 @@ export default async function StatsPage({ searchParams }: { searchParams: Promis
                 <dl className="grid grid-cols-2 gap-x-4 gap-y-2 border-t border-border pt-3">
                   {stats.mediaKit.numbers.map((n) => (
                     <div key={n.label} className="min-w-0">
-                      <dt className="meta truncate">{n.label}</dt>
-                      <dd className="truncate font-medium tabular-nums">{n.value}</dd>
+                      <dt className="meta [overflow-wrap:anywhere]">{n.label}</dt>
+                      <dd className="font-medium tabular-nums [overflow-wrap:anywhere]">{n.value}</dd>
                     </div>
                   ))}
                 </dl>

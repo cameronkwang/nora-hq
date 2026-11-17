@@ -89,7 +89,7 @@ export default async function LeadPage({ params, searchParams }: { params: Promi
           {lead.convertedClientId ? (
             <Card title="Now a client">
               <p className="mb-4">You’re managing this business.</p>
-              <LinkButton href={`/clients/${lead.convertedClientId}`} variant="primary">Open business page</LinkButton>
+              <LinkButton href={`/clients/${lead.convertedClientId}`} variant="secondary">Open business page</LinkButton>
             </Card>
           ) : canConvert ? (
             <Card title="Start managing this business">
@@ -105,7 +105,7 @@ export default async function LeadPage({ params, searchParams }: { params: Promi
                   <p>
                     A pitch is {pending.status === "needs_review" ? "waiting for your review" : pending.status === "approved" ? "approved and ready to send" : "sent back to Claude"}.
                   </p>
-                  <LinkButton href="/review" variant={canConvert ? "secondary" : "primary"}>Open Review</LinkButton>
+                  <LinkButton href="/review">Open Review</LinkButton>
                 </div>
               ) : channels.length === 0 ? (
                 <p className="meta">
@@ -134,7 +134,7 @@ export default async function LeadPage({ params, searchParams }: { params: Promi
                     </summary>
                     <textarea name="note" rows={2} maxLength={1000} className="input mt-1" placeholder="e.g. mention we love their dumplings" aria-label="Note for Claude" />
                   </details>
-                  <SubmitButton variant={canConvert ? "secondary" : "primary"} pendingLabel="Asking…">Ask Claude to draft a pitch</SubmitButton>
+                  <SubmitButton pendingLabel="Asking…">Ask Claude to draft a pitch</SubmitButton>
                   <p className="hint">You’ll approve it in Review before anything is sent.</p>
                 </ActionForm>
               )}
@@ -206,24 +206,27 @@ export default async function LeadPage({ params, searchParams }: { params: Promi
         </aside>
       </div>
 
-      <div id="edit" className="scroll-mt-20">
-        <details className="sec g-fold max-w-3xl">
-          <summary className="sec-head">
-            <span className="title">Edit details</span>
-            <svg viewBox="0 0 16 16" aria-hidden fill="none" stroke="currentColor" strokeWidth={1.8}><path d="M6 3.5 10.5 8 6 12.5" strokeLinecap="round" strokeLinejoin="round" /></svg>
-          </summary>
-          <div className="sec-body">
-            <ActionForm action={updateLeadAction.bind(null, lead.id)} className="space-y-4" ariaLabel="Edit lead">
-              <LeadFields lead={lead} idPrefix="edit" openMore />
-              <div className="g-bar sticky-actions">
-                <SubmitButton variant="secondary">Save changes</SubmitButton>
-              </div>
-            </ActionForm>
-            <form action={deleteLeadAction.bind(null, lead.id)} className="mt-8">
-              <ConfirmButton confirm={`Delete ${lead.name}? Any unsent pitches to them are withdrawn.`}>Delete lead</ConfirmButton>
-            </form>
-          </div>
-        </details>
+      {/* Under the two columns, in the main column's track (.cols with one child), so its rule ends where theirs does. */}
+      <div id="edit" className="cols scroll-mt-20">
+        <div>
+          <details className="sec g-fold">
+            <summary className="sec-head">
+              <span className="title">Edit details</span>
+              <svg viewBox="0 0 16 16" aria-hidden fill="none" stroke="currentColor" strokeWidth={1.8}><path d="M6 3.5 10.5 8 6 12.5" strokeLinecap="round" strokeLinejoin="round" /></svg>
+            </summary>
+            <div className="sec-body">
+              <ActionForm action={updateLeadAction.bind(null, lead.id)} className="space-y-4" ariaLabel="Edit lead">
+                <LeadFields lead={lead} idPrefix="edit" openMore />
+                <div className="g-bar sticky-actions">
+                  <SubmitButton variant="secondary">Save changes</SubmitButton>
+                </div>
+              </ActionForm>
+              <form action={deleteLeadAction.bind(null, lead.id)} className="mt-8">
+                <ConfirmButton confirm={`Delete ${lead.name}? Any unsent pitches to them are withdrawn.`}>Delete lead</ConfirmButton>
+              </form>
+            </div>
+          </details>
+        </div>
       </div>
 
       <p className="meta mt-8">Added {formatDate(lead.createdAt)} · updated {relativeTime(lead.updatedAt)}</p>

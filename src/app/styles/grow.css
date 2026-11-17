@@ -69,6 +69,13 @@
   .g-row > .more + .more { margin-top: 0; }
   .g-row > .body { grid-column: 1 / -1; min-width: 0; margin-top: 4px; }
   .g-row a.row-title, .g-row .head a { text-decoration: none; }
+  /* Touch: the title link gets a 44px hit area (centred on its line, so the row keeps its height). The row's other
+     controls (.end, links in a meta line) sit above it, so the bigger target never swallows them. */
+  @media (max-width: 767px), (pointer: coarse) {
+    :is(.g-row, .g-lead) > a.row-title, :is(.g-row, .g-lead) .head > a:first-child, .g-card > a:first-child { position: relative; }
+    :is(.g-row, .g-lead) > a.row-title::after, :is(.g-row, .g-lead) .head > a:first-child::after, .g-card > a:first-child::after { content: ""; position: absolute; left: 0; right: 0; top: 50%; height: 44px; transform: translateY(-50%); }
+    .g-row > .end, :is(.g-row, .g-lead, .g-card) .more :is(a, button) { position: relative; z-index: 1; }
+  }
   .g-row a.row-title:hover, .g-row .head a:hover { text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 3px; }
   .g-row .head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; }
   .g-row .head > :first-child { font-weight: 500; }
@@ -137,10 +144,17 @@
   .g-table tbody td, .g-table tbody th { padding: 8px; border-bottom: var(--rule); vertical-align: baseline; }
   .g-table .num { text-align: right; }
   .g-table th:first-child, .g-table td:first-child { padding-left: 0; }
-  .g-table.is-cells thead th { white-space: normal; vertical-align: bottom; }
+  .g-table.is-cells thead th { white-space: nowrap; vertical-align: bottom; }   /* one line: every head on the same baseline */
   .g-table.is-cells tbody td { padding: 4px 2px; vertical-align: middle; }
   .g-table.is-cells tbody td:first-child { padding-left: 0; }
   .g-scroll { overflow: auto; }
+  /* A wide table that scrolls sideways says so: a soft ink fade on the right edge while there is more to the right.
+     The paper-coloured cover scrolls with the content (local) and hides the fade once the last column is in view. */
+  .g-scroll.is-x-hint {
+    background:
+      linear-gradient(to left, var(--bg) 40%, transparent) right / 2.5rem 100% no-repeat local,
+      linear-gradient(to left, color-mix(in srgb, var(--text) 12%, transparent), transparent) right / 1rem 100% no-repeat scroll;
+  }
 
   /* A spreadsheet cell: a borderless input that shows its edge on hover and an ink edge while you type. */
   .g-cell {

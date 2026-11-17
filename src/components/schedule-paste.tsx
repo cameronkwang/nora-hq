@@ -76,7 +76,7 @@ export function SchedulePaste() {
         open={open}
         onClose={close}
         wide
-        title="Paste Nora's schedule"
+        title="Paste Nora’s schedule"
         subtitle="Copy the list from your notes and paste it here. Dates, FREE and 📸 are kept; amounts and payment notes are left out."
       >
         {done ? (

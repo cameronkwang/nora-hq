@@ -220,7 +220,7 @@ export function CreatorImport({ clients }: { clients: Array<{ id: string; label:
         </div>
         {ready && hasKey && !tooMany && (
           <div className="g-bar sticky-actions mt-4">
-            <button type="button" className={buttonClass("primary")} disabled={busy || checking || !current || toImport.length === 0} onClick={runImport}>
+            <button type="button" className={buttonClass("secondary")} disabled={busy || checking || !current || toImport.length === 0} onClick={runImport}>
               {busy ? `Importing… ${phase.done}/${phase.total}` : `Import ${toImport.length} creator${toImport.length === 1 ? "" : "s"}`}
             </button>
             {current && clientId && !busy && toImport.length > 0 && (
@@ -385,7 +385,7 @@ function Done({ result, outreachFor, onAgain }: { result: ImportResult; outreach
         </div>
       )}
       <div className="mt-6 flex flex-wrap gap-2">
-        <Link href="/creators" className={buttonClass("primary")}>See creators</Link>
+        <Link href="/creators" className={buttonClass("secondary")}>See creators</Link>
         <button type="button" className={buttonClass("secondary")} onClick={onAgain}>Import more</button>
       </div>
     </section>

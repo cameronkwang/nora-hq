@@ -46,7 +46,7 @@ export function Card({ title, actions, children, className, padded = true }: { t
 }
 export const Section = Card;
 
-export type Tone = "neutral" | "accent" | "ok" | "warn" | "danger" | "info";
+export type Tone = "neutral" | "accent" | "ok" | "warn" | "danger" | "info" | "ink";
 const toneCls: Record<Tone, string> = {
   neutral: "is-idle",
   accent: "is-accent",
@@ -54,9 +54,13 @@ const toneCls: Record<Tone, string> = {
   warn: "is-warn",
   danger: "is-danger",
   info: "is-info",
+  ink: "is-ink",
 };
 
-/** A state: a 7px dot in the tone's colour and plain words. `tone="neutral"` is the hollow dot ("nothing to do"). */
+/**
+ * A state: a 7px dot in the tone's colour and plain words. `tone="neutral"` is the hollow dot ("nothing to do");
+ * `tone="ink"` is a solid ink dot, for a settled state that is neither good news nor a warning (a post that is ready).
+ */
 export function Status({ tone = "neutral", small, children, className }: { tone?: Tone; small?: boolean; children: ReactNode; className?: string }) {
   return <span className={cx("status", toneCls[tone], small && "is-small", className)}>{children}</span>;
 }

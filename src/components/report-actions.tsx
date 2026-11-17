@@ -71,7 +71,7 @@ function ConfirmSubmit({ children, confirm }: { children: React.ReactNode; confi
 export function ReportRequestButton({ action, label = "Ask Claude to draft this month" }: { action: Action; label?: string }) {
   return (
     <ActionForm action={action} ariaLabel="Ask Claude to draft reports">
-      <SubmitButton variant="primary" pendingLabel="Asking…">{label}</SubmitButton>
+      <SubmitButton pendingLabel="Asking…">{label}</SubmitButton>
     </ActionForm>
   );
 }

@@ -427,7 +427,7 @@ export function IntakeForm({
               type="button"
               onClick={() => go(step - 1)}
               data-off={step === 0}
-              className={cx(buttonClass("ghost"), "intake-js shrink-0 data-[off=true]:hidden max-[360px]:px-2")}
+              className={cx(buttonClass("ghost"), "intake-js min-w-11 shrink-0 data-[off=true]:hidden max-[360px]:px-2")}
             >
               <span aria-hidden>←</span> <span className="max-[420px]:sr-only">{C.common.back}</span>
             </button>

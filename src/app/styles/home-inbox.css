@@ -36,7 +36,7 @@
 
   /* To approve and For you share their right-hand columns (business, when) with the task rows
      (.task-link in calendar-tasks.css), so the lists line up. Keep the two column templates equal. */
-  .approve-row { display: grid; grid-template-columns: minmax(0, 1fr) 10.5rem 4.75rem 14px; column-gap: 16px; align-items: baseline; }
+  .approve-row { display: grid; grid-template-columns: minmax(0, 1fr) 10.5rem 6.75rem 14px; column-gap: 16px; align-items: baseline; }
   .approve-row .row-meta { display: contents; }
   .approve-row .where { grid-column: 2; overflow: hidden; text-overflow: ellipsis; }
   .approve-row .when { grid-column: 3; text-align: right; }
@@ -106,6 +106,7 @@
   }
   @media (max-width: 767px), (pointer: coarse) {
     .ledger-wait a { display: inline-flex; align-items: center; min-height: 2.75rem; }   /* each one is its own tap target */
+    .ledger-wait > *::before { top: 50%; transform: translateY(-50%); }                  /* so the dot stays on the text's line */
   }
 
   /* Facts on one line, joined by middle dots. When the line wraps, a new line never starts with a dot: every item

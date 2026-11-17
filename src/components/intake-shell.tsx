@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { IntakeLangSwitch } from "./intake-lang";
+import { HtmlLang } from "./html-lang";
 import { intakeCopy, type IntakeLangCode } from "@/lib/intake-copy";
 
 /**
@@ -48,6 +49,7 @@ export function IntakeShell({
       // No tab bar here: the sticky action bar sits on the bottom edge and covers the home indicator itself.
       style={{ ["--tabbar-h" as string]: "0px" }}
     >
+      <HtmlLang lang={C.htmlLang} />
       <style>{FOLLOW_UP_CSS}</style>
       <noscript>
         <style>{NO_JS_CSS}</style>

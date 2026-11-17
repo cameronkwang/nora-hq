@@ -121,8 +121,17 @@ export default async function CreatorsPage({ searchParams }: { searchParams: Pro
         subtitle="Local creators and where each one stands with every business."
         actions={
           <>
+            {/* The view switch sits in the head, as on /tasks. */}
+            <ViewToggle
+              cookieName={VIEW_COOKIE}
+              current={view === "pipeline" ? "board" : "table"}
+              options={[
+                { value: "table", label: "Table", href: href({ view: "table" }) },
+                { value: "board", label: "Pipeline", href: href({ view: "pipeline", stage: "" }) },
+              ]}
+            />
             <CreatorMenu exportHref={`/creators/export${client ? `?client=${encodeURIComponent(client)}` : ""}`} />
-            <LinkButton href={client ? `/creators/new?client=${encodeURIComponent(client)}` : "/creators/new"} variant="primary">
+            <LinkButton href={client ? `/creators/new?client=${encodeURIComponent(client)}` : "/creators/new"} size="sm">
               Add creator
             </LinkButton>
           </>
@@ -147,16 +156,8 @@ export default async function CreatorsPage({ searchParams }: { searchParams: Pro
         </Link>
       </div>
 
-      {/* View switch */}
-      <div className="mb-3 mt-10 flex flex-wrap items-center justify-between gap-2 max-md:mt-8">
-        <ViewToggle
-          cookieName={VIEW_COOKIE}
-          current={view === "pipeline" ? "board" : "table"}
-          options={[
-            { value: "table", label: "Table", href: href({ view: "table" }) },
-            { value: "board", label: "Pipeline", href: href({ view: "pipeline", stage: "" }) },
-          ]}
-        />
+      {/* Clear filters, when any are on (the view switch is in the head) */}
+      <div className="mb-3 mt-10 flex flex-wrap items-center justify-end gap-2 max-md:mt-8">
         {filtersOn && (
           <Link href={href({ q: "", stage: "", channel: "", due: "", client: view === "pipeline" ? client : "", view })} className="link-quiet inline-flex min-h-11 items-center md:pointer-fine:min-h-0">
             Clear filters

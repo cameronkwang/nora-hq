@@ -178,14 +178,17 @@ export default async function CreatorPage({ params, searchParams }: { params: Pr
         </div>
       </div>
 
-      <div id="edit" className="scroll-mt-6">
-        <Card title="Edit profile" className="max-w-3xl">
-          <ActionForm action={updateCreatorAction.bind(null, c.id)} ariaLabel="Edit creator profile" className="space-y-4">
-            <CreatorFields creator={c} />
-            <p className="hint">Clearing a field removes it. Changing follower counts or engagement updates the “stats updated” date.</p>
-            <SubmitButton>Save profile</SubmitButton>
-          </ActionForm>
-        </Card>
+      {/* Under the two columns, in the main column's track (.cols with one child), so its rule ends where theirs does. */}
+      <div id="edit" className="cols scroll-mt-6">
+        <div>
+          <Card title="Edit profile">
+            <ActionForm action={updateCreatorAction.bind(null, c.id)} ariaLabel="Edit creator profile" className="space-y-4">
+              <CreatorFields creator={c} />
+              <p className="hint">Clearing a field removes it. Changing follower counts or engagement updates the “stats updated” date.</p>
+              <SubmitButton>Save profile</SubmitButton>
+            </ActionForm>
+          </Card>
+        </div>
       </div>
     </>
   );
@@ -260,7 +263,7 @@ function OutreachCard({ o, creatorId, drafts, now }: { o: OutreachWithClient; cr
           <textarea id={`${idp}-notes`} name="notes" className="input" defaultValue={o.notes ?? ""} placeholder="What they said, visit date, what they ordered…" />
         </div>
         <div className="sm:col-span-2">
-          <SubmitButton size="sm" variant="secondary">Save</SubmitButton>
+          <SubmitButton>Save</SubmitButton>
         </div>
       </ActionForm>
 

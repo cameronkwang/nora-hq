@@ -50,7 +50,7 @@ function FormMessage({ state }: { state: ActionFormState }) {
 export function SubmitButton({
   children,
   pendingLabel = "Saving…",
-  variant = "primary",
+  variant = "secondary",
   size = "md",
   className,
   formAction,

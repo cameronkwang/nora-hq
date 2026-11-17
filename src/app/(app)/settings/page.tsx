@@ -180,7 +180,7 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
                   <li key={c.id} className="ps-row">
                     <div className="ps-row-main">
                       <p className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5">
-                        <Link href={`/clients/${c.id}`} className="row-title flex-none hover:underline">{clientLabel(c)}</Link>
+                        <Link href={`/clients/${c.id}`} className="row-title tap-target min-w-0 hover:underline [overflow-wrap:anywhere]">{clientLabel(c)}</Link>
                         <ConnStatus conn={conn} />
                       </p>
                       {conn ? <ConnMeta conn={conn} renews /> : (
@@ -208,7 +208,7 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
         </Card>
 
         {/* Nora's own accounts; their stats live on /stats */}
-        <Card title="Nora's accounts (@noraeatsgood)">
+        <Card title="Nora’s accounts (@noraeatsgood)">
           <div className="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-3">
             <p className="min-w-0 flex-[1_1_20rem] text-muted">Nora&apos;s own Instagram and TikTok, for follower growth, top posts and the media kit on My stats. Read-only.</p>
             <div className="flex flex-wrap gap-2">
@@ -332,7 +332,7 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
                   <code className="min-w-0 flex-1 truncate font-mono text-[0.8125rem]">{mcpUrl}</code>
                   <CopyButton text={mcpUrl} size="sm" />
                 </div>
-                {!base && <p className="mt-1"><Status tone="warn" small>Set APP_URL so this shows your real address.</Status></p>}
+                {!base && <p className="mt-1"><Status tone="warn" small className="whitespace-normal">Set APP_URL so this shows your real address.</Status></p>}
               </div>
               <ol className="ps-steps-list">
                 <li><span aria-hidden className="n">1</span><span>In Claude, open Settings → Connectors → Add custom connector.</span></li>

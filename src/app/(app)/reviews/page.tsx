@@ -14,13 +14,13 @@ export const dynamic = "force-dynamic";
 type SP = Record<string, string | string[] | undefined>;
 const one = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v) ?? "";
 
-/** Stars in ink, the empty ones in the hairline colour (no traffic-light colours). */
+/** Stars in ink, the empty ones in the faint glyph colour (3:1, no traffic-light colours). Read out as "N out of 5 stars". */
 function Stars({ n }: { n: number | null }) {
   if (!n) return <span className="meta">No rating</span>;
   return (
-    <span className="tracking-tight" aria-label={`${n} out of 5 stars`} title={`${n} of 5`}>
+    <span role="img" className="tracking-tight" aria-label={`${n} out of 5 stars`} title={`${n} of 5`}>
       <span aria-hidden className="text-text">{"★".repeat(n)}</span>
-      <span aria-hidden className="text-border-strong opacity-50">{"★".repeat(5 - n)}</span>
+      <span aria-hidden className="text-faint">{"★".repeat(5 - n)}</span>
     </span>
   );
 }
@@ -66,10 +66,10 @@ export default async function ReviewsPage({ searchParams }: { searchParams: Prom
         actions={conn ? (
           <form action={syncReviewsAction}>
             <input type="hidden" name="returnTo" value="/reviews" />
-            <SubmitButton variant="secondary" pendingLabel="Syncing…">Sync now</SubmitButton>
+            <SubmitButton size="sm" pendingLabel="Syncing…">Sync now</SubmitButton>
           </form>
         ) : (
-          <LinkButton href="/settings" variant="primary">Connect Google</LinkButton>
+          <LinkButton href="/settings" size="sm">Connect Google</LinkButton>
         )}
       />
 
@@ -185,7 +185,7 @@ export default async function ReviewsPage({ searchParams }: { searchParams: Prom
                         <input type="hidden" name="returnTo" value={returnTo} />
                         <label htmlFor={`note-${r.id}`} className="sr-only">Notes for Claude (optional)</label>
                         <input id={`note-${r.id}`} name="note" placeholder="Optional note for Claude (e.g. offer a free drink)" className="input sm:max-w-sm" />
-                        <SubmitButton size="sm" variant="secondary" pendingLabel="Asking…" className="shrink-0">Ask Claude to draft a reply</SubmitButton>
+                        <SubmitButton pendingLabel="Asking…" className="shrink-0">Ask Claude to draft a reply</SubmitButton>
                       </form>
                     )}
                   </div>

@@ -5,7 +5,7 @@
   /* ============================================================ TASK ROWS (Home, the business page and /tasks show them)
      The tick, then one link that carries the title and its facts, so the whole row is the target.
      Wide (1024px and up): one line. Title and its small facts (platform, who, state) on the left, then the business and
-     the due date in fixed columns that match .approve-row in home-inbox.css (business 10.5rem, when 4.75rem, then the
+     the due date in fixed columns that match .approve-row in home-inbox.css (business 10.5rem, when 6.75rem, then the
      14px chevron column), so task rows and the To approve rows line up. Narrow: the title, then one meta line joined by "·". */
   .task-row { column-gap: 16px; padding: 0; }
   .task-row > form { display: contents; }          /* the tick is the row's own flex item; the form still submits it */
@@ -27,12 +27,12 @@
   .pick { flex: none; align-self: center; display: grid; place-items: center; width: 28px; height: 28px; margin: -3px 2px -3px -5px; cursor: pointer; border-radius: var(--radius-sm); }
 
   @media (min-width: 1024px) {
-    /* The date's column keeps the chevron column's room (30px) on its right, like the other lists; a long
-       "Overdue · Nov 12" runs on into it. */
-    .task-link { display: grid; grid-template-columns: minmax(0, 1fr) 10.5rem calc(4.75rem + 30px); column-gap: 16px; align-items: baseline; }
+    /* The date's column keeps the chevron column's room (30px) on its right, like the other lists. It is wide enough for
+       "Overdue · Sep 30", so every date ends on the same edge; anything longer would run left, never into that room. */
+    .task-link { display: grid; grid-template-columns: minmax(0, 1fr) 10.5rem calc(6.75rem + 30px); column-gap: 16px; align-items: baseline; }
     .task-link .row-meta { display: contents; }
     .task-link .where { grid-column: 2; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .task-link .when { grid-column: 3; padding-right: 30px; text-align: right; }
+    .task-link .when { grid-column: 3; justify-self: end; padding-right: 30px; text-align: right; white-space: nowrap; }
   }
   @media (max-width: 1023px) {
     .task-link { display: block; padding: 10px 0; }
@@ -45,7 +45,7 @@
   }
 
   /* ---- A plan group: a collapsed row, a segment meter and "0 of 8". Its slots open underneath, indented to the title. */
-  .group-row { display: grid; grid-template-columns: var(--tick-w) minmax(0, 1fr) 10.5rem 4.75rem 14px; column-gap: 16px; align-items: baseline; cursor: pointer; list-style: none; user-select: none; }
+  .group-row { display: grid; grid-template-columns: var(--tick-w) minmax(0, 1fr) 10.5rem 6.75rem 14px; column-gap: 16px; align-items: baseline; cursor: pointer; list-style: none; user-select: none; }
   .group-row::-webkit-details-marker { display: none; }
   .group-row .disc { grid-column: 1; align-self: center; width: 18px; height: 18px; margin-left: -3px; color: var(--faint); stroke-width: 2; transition: transform 0.15s; }
   details[open] > .group-row .disc { transform: rotate(90deg); }

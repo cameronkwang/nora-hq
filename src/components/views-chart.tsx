@@ -62,7 +62,7 @@ export function ViewsChart({ points, title }: { points: ViewsPoint[]; title: str
   const tickW = Math.max(...ticks.map((t) => tickText(t, top).length)) * 6.5 + 8;
   const wide = width >= 520;
   const left = M.left + tickW;
-  const right = wide ? 76 : 12;
+  const right = wide ? 84 : 12; // room for the end labels ("31K TikTok") at 12px
   const plotW = Math.max(40, width - left - right);
   const plotH = HEIGHT - M.top - M.bottom;
   const x = (i: number) => left + (n <= 1 ? plotW / 2 : (i * plotW) / (n - 1));
@@ -154,7 +154,7 @@ export function ViewsChart({ points, title }: { points: ViewsPoint[]; title: str
           {ticks.map((t) => (
             <g key={t}>
               <line x1={left} x2={left + plotW} y1={y(t)} y2={y(t)} stroke="var(--border)" strokeWidth={1} shapeRendering="crispEdges" />
-              <text x={left - 8} y={y(t)} dy="0.32em" textAnchor="end" fontSize={11} fill="var(--muted)" style={{ fontVariantNumeric: "tabular-nums" }}>
+              <text x={left - 8} y={y(t)} dy="0.32em" textAnchor="end" fontSize={12} fill="var(--muted)" style={{ fontVariantNumeric: "tabular-nums" }}>
                 {tickText(t, top)}
               </text>
             </g>
@@ -162,7 +162,7 @@ export function ViewsChart({ points, title }: { points: ViewsPoint[]; title: str
 
           {points.map((p, i) =>
             i % labelEvery === (n - 1) % labelEvery ? (
-              <text key={p.month} x={x(i)} y={HEIGHT - 8} textAnchor={i === n - 1 ? "end" : i === 0 ? "start" : "middle"} fontSize={11} fill={i === active ? "var(--text)" : "var(--muted)"}>
+              <text key={p.month} x={x(i)} y={HEIGHT - 8} textAnchor={i === n - 1 ? "end" : i === 0 ? "start" : "middle"} fontSize={12} fill={i === active ? "var(--text)" : "var(--muted)"}>
                 {p.label}
               </text>
             ) : null,
@@ -189,7 +189,7 @@ export function ViewsChart({ points, title }: { points: ViewsPoint[]; title: str
 
           {showDirect &&
             ends.map((e) => (
-              <text key={e.key} x={e.ex + 10} y={e.ey} dy="0.32em" fontSize={11} fill="var(--text)">
+              <text key={e.key} x={e.ex + 10} y={e.ey} dy="0.32em" fontSize={12} fill="var(--text)">
                 <tspan fontWeight={600}>{formatNumber(points[e.last][e.key])}</tspan>
                 <tspan fill="var(--muted)"> {e.name === "Instagram" ? "IG" : "TikTok"}</tspan>
               </text>

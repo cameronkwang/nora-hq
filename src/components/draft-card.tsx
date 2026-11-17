@@ -26,9 +26,9 @@ function Stars({ rating }: { rating: number | null }) {
   if (!rating) return <span className="meta">No rating</span>;
   // Ink stars: the count says it, not a colour.
   return (
-    <span className="text-sm tracking-tight" aria-label={`${rating} out of 5 stars`}>
-      {"★".repeat(rating)}
-      <span className="text-faint">{"★".repeat(5 - rating)}</span>
+    <span role="img" className="text-sm tracking-tight" aria-label={`${rating} out of 5 stars`}>
+      <span aria-hidden>{"★".repeat(rating)}</span>
+      <span aria-hidden className="text-faint">{"★".repeat(5 - rating)}</span>
     </span>
   );
 }

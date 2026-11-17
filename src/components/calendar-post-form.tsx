@@ -287,7 +287,7 @@ export function CalendarPostForm({
       )}
 
       <div className="flex flex-wrap items-center gap-3">
-        <button type="submit" disabled={busy} className={cx(buttonClass("primary"), "w-full sm:w-auto")}>
+        <button type="submit" disabled={busy} className={cx(buttonClass("secondary"), "w-full sm:w-auto")}>
           {phase === "uploading" && files.length
             ? `Uploading ${Math.min(progress + 1, files.length)} of ${files.length}…`
             : busy

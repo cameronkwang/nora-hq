@@ -24,6 +24,8 @@ const TABS: Array<{ key: TabKey; label: string; empty: string }> = [
   { key: "ideas", label: "Ideas", empty: "No ideas saved yet. Pick “Just an idea” on a new ask to park one here." },
   { key: "done", label: "Done", empty: "No finished asks yet." },
 ];
+/** The lists the chips switch between (all "To do" in the section tabs). */
+const PERSON_TABS: TabKey[] = ["inbox", "nora", "cameron"];
 const ARCHIVED = { key: "archived" as const, label: "Archived", empty: "Nothing archived." };
 
 /** Old links used ?status=…; map them onto the new tabs. */
@@ -54,7 +56,7 @@ export default async function AsksPage({ searchParams }: { searchParams: Promise
   };
   const count = (w: SQL) => db.select({ n: sql<number>`count(*)::int` }).from(schema.asks).where(w).then((r) => r[0]?.n ?? 0);
 
-  const [rows, nInbox, nNora, nCameron, nIdeas] = await Promise.all([
+  const [rows, nInbox, nNora, nCameron] = await Promise.all([
     db
       .select({ ask: schema.asks, client: schema.clients })
       .from(schema.asks)
@@ -65,9 +67,8 @@ export default async function AsksPage({ searchParams }: { searchParams: Promise
     count(where.inbox),
     count(where.nora),
     count(where.cameron),
-    count(where.ideas),
   ]);
-  const counts: Partial<Record<TabKey, number>> = { inbox: nInbox, nora: nNora, cameron: nCameron, ideas: nIdeas };
+  const counts: Partial<Record<TabKey, number>> = { inbox: nInbox, nora: nNora, cameron: nCameron };
   const sent = typeof sp.created === "string";
 
   const ids = rows.map((r) => r.ask.id);
@@ -86,7 +87,6 @@ export default async function AsksPage({ searchParams }: { searchParams: Promise
       <PageHeader
         title="Asks"
         subtitle="Anything you drop in: requests, ideas, FYIs. Claude sorts them and gets to work."
-        actions={<LinkButton href="/asks/new">+ New ask</LinkButton>}
       />
 
       {sent && (
@@ -95,19 +95,22 @@ export default async function AsksPage({ searchParams }: { searchParams: Promise
         </p>
       )}
 
-      {/* Whose list: filter chips (the selected one is ink). One line; it scrolls sideways on a small phone. */}
-      <nav aria-label="Ask lists" className="-mx-4 mb-3 overflow-x-auto px-4 md:mx-0 md:px-0">
-        <div className="chips min-w-max flex-nowrap">
-          {TABS.map((t) => (
-            <Link key={t.key} href={t.key === "inbox" ? "/asks" : `/asks?tab=${t.key}`} aria-current={t.key === tab.key ? "page" : undefined} className="chip">
-              <span>
-                {t.label}
-                {(counts[t.key] ?? 0) > 0 && <i>{counts[t.key]}</i>}
-              </span>
-            </Link>
-          ))}
-        </div>
-      </nav>
+      {/* Whose list, under "To do": filter chips (the selected one is ink). Ideas and Done are the section tabs above,
+          so they are not repeated here. One line; it scrolls sideways on a small phone. */}
+      {PERSON_TABS.includes(tab.key) && (
+        <nav aria-label="Ask lists" className="-mx-4 mb-3 overflow-x-auto px-4 md:mx-0 md:px-0">
+          <div className="chips min-w-max flex-nowrap">
+            {TABS.filter((t) => PERSON_TABS.includes(t.key)).map((t) => (
+              <Link key={t.key} href={t.key === "inbox" ? "/asks" : `/asks?tab=${t.key}`} aria-current={t.key === tab.key ? "page" : undefined} className="chip">
+                <span>
+                  {t.label}
+                  {(counts[t.key] ?? 0) > 0 && <i>{counts[t.key]}</i>}
+                </span>
+              </Link>
+            ))}
+          </div>
+        </nav>
+      )}
 
       {rows.length === 0 ? (
         <div className="border-t border-border pt-1">
@@ -133,7 +136,7 @@ export default async function AsksPage({ searchParams }: { searchParams: Promise
               <li key={ask.id} className="ask-item">
                 <p className="meta mb-1">
                   {client ? (
-                    <Link href={`/clients/${client.id}`} className="font-medium text-text hover:underline">
+                    <Link href={`/clients/${client.id}`} className="tap-target font-medium text-text hover:underline">
                       {clientLabel(client)}
                     </Link>
                   ) : (
@@ -172,7 +175,7 @@ export default async function AsksPage({ searchParams }: { searchParams: Promise
                     {convo === "replied" && <Status tone="info" small>Replied</Status>}
                     {nTasks > 0 && <span className="meta">{nTasks} task{nTasks === 1 ? "" : "s"}</span>}
                     {nDrafts > 0 && <span className="meta">{nDrafts} draft{nDrafts === 1 ? "" : "s"}</span>}
-                    <Link href={`/asks/${ask.id}`} className="link text-sm">
+                    <Link href={`/asks/${ask.id}`} className="link -my-2.5 inline-flex min-h-11 items-center text-sm md:pointer-fine:my-0 md:pointer-fine:min-h-0">
                       Open
                     </Link>
                   </div>

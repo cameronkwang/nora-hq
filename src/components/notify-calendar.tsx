@@ -30,7 +30,7 @@ export function NotifyCalendarLink({ base, hasFeed }: { base: string; hasFeed: b
         <div role="status" className="flex flex-col gap-4 border-y border-border py-4">
           <Status tone="ok" className="whitespace-normal font-medium text-text">Your private calendar link: add it now. It won&apos;t be shown again.</Status>
           <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-center">
-            <input id="cal-new-link" readOnly value={https} onFocus={(e) => e.currentTarget.select()} className="input min-w-0 flex-1 font-mono" aria-label="Calendar link" />
+            <input id="cal-new-link" readOnly value={https} onFocus={(e) => e.currentTarget.select()} className="input min-w-0 font-mono sm:flex-1" aria-label="Calendar link" />
             <CopyButton targetId="cal-new-link" label="Copy link" />
           </div>
           <div>

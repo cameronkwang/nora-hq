@@ -118,7 +118,7 @@ export function LeadImport() {
           </ul>
         )}
         <div className="mt-6 flex flex-wrap gap-2">
-          <Link href="/leads" className={buttonClass("primary")}>See leads</Link>
+          <Link href="/leads" className={buttonClass("secondary")}>See leads</Link>
           <button type="button" className={buttonClass("secondary")} onClick={() => { setText(""); setPreview(null); setPhase({ kind: "edit" }); }}>Import another</button>
         </div>
       </section>
@@ -232,7 +232,7 @@ export function LeadImport() {
         )}
         {error && <p role="alert" className="notice mt-3"><span className="status is-danger">{error}</span></p>}
         <div className="g-bar sticky-actions mt-4">
-          <button type="button" className={cx(buttonClass("primary"))} disabled={busy || checking || toImport.length === 0} onClick={runImport}>
+          <button type="button" className={buttonClass("secondary")} disabled={busy || checking || toImport.length === 0} onClick={runImport}>
             {busy ? `Importing ${phase.done} of ${phase.total}…` : toImport.length ? `Import ${toImport.length} lead${toImport.length === 1 ? "" : "s"}` : "Import"}
           </button>
           <span className="meta">Existing leads only get new info filled in; nothing is blanked out.</span>

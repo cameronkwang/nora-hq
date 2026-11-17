@@ -6,6 +6,11 @@ import { KitView, type KitIdentity, type KitStats, type MediaKitSettings } from 
 import { CopyButton } from "./copy-button";
 import { Section, Status, Tag, buttonClass, cx } from "./ui";
 import { DEFAULT_RATE_LINE } from "@/lib/collab-copy";
+
+/** The default rate line as it read before the dash-free copy pass. A saved copy of it is still "the default", so it
+ *  doesn't grow a "Reset to" link Nora never asked for. */
+const EARLIER_DEFAULT_RATE_LINE = "Collabs start at $600 \u2014 custom packages available; reach out to Nora directly.";
+const isDefaultRateLine = (v: string) => v.trim() === DEFAULT_RATE_LINE || v.trim() === EARLIER_DEFAULT_RATE_LINE;
 import type { KitFormState } from "@/app/(app)/kit-settings/actions";
 
 type Action = (s: KitFormState, fd: FormData) => Promise<KitFormState>;
@@ -107,7 +112,7 @@ export function KitSettingsForm({
           <div className="mt-3">
             <label className="label" htmlFor="k-rate">Rate line</label>
             <textarea id="k-rate" name="rateLine" maxLength={300} rows={2} value={s.rateLine} onChange={(e) => set("rateLine", e.target.value)} className="input !min-h-0" />
-            {s.rateLine.trim() !== DEFAULT_RATE_LINE && (
+            {!isDefaultRateLine(s.rateLine) && (
               <button type="button" onClick={() => set("rateLine", DEFAULT_RATE_LINE)} className="link-quiet tap-target mt-2 whitespace-normal text-left">
                 Reset to “{DEFAULT_RATE_LINE}”
               </button>
@@ -155,12 +160,12 @@ export function KitSettingsForm({
           <div className="flex gap-2 max-sm:w-full">
             {enabled ? (
               <>
-                <IntentButton intent="save" variant="primary">Save changes</IntentButton>
+                <IntentButton intent="save">Save changes</IntentButton>
                 <IntentButton intent="unpublish" variant="danger">Unpublish</IntentButton>
               </>
             ) : (
               <>
-                <IntentButton intent="publish" variant="primary">Publish</IntentButton>
+                <IntentButton intent="publish">Publish</IntentButton>
                 <IntentButton intent="save">Save draft</IntentButton>
               </>
             )}

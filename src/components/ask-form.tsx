@@ -130,7 +130,7 @@ export function AskForm({
 
       {/* Phones: the one button stays in reach, just above the tab bar (a solid bar with a hairline on top). */}
       <div className="ask-bar md:static md:border-0 md:p-0">
-        <button type="submit" disabled={busy} className={cx(buttonClass("primary"), "w-full md:w-auto md:px-6")}>
+        <button type="submit" disabled={busy} className={cx(buttonClass("secondary"), "w-full md:w-auto md:px-6")}>
           {phase === "uploading" && files.length
             ? `Uploading ${Math.min(progress + 1, files.length)} of ${files.length}…`
             : busy

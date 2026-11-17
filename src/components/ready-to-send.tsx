@@ -249,7 +249,7 @@ export function ReadyToSend({ groups, backHref }: { groups: SendGroup[]; backHre
             <button type="button" onClick={() => setSkipped((s) => [...s, current.id])} disabled={busy} className={buttonClass("secondary")}>
               Skip
             </button>
-            <button type="button" onClick={() => void markSent(current)} disabled={busy || !!current.blocked} className={cx(buttonClass("primary"), "md:px-6")}>
+            <button type="button" onClick={() => void markSent(current)} disabled={busy || !!current.blocked} className={cx(buttonClass("secondary"), "md:px-6")}>
               {busy ? "Saving…" : "Sent ✓"}
             </button>
           </div>

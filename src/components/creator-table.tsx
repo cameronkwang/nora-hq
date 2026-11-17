@@ -33,8 +33,8 @@ const COLUMNS: Array<{ key: SortKey; label: string; kind?: Kind; num?: boolean; 
   { key: "email", label: "Email", kind: "email", width: "w-44" },
   { key: "city", label: "City", kind: "text", width: "w-32" },
   { key: "niche", label: "Niche", kind: "text", width: "w-32" },
-  { key: "instagramFollowers", label: "IG followers", kind: "count", num: true, width: "w-24" },
-  { key: "tiktokFollowers", label: "TikTok followers", kind: "count", num: true, width: "w-24" },
+  { key: "instagramFollowers", label: "IG followers", kind: "count", num: true, width: "w-36" },
+  { key: "tiktokFollowers", label: "TikTok followers", kind: "count", num: true, width: "w-36" },
   { key: "engagementRate", label: "Eng. %", kind: "rate", num: true, width: "w-20" },
   { key: "businesses", label: "Businesses", width: "" },
   { key: "nextFollowUp", label: "Next follow-up", width: "w-28" },
@@ -93,8 +93,8 @@ export function CreatorTable({ rows: initial }: { rows: CreatorTableRow[] }) {
       </ul>
 
       {/* Tablet / desktop: the spreadsheet */}
-      <div className="g-scroll relative hidden max-h-[calc(100dvh-14rem)] md:block" role="region" aria-label="Creators table" tabIndex={-1}>
-        <table className="g-table is-cells min-w-[94rem] table-fixed">
+      <div className="g-scroll is-x-hint relative hidden max-h-[calc(100dvh-14rem)] md:block" role="region" aria-label="Creators table" tabIndex={-1}>
+        <table className="g-table is-cells min-w-[100rem] table-fixed">
           <thead>
             <tr>
               {COLUMNS.map((c, i) => {

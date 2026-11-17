@@ -77,7 +77,7 @@ export default async function DealPage({ params, searchParams }: { params: Promi
             {compText(deal) && <span>{compText(deal)}</span>}
           </span>
         }
-        actions={<LinkButton href={`/deals/${deal.id}/visit`}>Visit mode</LinkButton>}
+        actions={<LinkButton href={`/deals/${deal.id}/visit`} size="sm">Visit mode</LinkButton>}
       />
 
       {flash && <p role="status" className="notice mb-2"><span className="status is-ok">{flash}</span></p>}

@@ -4,7 +4,8 @@ import type { ReactNode } from "react";
  * A small, safe Markdown renderer for client reports (Claude writes them). Builds React elements only — never
  * raw HTML — so nothing in a report can inject markup or script. Supports: # / ## / ### headings, paragraphs,
  * "-"/"*"/"•" bullets, "1." lists, > quotes, --- rules, **bold**, *italic* / _italic_, `code` and
- * [links](https://…) (http, https and mailto only). Also exports markdownToPlainText for email + copy.
+ * [links](https://…) (http, https and mailto only), and on screen | pipe | tables |. Also exports markdownToPlainText
+ * for email + copy (which reads a table as it always has: its lines joined into one paragraph).
  * No hooks and no server imports: usable from server and client components alike.
  */
 
@@ -13,9 +14,15 @@ type Block =
   | { t: "p"; text: string }
   | { t: "ul" | "ol"; items: string[] }
   | { t: "quote"; text: string }
-  | { t: "hr" };
+  | { t: "hr" }
+  | { t: "table"; head: string[]; rows: string[][] };
 
-function parse(md: string): Block[] {
+const TABLE_RE = /^\|.*\|$/;
+const TABLE_SEP_RE = /^\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|?$/;
+const cells = (row: string) => row.trim().replace(/^\|/, "").replace(/\|$/, "").split("|").map((c) => c.trim());
+
+/** `tables` turns "| a | b |" + "|---|---|" + rows into a table block (the on-screen preview only). */
+function parse(md: string, { tables = false }: { tables?: boolean } = {}): Block[] {
   const lines = md.replace(/\r\n?/g, "\n").split("\n");
   const out: Block[] = [];
   let para: string[] = [];
@@ -30,6 +37,16 @@ function parse(md: string): Block[] {
     const h = /^(#{1,6})\s+(.*)$/.exec(trimmed);
     if (h) { flush(); out.push({ t: "h", level: Math.min(3, h[1].length) as 1 | 2 | 3, text: h[2].replace(/\s*#+$/, "") }); continue; }
     if (/^(-{3,}|\*{3,}|_{3,})$/.test(trimmed)) { flush(); out.push({ t: "hr" }); continue; }
+    if (tables && TABLE_RE.test(trimmed) && i + 1 < lines.length && TABLE_SEP_RE.test(lines[i + 1].trim())) {
+      flush();
+      const head = cells(trimmed);
+      const rows: string[][] = [];
+      i += 2;
+      while (i < lines.length && TABLE_RE.test(lines[i].trim())) rows.push(cells(lines[i++]));
+      i--;
+      out.push({ t: "table", head, rows });
+      continue;
+    }
     const bullet = /^[-*•+]\s+(.*)$/.exec(trimmed);
     const num = /^\d+[.)]\s+(.*)$/.exec(trimmed);
     if (bullet || num) {
@@ -93,7 +110,7 @@ function inline(text: string, key = "i"): ReactNode[] {
 }
 
 export function ReportMarkdown({ body, className }: { body: string; className?: string }) {
-  const blocks = parse(body);
+  const blocks = parse(body, { tables: true });
   return (
     <div className={["min-w-0 max-w-[42rem] break-words", className].filter(Boolean).join(" ")}>
       {blocks.map((b, i) => {
@@ -117,6 +134,22 @@ export function ReportMarkdown({ body, className }: { body: string; className?: 
             return <blockquote key={k} className="g-quote my-3 text-muted">{inline(b.text, k)}</blockquote>;
           case "hr":
             return <hr key={k} className="my-5 border-border" />;
+          case "table":
+            // Caps heads on a hairline, rows on hairlines (.g-table); numbers in tabular figures. Wide ones scroll.
+            return (
+              <div key={k} className="g-scroll my-3">
+                <table className="g-table">
+                  <thead>
+                    <tr>{b.head.map((c, j) => <th key={j} scope="col">{inline(c, `${k}h${j}`)}</th>)}</tr>
+                  </thead>
+                  <tbody>
+                    {b.rows.map((row, ri) => (
+                      <tr key={ri}>{b.head.map((_, j) => <td key={j}>{inline(row[j] ?? "", `${k}r${ri}c${j}`)}</td>)}</tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            );
         }
       })}
     </div>

@@ -182,7 +182,7 @@ export function NotifyEnable({ publicKey, deviceKeys, compact = false }: { publi
               {!compact && <Button size="md" variant="ghost" onClick={turnOff}>Turn off here</Button>}
             </>
           ) : (
-            <Button variant="primary" size="md" onClick={turnOn} disabled={state === "busy"}>
+            <Button variant="secondary" size="md" onClick={turnOn} disabled={state === "busy"}>
               {state === "busy" ? "Turning on…" : "Turn on notifications"}
             </Button>
           )}

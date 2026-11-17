@@ -127,7 +127,12 @@ Email to Myah the Beauty   S&F Massage…   5h ago  ›
 ## Controls
 
 - **Buttons** `.btn`: 36px (44px touch), 6px radius, 14px sides, 14px / 500 label (16px on phones).
-  `.btn-primary` cinnabar fill, 600 weight, one per screen. `.btn-secondary` 1px `--border-strong`
+  `.btn-primary` cinnabar fill, 600 weight, one per screen: inside the app that one is the sidebar's
+  "New ask" (the phone "+"), so pages, forms and saves use `.btn-secondary` (the default of `<Button>`,
+  `<LinkButton>` and `<SubmitButton>`); `.btn-primary` stays on the pages with no sidebar or tab bar
+  (sign in, the owner form, the collab form, the drop link, the public media kit) and inside dialogs and
+  sheets. Page-head actions are `size="sm"`; a button beside a 36px input or ending a form is `md`.
+  `.btn-secondary` 1px `--border-strong`
   outline, ink label; hover darkens the outline. `.btn-ghost` no outline, muted label; hover
   `--surface-2`. `.btn-danger` outline with `--danger` label. `.btn-sm` 28px with a mouse, 44px on
   touch. Use `buttonClass(variant, size)`, `<Button>` or `<LinkButton>`.
@@ -136,10 +141,12 @@ Email to Myah the Beauty   S&F Massage…   5h ago  ›
   link): ink fill, paper text. The button is 44px tall on touch; the pill drawn inside is 34px.
   Markup: `<button class="chip" aria-pressed="true"><span>All <i>37</i></span></button>`.
 - **Tags** `.tag` (`<Tag>`): a fact about a row (Free, Creator, From Oct). 18px tall, 4px radius,
-  hairline outline, 11px / 600 caps, muted. Never coloured.
-- **Status** `.status.is-ok|is-warn|is-danger|is-info|is-idle|is-accent` (`<Status tone>`): a 7px
+  hairline outline, 11px / 600 caps, muted (12px and 20px tall on phones; plain, untracked 12px
+  under `:lang(zh)`). Never coloured.
+- **Status** `.status.is-ok|is-warn|is-danger|is-info|is-idle|is-accent|is-ink` (`<Status tone>`): a 7px
   dot and plain words. Words are ink, except `is-ok` and `is-idle` which are muted (nothing to do).
-  `is-idle` is a hollow dot. This replaces every soft-coloured pill. Platforms are the same thing:
+  `is-idle` is a hollow dot. `is-ink` is a solid ink dot for a settled state that is neither good
+  news nor a warning (a post that is "Ready"), so it is never confused with `is-danger`. This replaces every soft-coloured pill. Platforms are the same thing:
   `.status.is-ig|is-tt|is-google|is-facebook` (`<PlatformTag>`).
 - **Counts** `.count` (`<Count>`): a cinnabar numeral, no pill (sidebar, section titles, tabs). The
   only filled badge left is the 18px one on the phone tab icons.

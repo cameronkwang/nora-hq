@@ -17,7 +17,7 @@ export function CaptureTokenForm({ defaultLabel }: { defaultLabel: string }) {
           <input id="cap-label" name="label" defaultValue={defaultLabel} maxLength={60} className="input" autoComplete="off" />
         </div>
         {/* One primary per screen: once a key is shown, copying it is the thing to do. */}
-        <SubmitButton variant={state.token ? "secondary" : "primary"} pendingLabel="Making…">Make a key</SubmitButton>
+        <SubmitButton variant="secondary" pendingLabel="Making…">Make a key</SubmitButton>
       </form>
       {state.error && <p role="alert" className="status is-danger is-small ps-err flex">{state.error}</p>}
       {state.token && (
@@ -29,10 +29,10 @@ export function CaptureTokenForm({ defaultLabel }: { defaultLabel: string }) {
               readOnly
               value={state.token}
               onFocus={(e) => e.currentTarget.select()}
-              className="input min-w-0 flex-1 font-mono"
+              className="input min-w-0 font-mono sm:flex-1"
               aria-label="Your new key"
             />
-            <CopyButton targetId="cap-new-token" label="Copy key" variant="primary" />
+            <CopyButton targetId="cap-new-token" label="Copy key" variant="secondary" />
           </div>
           <p className="meta mt-2">Paste it into the Shortcut’s Authorization header as <code className="font-mono">Bearer</code> + a space + the key (step 6 below).</p>
         </div>

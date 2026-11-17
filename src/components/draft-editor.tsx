@@ -52,8 +52,8 @@ function ActionButton({
  *  readonly → text only (+ Copy)
  * Inside a <DraftQueue> (Needs review list) approving and sending back happen without a page reload, and on phones
  * the current card gets a fixed bottom bar: Send back / Edit / Approve.
- * One accent button per screen: the main action is filled only on the card you are on (the queue's current card, or
- * a draft opened on its own with `solo`); in any other list it is outlined like the rest.
+ * One accent button per screen, and in the app that is the sidebar's "New ask" (the phone "+"), so the main action
+ * here is outlined like the rest; its place (first, wider on phones) is what marks it.
  */
 export function DraftEditor({
   id,
@@ -61,7 +61,6 @@ export function DraftEditor({
   meta,
   body: initial,
   mode,
-  solo,
   returnTo,
   mailto,
   links,
@@ -75,7 +74,7 @@ export function DraftEditor({
   meta: Record<string, unknown>;
   body: string;
   mode: Mode;
-  /** This draft has the page to itself (opened from a link), so its main button may take the accent. */
+  /** This draft has the page to itself (opened from a link). Kept for callers; the look no longer depends on it. */
   solo?: boolean;
   returnTo: string;
   /** For approved outreach emails without Gmail: builds a mailto: link from the current text. */
@@ -110,7 +109,7 @@ export function DraftEditor({
   const inQueue = !!queue && mode === "review";
   const busy = !!queue && queue.busyId === id;
   const phoneBar = inQueue && queue.focusMode && queue.isCurrent(id);
-  const main = solo || (inQueue && queue.isCurrent(id)) ? "primary" : "secondary";
+  const main = "secondary" as const;
 
   // Latest values for the queue's keyboard / bulk handlers.
   const latest = useRef({ body, hardBlock, postKey });
@@ -375,7 +374,7 @@ export function DraftEditor({
             <button type="button" onClick={focusEdit} disabled={busy} className={cx(buttonClass("secondary"), "px-3")}>
               Edit
             </button>
-            <button type="button" onClick={() => queue.approve(id)} disabled={hardBlock || busy} className={cx(buttonClass("primary"), "grow")}>
+            <button type="button" onClick={() => queue.approve(id)} disabled={hardBlock || busy} className={cx(buttonClass("secondary"), "grow")}>
               {busy ? "Approving…" : dirty ? "Approve edits" : "Approve"}
             </button>
           </div>

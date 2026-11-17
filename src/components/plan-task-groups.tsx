@@ -10,8 +10,10 @@ import { ProgressBar, Tag, cx } from "./ui";
  * (done of the monthly target; the slots are inside). Groups from another month than the one being looked at
  * carry that month ("From Oct") on a second line. Build `groups` with groupPlanTasks() from lib/plan-groups.
  * Server component; `selectable` passes through to the rows inside a <TaskSelection> (the /tasks bulk bar).
+ * `meters={false}` keeps only the words ("3 of 8"): for a page that already draws each plan item's meter (the business
+ * page's plan section), so the same progress isn't drawn twice in two styles.
  */
-export function PlanTaskGroups({ groups, month, selectable = false }: { groups: PlanGroup[]; month: string; selectable?: boolean }) {
+export function PlanTaskGroups({ groups, month, selectable = false, meters = true }: { groups: PlanGroup[]; month: string; selectable?: boolean; meters?: boolean }) {
   if (groups.length === 0) return null;
   return (
     <ul className="list">
@@ -28,7 +30,7 @@ export function PlanTaskGroups({ groups, month, selectable = false }: { groups: 
                     {g.title}
                     <span className="sr-only"> ·</span>
                   </span>
-                  {g.target > 0 && <ProgressBar value={g.done} max={g.target} />}
+                  {meters && g.target > 0 && <ProgressBar value={g.done} max={g.target} />}
                   <span className={cx("meta num n", g.target === 0 && "is-wide")}>{planGroupProgress(g)}</span>
                   {(other || overdue > 0) && (
                     <span className="group-extra meta">

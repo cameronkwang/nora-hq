@@ -380,7 +380,7 @@ function PlanCard({ clientId, plan, month, now, holdNote }: { clientId: string; 
   return (
     <Card
       padded={false}
-      title={`${month === now ? "This month's" : `${mon}'s`} plan`}
+      title={`${month === now ? "This month’s" : `${mon}’s`} plan`}
       actions={<Link href={`/clients/${clientId}/settings#plan`} className="link-quiet tap-target">Edit plan</Link>}
     >
       {plan.length === 0 ? (
@@ -512,7 +512,8 @@ async function OutstandingCard({
                 <span>· {planTasks.length} left</span>
                 {planOverdue > 0 && <span className="over">{planOverdue} overdue</span>}
               </h3>
-              <PlanTaskGroups groups={planGroups} month={month} />
+              {/* The plan section above draws each item's meter; here the words are enough. */}
+              <PlanTaskGroups groups={planGroups} month={month} meters={false} />
             </section>
           )}
         </>

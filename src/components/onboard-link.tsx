@@ -6,7 +6,7 @@ export const NEW_CLIENT_HREF = "/clients/new";
 
 /**
  * "+ New client" — the quick way in to onboarding, wherever businesses are listed.
- *  - variant "button" (default): small primary button for page headers (/clients, Home business grid).
+ *  - variant "button" (default): small outlined button for page headers (/clients, a lead page).
  *  - variant "plus": a compact "+" for the desktop sidebar's Businesses heading (.side-add: 44px on touch).
  *  - variant "row": a full-width row for the phone More sheet (.more-row; pass `onClick` to close the sheet).
  * No hooks, so it works in server and client components alike.
@@ -44,7 +44,7 @@ export function NewClientLink({
     );
   }
   return (
-    <Link href={href} onClick={onClick} className={cx(buttonClass("primary", size), className)}>
+    <Link href={href} onClick={onClick} className={cx(buttonClass("secondary", size), className)}>
       {!leadId && <PlusIcon className={size === "sm" ? "size-3.5" : "size-4"} />}
       {children}
     </Link>

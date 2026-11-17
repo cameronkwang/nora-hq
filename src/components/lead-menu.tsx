@@ -32,7 +32,7 @@ export function LeadMenu({ exportHref }: { exportHref: string }) {
 
   return (
     <div ref={ref} className="relative">
-      <button ref={btn} type="button" className={buttonClass("secondary")} aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
+      <button ref={btn} type="button" className={buttonClass("secondary", "sm")} aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
         More
         <svg viewBox="0 0 16 16" aria-hidden className={cx("transition", open && "rotate-180")} fill="none" stroke="currentColor" strokeWidth={1.8}>
           <path d="m4 6 4 4 4-4" strokeLinecap="round" strokeLinejoin="round" />

@@ -120,11 +120,11 @@ export function StatsGrowthChart({ title, points, color, days }: { title: string
             {geo.t.map((v) => (
               <g key={v}>
                 <line x1={PAD.left} x2={width - PAD.right} y1={geo.y(v)} y2={geo.y(v)} stroke="var(--border)" strokeWidth={1} shapeRendering="crispEdges" />
-                <text x={PAD.left - 6} y={geo.y(v)} dy="0.32em" textAnchor="end" fontSize={11} fill="var(--muted)" className="tabular-nums">{fmt(v)}</text>
+                <text x={PAD.left - 6} y={geo.y(v)} dy="0.32em" textAnchor="end" fontSize={12} fill="var(--muted)" className="tabular-nums">{fmt(v)}</text>
               </g>
             ))}
-            <text x={PAD.left} y={H - 4} fontSize={11} fill="var(--muted)">{fmtDate(geo.firstDate)}</text>
-            <text x={width - PAD.right} y={H - 4} fontSize={11} fill="var(--muted)" textAnchor="end">{fmtDate(last.date)}</text>
+            <text x={PAD.left} y={H - 4} fontSize={12} fill="var(--muted)">{fmtDate(geo.firstDate)}</text>
+            <text x={width - PAD.right} y={H - 4} fontSize={12} fill="var(--muted)" textAnchor="end">{fmtDate(last.date)}</text>
             <path d={geo.area} fill={stroke} opacity={0.05} />
             <path d={geo.line} fill="none" stroke={stroke} strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" />
             {/* End dot with a surface ring + direct end label. */}
