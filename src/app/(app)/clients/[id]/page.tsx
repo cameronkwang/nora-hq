@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { requireUser, assigneeFor } from "@/lib/auth";
+import { requireUser, assigneeFor, seesDrafts } from "@/lib/auth";
 import { getClientMonth, type ClientMonth } from "@/lib/reports";
 import { addMonths, currentMonth, formatDate, isMonth, monthLabel, today } from "@/lib/dates";
 import { schema } from "@/lib/db";
@@ -22,8 +22,6 @@ import { SavedRepliesCard } from "@/components/reply-links";
 import { dealsCardData } from "@/lib/ops-deals";
 import { ClientIntakeCard } from "@/components/client-intake-card";
 import { PASSWORD_WARNING, hasSecret } from "@/lib/credential-guard";
-import { ActiveToggle } from "./settings/active-toggle";
-import { setBusinessActiveAction } from "./settings/actions";
 import { ClientGoogleSync } from "@/components/google-sync-status";
 import { groupPlanTasks, isPlanTask, type PlanGroup } from "@/lib/plan-groups";
 import { PlanTaskGroups } from "@/components/plan-task-groups";
@@ -56,6 +54,8 @@ export default async function ClientPage({
   // Nora's own workspace gets its own layout: collabs, her plan & tasks, stats. No reviews or creator outreach.
   if (data.client.kind === "creator") return <CreatorWorkspace data={data} month={month} now={now} />;
   const { client, plan, outreach, metrics, posts } = data;
+  // Drafts are Cameron's side; Nora doesn't see draft counts here either.
+  const draftsToReview = seesDrafts(user) ? data.pendingDrafts : 0;
   // While Getting started is showing, its steps live in that card rather than twice on the page.
   // Not open yet: the launch steps live in the Launch checklist card, and the monthly plan waits for opening day.
   const launch = launchInfo(client);
@@ -137,9 +137,27 @@ export default async function ClientPage({
             </LinkButton>
           </div>
         </div>
-        <ActiveToggle active={!client.archived} action={setBusinessActiveAction.bind(null, client.id, client.archived)} className="-my-1" />
+        {/* Active / inactive lives in Settings & plan; here only an inactive business says so (badge above). */}
         <MonthPicker month={month} current={now} />
       </div>
+
+      <AtAGlance
+        items={[
+          {
+            href: "#outstanding",
+            label: openTasks.length === 0 ? "Nothing open" : `${openTasks.length} open task${openTasks.length === 1 ? "" : "s"}`,
+            tone: openTasks.some((t) => isOverdue(t)) ? "danger" : openTasks.length ? "warn" : "ok",
+          },
+          ...(plan.length > 0 && !launch.planOnHold
+            ? [{ href: "#plan", label: `Plan ${plan.reduce((a, p) => a + (p.target > 0 ? Math.min(p.done, p.target) : 0), 0)}/${plan.reduce((a, p) => a + p.target, 0)}`, tone: "neutral" as const }]
+            : []),
+          ...(draftsToReview > 0 ? [{ href: `/review?client=${client.id}`, label: `${draftsToReview} to review`, tone: "accent" as const }] : []),
+          ...(data.unrepliedReviews > 0 ? [{ href: `/reviews?client=${client.id}`, label: `${data.unrepliedReviews} review${data.unrepliedReviews === 1 ? "" : "s"} to reply`, tone: "warn" as const }] : []),
+          { href: "#creators", label: `Creators ${outreach.length}`, tone: "neutral" },
+          { href: "#views", label: "Views", tone: "neutral" },
+          { href: "#content", label: `Content ${posts.length}`, tone: "neutral" },
+        ]}
+      />
 
       {hasSecret(client.notes) && (
         <div role="alert" className="mb-6 flex flex-col gap-2 rounded-xl border border-warn/40 bg-warn-soft px-4 py-3 text-sm text-warn sm:flex-row sm:items-center sm:justify-between">
@@ -175,27 +193,29 @@ export default async function ClientPage({
 
         <LaunchCard client={client} />
 
-        <ClientIntakeCard clientId={client.id} clientName={client.name} />
-
-        {/* Owner drop link: the owner's private page for sending a flyer or photo + "what's the deal, when does it end". */}
-        <ClientDropCard clientId={client.id} clientName={client.name} inactive={client.archived} />
+        {/* The onboarding form matters while a business is being set up; after that it moves to the bottom. */}
+        {onboarding.active && <ClientIntakeCard clientId={client.id} clientName={client.name} />}
 
         <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
-          {/* a. Plan */}
-          <PlanCard clientId={client.id} plan={plan} month={month} now={now} holdNote={planHoldLine(client.name, launch) || undefined} />
-
-          {/* b. Outstanding */}
+          {/* a. Outstanding first: it's what needs doing. */}
+          <section id="outstanding" className="scroll-mt-4">
           <OutstandingCard
             clientId={client.id}
             clientName={client.name}
             openTasks={openTasks}
             month={month}
             now={now}
-            pendingDrafts={data.pendingDrafts}
+            pendingDrafts={draftsToReview}
             unrepliedReviews={data.unrepliedReviews}
             needsChecklist={needsChecklist && plan.length > 0 && !launch.planOnHold}
             defaultAssignee={assigneeFor(user)}
           />
+          </section>
+
+          {/* b. Plan */}
+          <section id="plan" className="scroll-mt-4">
+            <PlanCard clientId={client.id} plan={plan} month={month} now={now} holdNote={planHoldLine(client.name, launch) || undefined} />
+          </section>
         </div>
 
         {/* c. Creators */}
@@ -289,9 +309,41 @@ export default async function ClientPage({
         </section>
 
         {/* e. Content */}
-        <ContentCard clientId={client.id} posts={posts} month={month} />
+        <section id="content" className="scroll-mt-4">
+          <ContentCard clientId={client.id} posts={posts} month={month} />
+        </section>
+
+        {/* f. Set-up, rarely touched: the onboarding form (once set up) and the owner's drop link. */}
+        {!onboarding.active && <ClientIntakeCard clientId={client.id} clientName={client.name} />}
+        <ClientDropCard clientId={client.id} clientName={client.name} inactive={client.archived} />
       </div>
     </>
+  );
+}
+
+type GlanceTone = "neutral" | "ok" | "warn" | "danger" | "accent";
+const GLANCE_TONE: Record<GlanceTone, string> = {
+  neutral: "border-border bg-surface text-text",
+  ok: "border-ok/30 bg-ok-soft text-ok",
+  warn: "border-warn/30 bg-warn-soft text-warn",
+  danger: "border-danger/30 bg-danger-soft text-danger",
+  accent: "border-accent/30 bg-accent-soft text-accent",
+};
+
+/** One row of jump links: what needs doing on this business, and a shortcut to each section. Scrolls sideways on phones. */
+function AtAGlance({ items }: { items: { href: string; label: string; tone: GlanceTone }[] }) {
+  return (
+    <nav aria-label="On this page" className="-mx-4 mb-5 overflow-x-auto px-4 md:mx-0 md:px-0">
+      <ul className="flex min-w-max gap-2">
+        {items.map((i) => (
+          <li key={i.href}>
+            <Link href={i.href} className={cx("inline-flex min-h-9 items-center rounded-full border px-3 text-sm font-medium pointer-coarse:min-h-11", GLANCE_TONE[i.tone])}>
+              {i.label}
+            </Link>
+          </li>
+        ))}
+      </ul>
+    </nav>
   );
 }
 
@@ -476,7 +528,7 @@ async function OutstandingCard({
 
       <div className="border-t border-border px-4 py-3">
         <ActionForm action={quickAddTaskAction.bind(null, clientId, month)} resetOnSuccess ariaLabel="Quick add task">
-          <label className="label" htmlFor="qa-title">Add an ad hoc task for {mon}</label>
+          <label className="label" htmlFor="qa-title">Add a task for {mon}</label>
           <div className="flex gap-2">
             <input id="qa-title" name="title" required className="input" placeholder={placeholder} autoComplete="off" />
             <SubmitButton size="sm" pendingLabel="Adding…" className="shrink-0">Add</SubmitButton>
