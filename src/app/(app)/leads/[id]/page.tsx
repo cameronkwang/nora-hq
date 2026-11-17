@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { requireUser } from "@/lib/auth";
+import { requireUser, seesDrafts } from "@/lib/auth";
 import { getLead, leadDrafts } from "@/lib/ops-leads";
 import { LEAD_STAGES } from "@/lib/schema";
 import { formatDate, relativeTime, today as todayStr } from "@/lib/dates";
@@ -23,7 +23,8 @@ const STAGE_TONE: Record<string, "neutral" | "info" | "accent" | "ok" | "danger"
 };
 
 export default async function LeadPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<SP> }) {
-  await requireUser();
+  const viewer = await requireUser();
+  const showDrafts = seesDrafts(viewer); // pitches are drafts: Cameron's side only
   const [{ id }, sp] = await Promise.all([params, searchParams]);
   const lead = await getLead(id);
   if (!lead) notFound();
@@ -98,7 +99,7 @@ export default async function LeadPage({ params, searchParams }: { params: Promi
             </Card>
           ) : null}
 
-          {canPitch && (
+          {canPitch && showDrafts && (
             <Card title={lead.stage === "contacted" ? "Follow up" : "Pitch them"}>
               {pending ? (
                 <div className="space-y-2 text-sm">
@@ -138,6 +139,7 @@ export default async function LeadPage({ params, searchParams }: { params: Promi
             </Card>
           )}
 
+          {showDrafts && (
           <Card title="Pitches" actions={drafts.length > 0 ? <Link href="/review" className="text-xs text-accent hover:underline">Review queue</Link> : undefined}>
             {drafts.length === 0 ? (
               <p className="text-sm text-muted">No pitches yet.</p>
@@ -159,6 +161,7 @@ export default async function LeadPage({ params, searchParams }: { params: Promi
               </ul>
             )}
           </Card>
+          )}
         </div>
 
         <div className="space-y-5">

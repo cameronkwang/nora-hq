@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { headers } from "next/headers";
-import { assigneeFor, requireUser } from "@/lib/auth";
+import { assigneeFor, requireUser, seesDrafts } from "@/lib/auth";
 import { relativeTime } from "@/lib/dates";
 import { appUrl } from "@/lib/integrations/oauth";
 import { noraNotificationsPaused, pushConfigured, vapidPublicKey } from "@/lib/notify";
@@ -66,7 +66,7 @@ export default async function NotificationSettingsPage() {
           ) : (
             <>
               <p className="text-sm text-muted">Pick what each device gets. Changes save as you tap.</p>
-              <NotifyDevices devices={rows} />
+              <NotifyDevices devices={rows} hideDrafts={!seesDrafts(user)} />
             </>
           )}
         </Card>

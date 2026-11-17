@@ -11,7 +11,7 @@ import { cx } from "./ui";
 export type DeviceRow = { id: string; endpointKey: string; label: string; topics: NotifyTopic[]; added: string; lastSent: string | null };
 
 /** One device: what it gets (toggles save as you tap) and a remove button. */
-function Device({ d, mine }: { d: DeviceRow; mine: boolean }) {
+function Device({ d, mine, hideDrafts }: { d: DeviceRow; mine: boolean; hideDrafts: boolean }) {
   const [topics, setTopics] = useState<NotifyTopic[]>(d.topics);
   const [error, setError] = useState<string | null>(null);
   const [pending, start] = useTransition();
@@ -47,7 +47,7 @@ function Device({ d, mine }: { d: DeviceRow; mine: boolean }) {
       </div>
       <fieldset className="mt-2" aria-label={`What ${d.label} gets`}>
         <ul className="flex flex-col">
-          {NOTIFY_TOPIC_INFO.map((t) => {
+          {NOTIFY_TOPIC_INFO.filter((t) => !(hideDrafts && t.topic === "drafts_waiting")).map((t) => {
             const id = `t-${d.id}-${t.topic}`;
             const on = topics.includes(t.topic);
             return (
@@ -77,7 +77,7 @@ function Device({ d, mine }: { d: DeviceRow; mine: boolean }) {
   );
 }
 
-export function NotifyDevices({ devices }: { devices: DeviceRow[] }) {
+export function NotifyDevices({ devices, hideDrafts = false }: { devices: DeviceRow[]; hideDrafts?: boolean }) {
   const [mine, setMine] = useState<string | null>(null);
   useEffect(() => {
     let cancelled = false;
@@ -94,7 +94,7 @@ export function NotifyDevices({ devices }: { devices: DeviceRow[] }) {
   const sorted = [...devices].sort((a, b) => Number(b.endpointKey === mine) - Number(a.endpointKey === mine));
   return (
     <ul className="divide-y divide-border">
-      {sorted.map((d) => <Device key={d.id} d={d} mine={d.endpointKey === mine} />)}
+      {sorted.map((d) => <Device key={d.id} d={d} mine={d.endpointKey === mine} hideDrafts={hideDrafts} />)}
     </ul>
   );
 }

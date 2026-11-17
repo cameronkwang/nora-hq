@@ -66,3 +66,11 @@ export async function requireUser(): Promise<SessionUser> {
 export function assigneeFor(user: SessionUser): string {
   return user.name.toLowerCase();
 }
+
+/**
+ * Drafts (Claude's DMs, emails, pitches, captions waiting for approval) are Cameron's to review. Nora uses HQ to
+ * track her own work and send asks, so she never sees the review queue or draft lists: less to wade through.
+ */
+export function seesDrafts(user: SessionUser): boolean {
+  return assigneeFor(user) !== "nora";
+}

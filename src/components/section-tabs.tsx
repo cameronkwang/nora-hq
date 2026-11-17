@@ -67,20 +67,20 @@ function activeTab(path: string, tab: string): { section: SectionKey; key: strin
   return { section, key: SECTIONS[section].tabs.find((t) => t.path === path)!.key };
 }
 
-export function SectionTabs({ counts }: { counts?: Partial<Record<CountKey, number>> }) {
+export function SectionTabs({ counts, hideReview = false }: { counts?: Partial<Record<CountKey, number>>; hideReview?: boolean }) {
   return (
-    <Suspense fallback={<Tabs tab="" counts={counts} />}>
-      <TabsWithParams counts={counts} />
+    <Suspense fallback={<Tabs tab="" counts={counts} hideReview={hideReview} />}>
+      <TabsWithParams counts={counts} hideReview={hideReview} />
     </Suspense>
   );
 }
 
-function TabsWithParams({ counts }: { counts?: Partial<Record<CountKey, number>> }) {
+function TabsWithParams({ counts, hideReview }: { counts?: Partial<Record<CountKey, number>>; hideReview: boolean }) {
   const params = useSearchParams();
-  return <Tabs tab={params?.get("tab") ?? ""} counts={counts} />;
+  return <Tabs tab={params?.get("tab") ?? ""} counts={counts} hideReview={hideReview} />;
 }
 
-function Tabs({ tab, counts }: { tab: string; counts?: Partial<Record<CountKey, number>> }) {
+function Tabs({ tab, counts, hideReview }: { tab: string; counts?: Partial<Record<CountKey, number>>; hideReview: boolean }) {
   const path = usePathname() ?? "/";
   const at = activeTab(path, tab);
   if (!at) return null;
@@ -88,7 +88,7 @@ function Tabs({ tab, counts }: { tab: string; counts?: Partial<Record<CountKey, 
   return (
     <nav aria-label={section.label} className="-mx-4 mb-5 overflow-x-auto px-4 md:mx-0 md:px-0">
       <div className="flex min-w-max gap-1 border-b border-border">
-        {section.tabs.map((t) => {
+        {section.tabs.filter((t) => !(hideReview && t.key === "approve")).map((t) => {
           const on = t.key === at.key;
           const n = t.count ? (counts?.[t.count] ?? 0) : 0;
           return (
