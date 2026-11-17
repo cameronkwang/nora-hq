@@ -21,7 +21,7 @@ import { publicAskText } from "./credential-guard";
  */
 
 export type PushPayload = { title: string; body: string; url?: string; tag?: string };
-export type SendResult = { sent: number; removed: number; failed: number; skipped?: "not_configured" | "no_devices" | "throttled" };
+export type SendResult = { sent: number; removed: number; failed: number; skipped?: "not_configured" | "no_devices" | "throttled" | "paused" };
 
 const TTL: Record<NotifyTopic, number> = {
   collab_request: 2 * 86400,
@@ -153,10 +153,40 @@ async function claimSlot(key: string, windowMs: number): Promise<boolean> {
   return rows.length > 0;
 }
 
-/** Sends to every device `email` subscribed for `topic`. Never throws. */
+/* ───────────────────────── Pause Nora's notifications ───────────────────────── */
+
+/**
+ * Cameron can pause every phone notification to Nora (Settings → Notifications). Paused until he turns it back on:
+ * with no saved setting it counts as paused, so nothing new reaches her until he says so.
+ */
+const NORA_PAUSE_KEY = "notify.paused.nora";
+
+function isNoraEmail(email: string): boolean {
+  const e = email.trim().toLowerCase();
+  return allowedUsers().some((u) => u.email.trim().toLowerCase() === e && u.name.trim().toLowerCase() === "nora");
+}
+
+export async function noraNotificationsPaused(): Promise<boolean> {
+  const db = await getDb();
+  const [row] = await db.select({ value: schema.appSettings.value }).from(schema.appSettings).where(eq(schema.appSettings.key, NORA_PAUSE_KEY));
+  if (!row) return true;
+  return (row.value as { paused?: boolean } | null)?.paused !== false;
+}
+
+export async function setNoraNotificationsPaused(paused: boolean, actor: string): Promise<void> {
+  const db = await getDb();
+  const now = new Date();
+  await db
+    .insert(schema.appSettings)
+    .values({ key: NORA_PAUSE_KEY, value: { paused }, updatedBy: actor, updatedAt: now })
+    .onConflictDoUpdate({ target: schema.appSettings.key, set: { value: { paused }, updatedBy: actor, updatedAt: now } });
+}
+
+/** Sends to every device `email` subscribed for `topic`. Never throws. Nothing goes to Nora while she's paused. */
 export async function sendToUser(email: string, topic: NotifyTopic, payload: PushPayload): Promise<SendResult> {
   try {
     if (!pushConfigured()) return { sent: 0, removed: 0, failed: 0, skipped: "not_configured" };
+    if (isNoraEmail(email) && (await noraNotificationsPaused())) return { sent: 0, removed: 0, failed: 0, skipped: "paused" };
     const subs = await subsFor(email, topic);
     if (!subs.length) return { sent: 0, removed: 0, failed: 0, skipped: "no_devices" };
     if (topic === "drafts_waiting" && !(await claimSlot(`notify.throttle.drafts_waiting.${email.trim().toLowerCase()}`, DRAFTS_THROTTLE_MS))) {
@@ -187,6 +217,7 @@ export async function sendToAll(topic: NotifyTopic, payload: PushPayload, opts: 
 export async function sendTest(email: string): Promise<SendResult> {
   try {
     if (!pushConfigured()) return { sent: 0, removed: 0, failed: 0, skipped: "not_configured" };
+    if (isNoraEmail(email) && (await noraNotificationsPaused())) return { sent: 0, removed: 0, failed: 0, skipped: "paused" };
     const subs = await subsFor(email, null);
     if (!subs.length) return { sent: 0, removed: 0, failed: 0, skipped: "no_devices" };
     return await deliver(subs, "ask_for_me", { title: "Nora HQ", body: "Notifications are working on this device ✓", url: "/settings/notifications", tag: `test-${Date.now()}` });
