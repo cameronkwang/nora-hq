@@ -104,7 +104,7 @@ Links:
 | --- | --- | --- |
 | `TOKEN_ENC_KEY` | yes (already used for OAuth) | Encrypts the stored copy of each link, so the team can copy it again later. |
 | `APP_URL` | recommended | Base for the links, e.g. `https://hq.example.com`. Without it, the address you are using is used. |
-| `INTAKE_ACCESS_EMAIL` | recommended | The email clients add as a helper in Meta Business Suite and Google Business Profile (Nora's). Without it, the form says "Nora's email. We'll send it to you." |
+| `INTAKE_ACCESS_EMAIL` | optional | The email clients add as a manager in Meta Business Suite and Google Business Profile. Defaults to Nora HQ's own account, `noraeatsgood.manager@gmail.com`. |
 | `BLOB_READ_WRITE_TOKEN` | optional | Turns on "upload photos, videos or your logo" (up to 25 MB each, under `intake/<id>/` in Blob; at most 40 files a day per link, and each upload token is good for one file and 15 minutes). Without it, clients share a Google Drive, Dropbox or iCloud link instead. |
 
 ## Security notes

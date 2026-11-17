@@ -76,10 +76,13 @@ export function intakeBaseUrl(origin?: string | null): string {
 }
 const linkFor = (token: string, origin?: string | null) => `${intakeBaseUrl(origin)}/start/${token}`;
 
-/** Email the client adds as a helper on their accounts (INTAKE_ACCESS_EMAIL), or null → the form says "we'll send it to you". */
-export function intakeAccessEmail(): string | null {
+/** Nora HQ's own Google account: owners add it as a manager on their Google Business Profile and Meta accounts. */
+export const NORA_HQ_MANAGER_EMAIL = "noraeatsgood.manager@gmail.com";
+
+/** Email the client adds as a helper on their accounts: INTAKE_ACCESS_EMAIL if set to a valid address, else Nora HQ's manager account. */
+export function intakeAccessEmail(): string {
   const v = process.env.INTAKE_ACCESS_EMAIL?.trim();
-  return v && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v) ? v : null;
+  return v && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v) ? v : NORA_HQ_MANAGER_EMAIL;
 }
 
 export async function createIntakeLink(clientId: string, actor: string, opts: { origin?: string | null } = {}): Promise<{ id: string; url: string; reused?: boolean }> {
