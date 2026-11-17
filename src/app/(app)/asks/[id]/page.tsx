@@ -15,7 +15,7 @@ import { askThreadState, listAskMessages } from "@/lib/ops";
 import { TaskList, TaskRow } from "@/components/task-row";
 import { TaskQuickAdd } from "@/components/task-quick-add";
 import { Badge, Button, Card, EmptyState, PageHeader, StatusBadge, clientLabel, humanize } from "@/components/ui";
-import { setAskClient } from "../actions";
+import { setAskClient, setAskStatus } from "../actions";
 import { actorName } from "../../activity/actor";
 
 export const dynamic = "force-dynamic";
@@ -51,6 +51,57 @@ export default async function AskPage({ params }: { params: Promise<{ id: string
   ];
   const state = askThreadState(ask, messages.at(-1), thread.some((t) => t.claude));
   const canReply = ask.status === "new" || ask.status === "in_progress";
+
+  // Nora's version: her message, the conversation, one reply box and one Done button. The routing, business,
+  // task and draft tools are Cameron's side.
+  if (!seesDrafts(user)) {
+    const where =
+      ask.status === "done" ? { label: "Done", tone: "ok" as const }
+      : state === "claude_asked" ? { label: "Claude asked you something", tone: "warn" as const }
+      : ask.forWho === "nora" ? { label: "For you", tone: "info" as const }
+      : ask.status === "in_progress" || ask.forWho === "claude" ? { label: "Being worked on", tone: "info" as const }
+      : { label: "Sent", tone: "neutral" as const };
+    const open = ask.status === "new" || ask.status === "in_progress";
+    return (
+      <div className="mx-auto max-w-xl">
+        <Link href="/asks" className="mb-3 inline-flex min-h-11 items-center text-sm text-muted hover:text-text md:min-h-0">
+          ← Inbox
+        </Link>
+        <div className="mb-4 flex flex-wrap items-center gap-2">
+          <Badge tone={where.tone}>{where.label}</Badge>
+          <span className="text-sm text-muted">{relativeTime(ask.createdAt)}</span>
+        </div>
+        <div className="flex flex-col gap-4">
+          <Card>
+            <p className="whitespace-pre-wrap break-words text-base">{ask.body}</p>
+            {ask.attachments.length > 0 && (
+              <div className="mt-4">
+                <AskAttachments items={ask.attachments} size="lg" />
+              </div>
+            )}
+          </Card>
+
+          <AskThread items={thread} empty="Sent. Cameron and Claude will pick it up; replies show up here." />
+
+          {drafts.length > 0 && (
+            <p className="rounded-xl border border-border bg-surface px-4 py-3 text-sm text-muted">
+              Claude wrote {drafts.length === 1 ? "a draft" : `${drafts.length} drafts`} for this. Cameron is reviewing.
+            </p>
+          )}
+
+          {canReply && <AskReply askId={ask.id} placeholder={state === "claude_asked" ? "Answer Claude…" : "Add a note…"} />}
+
+          <form action={setAskStatus}>
+            <input type="hidden" name="id" value={ask.id} />
+            <input type="hidden" name="status" value={open ? "done" : "in_progress"} />
+            <Button type="submit" variant={open ? "secondary" : "ghost"} className="w-full">
+              {open ? "✓ This is done" : "Reopen"}
+            </Button>
+          </form>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="mx-auto max-w-3xl lg:max-w-6xl">

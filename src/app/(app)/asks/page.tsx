@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { and, desc, eq, inArray, ne, or, sql, type SQL } from "drizzle-orm";
 import { getDb, schema } from "@/lib/db";
-import { assigneeFor, requireUser } from "@/lib/auth";
+import { assigneeFor, requireUser, seesDrafts } from "@/lib/auth";
 import { relativeTime } from "@/lib/dates";
 import { askThreadState, listAskMessagesFor } from "@/lib/ops";
 import { AskAttachments } from "@/components/ask-attachments";
@@ -31,6 +31,7 @@ const LEGACY: Record<string, TabKey> = { new: "inbox", in_progress: "inbox", don
 
 export default async function AsksPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const user = await requireUser();
+  const simple = !seesDrafts(user); // Nora: fewer controls per card
   const sp = await searchParams;
   const me = personKey(assigneeFor(user));
   const rawTab = typeof sp.tab === "string" ? sp.tab : typeof sp.status === "string" ? LEGACY[sp.status] : undefined;
@@ -84,9 +85,9 @@ export default async function AsksPage({ searchParams }: { searchParams: Promise
   return (
     <div>
       <PageHeader
-        title="Asks"
-        subtitle="Anything you drop in — requests, ideas, FYIs. Claude sorts them and gets to work."
-        actions={<LinkButton href="/asks/new" variant="primary">+ New ask</LinkButton>}
+        title={simple ? "Inbox" : "Asks"}
+        subtitle={simple ? "What you sent, and anything for you. Tap the + to send something new." : "Anything you drop in — requests, ideas, FYIs. Claude sorts them and gets to work."}
+        actions={simple ? undefined : <LinkButton href="/asks/new" variant="primary">+ New ask</LinkButton>}
       />
 
       {sent && (
@@ -108,7 +109,7 @@ export default async function AsksPage({ searchParams }: { searchParams: Promise
                 t.key === tab.key ? "bg-surface text-text shadow-sm" : "text-muted hover:text-text",
               )}
             >
-              {t.label}
+              {simple && t.key === "nora" ? "For you" : simple && t.key === "cameron" ? "Sent to Cameron" : t.label}
               {(counts[t.key] ?? 0) > 0 && <span className="ml-1.5 text-xs tabular-nums text-muted">{counts[t.key]}</span>}
             </Link>
           ))}
@@ -137,13 +138,17 @@ export default async function AsksPage({ searchParams }: { searchParams: Promise
               <li key={ask.id} className="rounded-xl border border-border bg-surface p-4">
                 <div className="mb-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted">
                   {client ? (
-                    <Link href={`/clients/${client.id}`} className="font-medium text-text hover:underline">
-                      {clientLabel(client)}
-                    </Link>
+                    simple ? (
+                      <span className="font-medium text-text">{clientLabel(client)}</span>
+                    ) : (
+                      <Link href={`/clients/${client.id}`} className="font-medium text-text hover:underline">
+                        {clientLabel(client)}
+                      </Link>
+                    )
                   ) : (
-                    <span>No business set</span>
+                    !simple && <span>No business set</span>
                   )}
-                  <span aria-hidden>·</span>
+                  {(client || !simple) && <span aria-hidden>·</span>}
                   <span>
                     {actorName(ask.createdBy)}, {relativeTime(ask.createdAt)}
                   </span>
@@ -177,16 +182,18 @@ export default async function AsksPage({ searchParams }: { searchParams: Promise
 
                 <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
                   <div className="flex flex-wrap items-center gap-1.5">
-                    <AskRouteBadges ask={ask} />
+                    {!simple && <AskRouteBadges ask={ask} />}
                     {convo === "claude_asked" && <Badge tone="warn">Claude asked a question</Badge>}
                     {convo === "replied" && <Badge tone="info">Replied</Badge>}
                     {nTasks > 0 && <Badge>{nTasks} task{nTasks === 1 ? "" : "s"}</Badge>}
-                    {nDrafts > 0 && <Badge tone="warn">{nDrafts} draft{nDrafts === 1 ? "" : "s"}</Badge>}
-                    <Link href={`/asks/${ask.id}`} className="text-xs font-medium text-accent hover:underline">
+                    {simple ? null : nTasks > 0 && <Badge>{nTasks} task{nTasks === 1 ? "" : "s"}</Badge>}
+                    {simple ? null : nDrafts > 0 && <Badge tone="warn">{nDrafts} draft{nDrafts === 1 ? "" : "s"}</Badge>}
+                    <Link href={`/asks/${ask.id}`} className="inline-flex min-h-11 items-center text-sm font-medium text-accent hover:underline md:min-h-0 md:text-xs">
                       Open
                     </Link>
                   </div>
-                  <AskStatusButtons id={ask.id} status={ask.status} />
+                  {/* Nora marks things done from the ask itself; the list stays calm. */}
+                  {!simple && <AskStatusButtons id={ask.id} status={ask.status} />}
                 </div>
               </li>
             );
