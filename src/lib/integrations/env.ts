@@ -12,7 +12,7 @@ export const ENV_VARS: EnvVar[] = [
   { name: "TOKEN_ENC_KEY", group: "Core", required: true, purpose: "Encrypts saved Instagram/Google tokens and onboarding-form links", doc: "3. Environment variables" },
   { name: "APP_TZ", group: "Core", required: false, purpose: "Timezone for months and due dates (default America/New_York)", doc: "3. Environment variables" },
   { name: "BLOB_READ_WRITE_TOKEN", group: "Core", required: false, purpose: "Photo/video uploads (Vercel Blob) — needed for Instagram auto-publish", doc: "2. Database & storage" },
-  { name: "INTAKE_ACCESS_EMAIL", group: "Core", required: false, purpose: "Email new clients add as a helper on their accounts (client onboarding form)", doc: "3. Environment variables" },
+  { name: "INTAKE_ACCESS_EMAIL", group: "Core", required: false, purpose: "Email new clients add as a manager on their accounts (client onboarding form); defaults to noraeatsgood.manager@gmail.com", doc: "3. Environment variables" },
   { name: "MCP_TOKEN", group: "Claude", required: true, purpose: "Bearer token for the Claude connector", doc: "9. Claude connector" },
   { name: "CRON_SECRET", group: "Automation", required: true, purpose: "Protects the publish/sync cron endpoints", doc: "8. Scheduled jobs" },
   { name: "IG_APP_ID", group: "Instagram", required: false, purpose: "Meta app id (Instagram API with Instagram Login)", doc: "5. Instagram" },
