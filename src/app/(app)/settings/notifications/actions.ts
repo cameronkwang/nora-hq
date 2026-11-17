@@ -1,7 +1,8 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { requireUser } from "@/lib/auth";
+import { assigneeFor, requireUser } from "@/lib/auth";
+import { setNoraNotificationsPaused } from "@/lib/notify";
 import { OpsError } from "@/lib/ops";
 import { createCalendarFeed, removePushDevice, revokeCalendarFeed, setPushTopics } from "@/lib/ops-notify";
 
@@ -59,4 +60,12 @@ export async function revokeCalendarFeedAction(formData: FormData) {
     if (!(e instanceof OpsError)) throw e;
   }
   revalidatePath(PATH);
+}
+
+/** Cameron only: pause or resume every phone notification to Nora. */
+export async function setNoraPausedAction(formData: FormData): Promise<void> {
+  const user = await requireUser();
+  if (assigneeFor(user) !== "cameron") return;
+  await setNoraNotificationsPaused(formData.get("paused") === "1", user.email);
+  revalidatePath("/settings/notifications");
 }

@@ -154,6 +154,7 @@ export function NotifyEnable({ publicKey, deviceKeys, compact = false }: { publi
       const r = await postJson("/api/push/test", {});
       const sent = Number(r.data.sent ?? 0);
       if (r.data.skipped === "not_configured") setMsg({ tone: "danger", text: "Server isn't set up for notifications (VAPID keys missing)." });
+      else if (r.data.skipped === "paused") setMsg({ tone: "muted", text: "Notifications are paused for now. Cameron will turn them on." });
       else if (sent > 0) setMsg({ tone: "ok", text: `Sent to ${sent} device${sent === 1 ? "" : "s"} — it should pop up in a few seconds.` });
       else setMsg({ tone: "danger", text: "No device got it. Turn notifications off and on again on this device." });
     } catch {
