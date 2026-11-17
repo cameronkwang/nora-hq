@@ -23,7 +23,7 @@ export function Card({ title, actions, children, className, padded = true }: { t
   return (
     <section className={cx("rounded-xl border border-border bg-surface", className)}>
       {(title || actions) && (
-        <header className="flex items-center justify-between gap-2 border-b border-border px-4 py-3">
+        <header className="card-head flex items-center justify-between gap-2 border-b border-border px-4 py-3">
           <h2 className="text-sm font-semibold">{title}</h2>
           {actions}
         </header>
