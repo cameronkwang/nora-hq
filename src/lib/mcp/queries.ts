@@ -679,7 +679,9 @@ async function briefingHousekeeping(activeClients: schema.Client[]) {
 
 /* ───────────── creators & outreach ───────────── */
 
-export async function searchCreators(opts: { q?: string; clientId?: string; stage?: schema.OutreachStage; includeDoNotContact: boolean; limit: number }) {
+const clipNote = (s: string | null | undefined, n: number) => (s && s.length > n ? `${s.slice(0, n).trimEnd()}… (detail "full" for all)` : s ?? null);
+
+export async function searchCreators(opts: { q?: string; clientId?: string; stage?: schema.OutreachStage; includeDoNotContact: boolean; limit: number; detail?: "summary" | "full" }) {
   const db = await getDb();
   const where: SQL[] = [];
   const q = opts.q?.trim().replace(/^@/, "");
@@ -707,11 +709,40 @@ export async function searchCreators(opts: { q?: string; clientId?: string; stag
   return creators.map((c) => {
     const mine = rel.filter((o) => o.creatorId === c.id);
     const posted = alreadyPostedAbout(mine, names);
+    if (opts.detail === "full") {
+      return {
+        ...shapeCreator(c),
+        // Businesses this creator already posted about: never pitch them for those again.
+        alreadyPostedAbout: posted.length ? posted : undefined,
+        outreach: mine.map((o) => shapeOutreach(o, names)),
+      };
+    }
+    // Summary (default): one creator stays a few hundred characters, so a 25-row search fits comfortably.
+    // With client_id, that business's outreach is shown in full and the others as one line each.
+    const full = shapeCreator(c);
+    const here = opts.clientId ? mine.filter((o) => o.clientId === opts.clientId) : mine;
+    const elsewhere = opts.clientId ? mine.filter((o) => o.clientId !== opts.clientId) : [];
     return {
-      ...shapeCreator(c),
-      // Businesses this creator already posted about: never pitch them for those again.
+      id: full.id,
+      name: full.name,
+      instagramHandle: full.instagramHandle,
+      tiktokHandle: full.tiktokHandle,
+      email: full.email,
+      city: full.city,
+      niche: full.niche,
+      instagramFollowers: full.instagramFollowers,
+      tiktokFollowers: full.tiktokFollowers,
+      statsCheck: full.statsCheck,
+      doNotContact: full.doNotContact || undefined,
+      notes: clipNote(full.notes, 280),
       alreadyPostedAbout: posted.length ? posted : undefined,
-      outreach: mine.map((o) => shapeOutreach(o, names)),
+      outreach: here.map((o) => {
+        const sh = shapeOutreach(o, names);
+        return opts.clientId
+          ? sh
+          : { id: sh.id, businessId: sh.businessId, business: sh.business, channel: sh.channel, stage: sh.stage, compType: sh.compType, ...(sh.alreadyPosted ? { alreadyPosted: true } : {}), notes: clipNote(sh.notes, 140) };
+      }),
+      ...(elsewhere.length ? { otherPipelines: elsewhere.map((o) => `${names.get(o.clientId) ?? o.clientId}: ${o.stage}`) } : {}),
     };
   });
 }

@@ -1,6 +1,6 @@
 import "server-only";
 import { z } from "zod";
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, eq, ne } from "drizzle-orm";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { getDb, schema } from "@/lib/db";
@@ -23,6 +23,7 @@ import {
   upsertOutreach,
 } from "@/lib/ops";
 import { TASK_SCOPES } from "@/lib/ops-tasks";
+import { nearDates, sameWork } from "@/lib/task-dupes";
 import { STATS_STALE_DAYS, alreadyPosted, draftChannel, outreachProfileOf, readsAsNora, sendFromText, senderMismatch, statsCheck } from "@/lib/outreach-profile";
 import { planHold, pendingProfileCopy } from "@/lib/ops-launch";
 import { launchField, planHoldLine } from "@/lib/launch";
@@ -379,7 +380,8 @@ export function registerTools(server: McpServer, ctx: Ctx) {
     description:
       "Adds a task to the checklist — e.g. things a person must do (\"Nora: film a reel of the new bowl\" assigned to nora) or follow-up work for yourself (assignee claude). " +
       "Link ask_id when the task came from an ask, and deliverable_id when it counts toward a monthly plan item. " +
-      "Don't create tasks for drafts you can write right now — just write the draft (create_draft) instead.",
+      "Don't create tasks for drafts you can write right now — just write the draft (create_draft) instead. " +
+      "If an open task for the same person and business with nearly the same title and due date already exists, this refuses and names it: update that task instead (update_task). Pass allow_duplicate only when it really is separate work.",
     inputSchema: {
       client_id: clientId.optional().describe("Business id; omit only for work that isn't tied to one business."),
       title: z.string().min(1).max(200),
@@ -391,10 +393,25 @@ export function registerTools(server: McpServer, ctx: Ctx) {
       status: z.enum(["todo", "in_progress", "blocked"]).default("todo"),
       deliverable_id: z.string().optional(),
       ask_id: z.string().optional(),
+      allow_duplicate: z.boolean().default(false).describe("Only when a similar open task exists and this is genuinely separate work."),
     },
     annotations: WRITE,
   }, async (a) => run(async () => {
     if (a.client_id) await requireClient(a.client_id);
+    if (!a.allow_duplicate) {
+      const db = await getDb();
+      const t = schema.tasks;
+      const open = await db
+        .select({ id: t.id, title: t.title, dueDate: t.dueDate, clientId: t.clientId })
+        .from(t)
+        .where(and(ne(t.status, "done"), eq(t.assignee, a.assignee)));
+      const twin = open.find((o) => (o.clientId ?? null) === (a.client_id ?? null) && nearDates(o.dueDate, a.due_date) && sameWork(o.title, a.title));
+      if (twin)
+        throw new ToolError(
+          `That looks like a task that's already open: "${twin.title}" (${twin.id}${twin.dueDate ? `, due ${twin.dueDate}` : ""}). ` +
+            "Update it with update_task instead, or pass allow_duplicate: true if this is separate work.",
+        );
+    }
     const id = await createTask({
       clientId: a.client_id, title: a.title, details: a.details, platform: a.platform, assignee: a.assignee, dueDate: a.due_date,
       month: a.month, status: a.status, deliverableId: a.deliverable_id, askId: a.ask_id,
@@ -792,6 +809,7 @@ export function registerTools(server: McpServer, ctx: Ctx) {
       "Searches the creator/influencer database by name, handle, email, city, niche or notes, optionally only creators in a business's outreach pipeline and/or at a stage. " +
       "Each creator includes their outreach relationships with every business, statsCheck (when their follower numbers were last read from their public page — never checked or over " + STATS_STALE_DAYS + " days means re-read it before pitching) " +
       "and alreadyPostedAbout (businesses they have ALREADY posted about: never pitch them for those — create_draft refuses). Do-not-contact creators are hidden unless include_do_not_contact is true. " +
+      "Results are a summary by default (notes clipped; with client_id, that business's outreach in full and the creator's other pipelines as one line each); pass detail \"full\" for every field. " +
       "Always search before adding a creator to avoid duplicates. " +
       "When researching new local creators for a business, look in its outreachAreas (from list_clients / get_client_month, e.g. Richmond or 757 / Hampton Roads); if empty, use the business's city.",
     inputSchema: {
@@ -800,10 +818,11 @@ export function registerTools(server: McpServer, ctx: Ctx) {
       stage: z.enum(schema.OUTREACH_STAGES).optional(),
       include_do_not_contact: z.boolean().default(false),
       limit: limit(25),
+      detail: z.enum(["summary", "full"]).default("summary").describe("summary (default) keeps results small; full returns every field and all outreach notes."),
     },
     annotations: READ,
-  }, async ({ q, client_id, stage, include_do_not_contact, limit }) => run(async () =>
-    searchCreators({ q, clientId: client_id, stage, includeDoNotContact: include_do_not_contact, limit })));
+  }, async ({ q, client_id, stage, include_do_not_contact, limit, detail }) => run(async () =>
+    searchCreators({ q, clientId: client_id, stage, includeDoNotContact: include_do_not_contact, limit, detail })));
 
   server.registerTool("upsert_creator", {
     title: "Add or update a creator",
