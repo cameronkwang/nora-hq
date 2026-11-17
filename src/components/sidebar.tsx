@@ -9,7 +9,7 @@ import { sectionOf, type SectionKey } from "./section-tabs";
 
 type NavClient = { id: string; name: string; location: string | null; kind?: string | null };
 type User = { name: string; email: string };
-type Counts = { newAsks: number; needsReview: number; tasksDue: number };
+type Counts = { newAsks: number; needsReview: number; tasksDue: number; reelsOwed: number };
 type NavProps = { user: User; creator: NavClient | null; businesses: NavClient[]; inactiveCount: number; counts: Counts };
 
 /** Nora's own workspace handle (clients.kind "creator", seeded as "noraeatsgood"). */
@@ -21,7 +21,7 @@ type Item = { href: string; label: string; icon: IconName; section?: SectionKey;
 const HOME: Item = { href: "/", label: "Home", icon: "home" };
 const INBOX: Item = { href: "/asks", label: "Inbox", icon: "inbox", section: "inbox", badge: (c) => c.newAsks + c.needsReview };
 const TASKS: Item = { href: "/tasks", label: "Tasks", icon: "list", badge: (c) => c.tasksDue };
-const CALENDAR: Item = { href: "/calendar", label: "Calendar", icon: "calendar" };
+const CALENDAR: Item = { href: "/calendar", label: "Calendar", icon: "calendar", badge: (c) => c.reelsOwed };
 const OUTREACH: Item = { href: "/creators", label: "Outreach", icon: "users", section: "outreach" };
 const INSIGHTS: Item = { href: "/numbers", label: "Insights", icon: "chart", section: "insights" };
 const CONTRACTS: Item = { href: "/contracts", label: "Contracts", icon: "file" };
@@ -244,7 +244,7 @@ function MobileNav({ user, creator, businesses, inactiveCount, counts }: NavProp
     };
   }, [open]);
 
-  const onTab = [HOME, INBOX, TASKS].some((i) => active(i)) || path === "/asks/new";
+  const onTab = [HOME, INBOX, CALENDAR].some((i) => active(i)) || path === "/asks/new";
   const sheetActive = open || !onTab;
 
   return (
@@ -258,7 +258,7 @@ function MobileNav({ user, creator, businesses, inactiveCount, counts }: NavProp
         </div>
       </header>
 
-      {/* Bottom tab bar: Home · Inbox · (+) · Tasks · More. */}
+      {/* Bottom tab bar: Home · Inbox · (+) · Calendar · More. Calendar is Nora's schedule; its badge counts reels she still owes. Tasks lives in More. */}
       <nav
         aria-label="Main"
         className="fixed inset-x-0 bottom-0 z-30 border-t border-border bg-surface/95 pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)] backdrop-blur md:hidden"
@@ -281,7 +281,7 @@ function MobileNav({ user, creator, businesses, inactiveCount, counts }: NavProp
               <Icon name="plus" className="size-6" strokeWidth={2.4} />
             </span>
           </Link>
-          <Tab item={TASKS} active={active(TASKS)} count={TASKS.badge!(counts)} />
+          <Tab item={CALENDAR} active={active(CALENDAR)} count={CALENDAR.badge!(counts)} />
           <button
             type="button"
             onClick={show}
@@ -316,9 +316,12 @@ function MobileNav({ user, creator, businesses, inactiveCount, counts }: NavProp
 
           <div className="flex flex-col gap-5 px-2 pt-1">
             <SheetGroup>
-              {[CALENDAR, ...GROW].map((item) => (
+              {[TASKS, ...GROW].map((item) => (
                 <SheetLink key={item.href} href={item.href} icon={item.icon} active={active(item)} onClick={close}>
-                  {item.label}
+                  <span className="flex items-center justify-between gap-2">
+                    {item.label}
+                    {(item.badge?.(counts) ?? 0) > 0 && <CountPill n={item.badge!(counts)} />}
+                  </span>
                 </SheetLink>
               ))}
             </SheetGroup>

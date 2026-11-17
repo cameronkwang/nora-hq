@@ -15,8 +15,8 @@ import { Button, Card, cx } from "./ui";
 /** Nora's own name and email are remembered on this device so she types them once. */
 const ME_KEY = "nora-hq:contract-me";
 
-export function ContractBuilder({ today, businesses }: { today: string; businesses: string[] }) {
-  const [f, setF] = useState<ContractFields>(() => defaultFields(today));
+export function ContractBuilder({ today, businesses, initial }: { today: string; businesses: string[]; initial?: Partial<ContractFields> }) {
+  const [f, setF] = useState<ContractFields>(() => ({ ...defaultFields(today), ...initial }));
   const [busy, setBusy] = useState(false);
   // Phones: the preview sits below a long form, so it's hidden until she asks for it.
   const [showPreview, setShowPreview] = useState(false);
@@ -25,7 +25,7 @@ export function ContractBuilder({ today, businesses }: { today: string; business
   useEffect(() => {
     try {
       const saved = JSON.parse(localStorage.getItem(ME_KEY) ?? "null") as { name?: string; email?: string } | null;
-      if (saved) setF((p) => ({ ...p, creatorName: saved.name ?? p.creatorName, creatorEmail: saved.email ?? p.creatorEmail }));
+      if (saved) setF((p) => ({ ...p, creatorName: saved.name || p.creatorName, creatorEmail: saved.email || p.creatorEmail }));
     } catch {
       /* storage unavailable: she just types it */
     }
@@ -205,7 +205,7 @@ export function ContractBuilder({ today, businesses }: { today: string; business
 
         <Card title="You">
           <div className="grid gap-3">
-            <Field label="Your name" hint="Your legal name or business name. Remembered on this device.">
+            <Field label="Your name" hint="Your legal name. Starts as Nora Chen; a change is remembered on this device.">
               <input className="input" value={f.creatorName} onChange={(e) => set("creatorName", e.target.value)} autoComplete="name" />
             </Field>
             <Field label="Your email" optional>

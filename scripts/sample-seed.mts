@@ -80,5 +80,43 @@ await db.insert(schema.clientIntakes).values({
     _meta: { ipHash: null },
   },
 }).onConflictDoNothing();
+// Collab deals + a busy schedule for this month (fake businesses), so phone screens can be checked with real-looking load.
+{
+  const today = ny(new Date(now));
+  const month = today.slice(0, 7);
+  const dayOf = (offset: number) => ny(new Date(now + offset * day));
+  await db.insert(schema.deals).values([
+    {
+      id: "sample-deal-pizza", businessName: "Sample Pizzeria", contactName: "Pat Sample", contactEmail: "owner@sample-pizzeria.test",
+      contactPhone: "555-0100", address: "123 Fake St, Sampleton, VA", compType: "paid", amountCents: 45000,
+      visitAt: new Date(now + 2 * day), status: "scheduled", menuNotes: "Margherita, hot honey pie, garlic knots (fake)",
+      shotList: [{ id: "s1", text: "Pizza coming out of the oven", done: false }, { id: "s2", text: "Cheese pull", done: false }],
+      createdBy: "sample",
+    },
+    { id: "sample-deal-cafe", businessName: "Sample Cafe", contactName: "Sam Sample", compType: "gifted", visitAt: new Date(now + 5 * day), status: "planning", createdBy: "sample" },
+  ]).onConflictDoNothing();
+  await db.insert(schema.dealDeliverables).values([
+    { id: "sample-dd-1", dealId: "sample-deal-pizza", kind: "ig_reel", dueDate: dayOf(9), sortOrder: 0 },
+    { id: "sample-dd-2", dealId: "sample-deal-pizza", kind: "tiktok", dueDate: dayOf(9), sortOrder: 1 },
+    { id: "sample-dd-3", dealId: "sample-deal-pizza", kind: "ig_story", dueDate: dayOf(2), sortOrder: 2 },
+  ]).onConflictDoNothing();
+  const jobs: { name: string; offset: number | null; free?: boolean; reel?: boolean; deal?: string }[] = [
+    { name: "Sample Pizzeria", offset: 2, reel: true, deal: "sample-deal-pizza" },
+    { name: "Sample Cafe", offset: 5, free: true, reel: true, deal: "sample-deal-cafe" },
+    { name: "Fake Burger Bar", offset: -3, reel: true },
+    { name: "Test Taqueria", offset: -1, free: true, reel: true },
+    { name: "Demo Dumplings", offset: 1 },
+    { name: "Mock Noodle House", offset: 7, reel: true },
+    { name: "Placeholder Bakery", offset: null, free: true },
+  ];
+  await db.insert(schema.scheduleItems).values(jobs.map((j, i) => {
+    const date = j.offset === null ? null : dayOf(j.offset);
+    return {
+      id: `sample-job-${i}`, month: date ? date.slice(0, 7) : month, date, businessName: j.name, nameKey: j.name.toLowerCase(),
+      dealId: j.deal ?? null, isFree: !!j.free, needsReel: !!j.reel, source: "manual" as const, createdBy: "sample",
+    };
+  })).onConflictDoNothing();
+}
+
 await client.close();
 console.log("sample data ready");

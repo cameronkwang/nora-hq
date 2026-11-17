@@ -3,12 +3,18 @@ import { isCreatorClient, listClients, navCounts } from "@/lib/data";
 import { Sidebar } from "@/components/sidebar";
 import { SectionTabs } from "@/components/section-tabs";
 import { LiveRefresh } from "@/components/live-refresh";
+import { reelsToPostCount } from "@/lib/ops-schedule";
 
 export const dynamic = "force-dynamic";
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const user = await requireUser();
-  const [everyone, counts] = await Promise.all([listClients({ includeArchived: true }), navCounts({ assignee: assigneeFor(user) })]);
+  const [everyone, baseCounts, reelsOwed] = await Promise.all([
+    listClients({ includeArchived: true }),
+    navCounts({ assignee: assigneeFor(user) }),
+    reelsToPostCount(),
+  ]);
+  const counts = { ...baseCounts, reelsOwed };
   // Nora's workspace is always pinned (even if it was archived); the business list shows active businesses only.
   const creator = everyone.find(isCreatorClient) ?? null;
   const businesses = everyone.filter((c) => !isCreatorClient(c));
