@@ -1,4 +1,4 @@
-import { assigneeFor, requireUser } from "@/lib/auth";
+import { assigneeFor, requireUser, seesDrafts } from "@/lib/auth";
 import { isCreatorClient, listClients, navCounts } from "@/lib/data";
 import { Sidebar } from "@/components/sidebar";
 import { SectionTabs } from "@/components/section-tabs";
@@ -14,7 +14,9 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     navCounts({ assignee: assigneeFor(user) }),
     reelsToPostCount(),
   ]);
-  const counts = { ...baseCounts, reelsOwed };
+  const drafts = seesDrafts(user);
+  // Nora never sees the review queue, so her Inbox badge counts asks only.
+  const counts = { ...baseCounts, needsReview: drafts ? baseCounts.needsReview : 0, reelsOwed };
   // Nora's workspace is always pinned (even if it was archived); the business list shows active businesses only.
   const creator = everyone.find(isCreatorClient) ?? null;
   const businesses = everyone.filter((c) => !isCreatorClient(c));
@@ -35,7 +37,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       <main className="min-w-0 flex-1 pt-5 pb-[calc(var(--tabbar-h)_+_1.5rem)] pl-[max(1rem,env(safe-area-inset-left))] pr-[max(1rem,env(safe-area-inset-right))] md:px-8 md:py-8 xl:px-10">
         <div className="mx-auto max-w-7xl">
           {/* Inbox / Outreach / Insights tabs on their member pages (renders nothing elsewhere). */}
-          <SectionTabs counts={{ newAsks: counts.newAsks, needsReview: counts.needsReview }} />
+          <SectionTabs counts={{ newAsks: counts.newAsks, needsReview: counts.needsReview }} hideReview={!drafts} />
           {children}
         </div>
       </main>

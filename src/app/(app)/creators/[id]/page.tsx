@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { requireUser } from "@/lib/auth";
+import { requireUser, seesDrafts } from "@/lib/auth";
 import { listClients } from "@/lib/data";
 import { OUTREACH_STAGES, type Draft } from "@/lib/schema";
 import { formatDate, relativeTime, today } from "@/lib/dates";
@@ -19,7 +19,8 @@ type SP = Record<string, string | string[] | undefined>;
 const one = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v) ?? "";
 
 export default async function CreatorPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<SP> }) {
-  await requireUser();
+  const viewer = await requireUser();
+  const showDrafts = seesDrafts(viewer); // Nora doesn't see DM / email drafts
   const [{ id }, sp] = await Promise.all([params, searchParams]);
   const [detail, clients] = await Promise.all([getCreatorDetail(id), listClients()]);
   if (!detail) notFound();
@@ -27,7 +28,7 @@ export default async function CreatorPage({ params, searchParams }: { params: Pr
   const now = new Date();
   const flash = one(sp.merged) ? "They were already in the roster, so we updated their existing profile." : one(sp.added) ? "Creator added." : "";
   const available = clients.filter((cl) => !outreach.some((o) => o.clientId === cl.id));
-  const draftsFor = (o: OutreachWithClient) => drafts.filter((d) => d.meta.outreachId === o.id);
+  const draftsFor = (o: OutreachWithClient) => (showDrafts ? drafts.filter((d) => d.meta.outreachId === o.id) : []);
   const check = statsCheck(c, now);
 
   return (
@@ -146,7 +147,7 @@ export default async function CreatorPage({ params, searchParams }: { params: Pr
           {outreach.length === 0 ? (
             <EmptyState title="Not in outreach with any business yet">Add them to a business below to start a pipeline.</EmptyState>
           ) : (
-            outreach.map((o) => <OutreachCard key={o.id} o={o} creatorId={c.id} drafts={draftsFor(o)} now={now} />)
+            outreach.map((o) => <OutreachCard key={o.id} o={o} creatorId={c.id} drafts={draftsFor(o)} showDrafts={showDrafts} now={now} />)
           )}
 
           <Card title="Add to another business">
@@ -192,7 +193,7 @@ export default async function CreatorPage({ params, searchParams }: { params: Pr
   );
 }
 
-function OutreachCard({ o, creatorId, drafts, now }: { o: OutreachWithClient; creatorId: string; drafts: Draft[]; now: Date }) {
+function OutreachCard({ o, creatorId, drafts, showDrafts, now }: { o: OutreachWithClient; creatorId: string; drafts: Draft[]; showDrafts: boolean; now: Date }) {
   const due = isFollowUpDue(o, now);
   const showFtc = AGREED_STAGES.includes(o.stage);
   const idp = `o-${o.id}`;
@@ -264,6 +265,7 @@ function OutreachCard({ o, creatorId, drafts, now }: { o: OutreachWithClient; cr
         </div>
       </ActionForm>
 
+      {showDrafts && (
       <div className="mt-5 border-t border-border pt-4">
         <h3 className="mb-2 text-xs font-semibold text-muted">Drafts</h3>
         {drafts.length === 0 ? (
@@ -291,6 +293,7 @@ function OutreachCard({ o, creatorId, drafts, now }: { o: OutreachWithClient; cr
           </ul>
         )}
       </div>
+      )}
     </Card>
   );
 }

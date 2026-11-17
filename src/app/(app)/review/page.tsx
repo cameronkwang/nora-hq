@@ -1,5 +1,6 @@
+import { redirect } from "next/navigation";
 import Link from "next/link";
-import { allowedUsers, requireUser } from "@/lib/auth";
+import { allowedUsers, requireUser, seesDrafts } from "@/lib/auth";
 import { listClients } from "@/lib/data";
 import { DRAFT_KINDS } from "@/lib/schema";
 import { DraftCard } from "@/components/draft-card";
@@ -31,7 +32,9 @@ function tabStatusFor(status: string, kind: string): ReviewTab | null {
 }
 
 export default async function ReviewPage({ searchParams }: { searchParams: Promise<SP> }) {
-  await requireUser();
+  const viewer = await requireUser();
+  // Drafts are Cameron's to review; Nora lands in her Inbox instead.
+  if (!seesDrafts(viewer)) redirect("/asks");
   const sp = await searchParams;
   const tabParam = one(sp.tab);
   const tab: ReviewTab = REVIEW_TABS.some((t) => t.key === tabParam) ? (tabParam as ReviewTab) : "needs_review";

@@ -261,19 +261,26 @@ export function notifyAsk(ask: AskLike, actor: string, prev?: { kind: string; fo
   });
 }
 
-/** New draft by Claude → both people (drafts_waiting, max one per person per 2h). */
+/**
+ * New draft by Claude → whoever reviews drafts (drafts_waiting, max one per person per 2h). That's Cameron:
+ * Nora doesn't see the review queue (lib/auth seesDrafts), so she isn't pinged about it either.
+ */
 export function notifyDraftCreated(d: { id: string; title: string }, actor: string) {
   if (actor !== "claude") return;
   defer("drafts_waiting", async () => {
     const db = await getDb();
     const [r] = await db.select({ n: count() }).from(schema.drafts).where(eq(schema.drafts.status, "needs_review"));
     const n = r?.n ?? 1;
-    await sendToAll("drafts_waiting", {
+    const payload = {
       title: n === 1 ? "1 draft waiting for review" : `${n} drafts waiting for review`,
       body: `Latest: ${d.title}`,
       url: "/review",
       tag: "drafts-waiting",
-    });
+    };
+    for (const u of allowedUsers()) {
+      if (u.name.trim().toLowerCase() === "nora") continue;
+      await sendToUser(u.email, "drafts_waiting", payload);
+    }
   });
 }
 
