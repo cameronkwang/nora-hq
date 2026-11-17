@@ -64,7 +64,7 @@ function addDays(date: string, n: number): string {
 
 /** The short confirmation after "New ask" → Send. */
 const SENT: Record<AskRoute, string> = {
-  auto: "Sent. Claude will sort it out.",
+  auto: "Sent. Claude picks up what it can; the rest goes to Cameron.",
   claude: "Sent to Claude.",
   cameron: "Sent to Cameron — it’s on his task list.",
   nora: "Sent to Nora — it’s on her task list.",

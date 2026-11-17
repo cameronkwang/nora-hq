@@ -21,7 +21,7 @@ const TABS: Array<{ key: TabKey; label: string; empty: string }> = [
   { key: "inbox", label: "Everything", empty: "Nothing open. Drop an ask whenever something comes up." },
   { key: "nora", label: "For Nora", empty: "Nothing waiting on Nora right now." },
   { key: "cameron", label: "For Cameron", empty: "Nothing waiting on Cameron right now." },
-  { key: "ideas", label: "Ideas", empty: "No ideas saved yet. Pick “Just an idea” on a new ask to park one here." },
+  { key: "ideas", label: "Ideas", empty: "No ideas yet. When you send an idea, Claude files it here." },
   { key: "done", label: "Done", empty: "No finished asks yet." },
 ];
 const ARCHIVED = { key: "archived" as const, label: "Archived", empty: "Nothing archived." };
@@ -91,7 +91,7 @@ export default async function AsksPage({ searchParams }: { searchParams: Promise
 
       {sent && (
         <p role="status" className="mb-4 rounded-lg bg-ok-soft px-3 py-2 text-sm text-ok">
-          Sent. Claude sorts it next time it checks in.
+          Sent. Claude picks up what it can; the rest goes to Cameron.
         </p>
       )}
 

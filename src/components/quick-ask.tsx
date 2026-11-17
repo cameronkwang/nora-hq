@@ -10,7 +10,7 @@ import { buttonClass, cx } from "./ui";
 type Chip = AskRoute | "adhoc";
 
 /** Compact chip labels for the composer. */
-const LABEL = (r: Chip, other: string) => (r === "adhoc" ? `Task for ${other}` : r === "idea" ? "Idea" : r === "cameron" || r === "nora" ? other : ROUTE_LABEL[r]);
+const LABEL = (r: Chip, other: string) => (r === "adhoc" ? `Task for ${other}` : ROUTE_LABEL[r as AskRoute]);
 
 const MAX_HEIGHT = 240;
 
@@ -20,10 +20,10 @@ const MAX_HEIGHT = 240;
  * on the other person's list instead of making an ask.
  */
 export function QuickAsk({ me, directUpload }: { me: "cameron" | "nora" | null; directUpload: boolean }) {
-  const base = routesFor(me); // auto · claude · <other person> · idea · fyi
-  const otherKey = base[2] as AskRoute;
-  const otherName = otherKey === "nora" ? "Nora" : "Cameron";
-  const chips: Chip[] = ["auto", "claude", otherKey, "adhoc", "idea"];
+  const base = routesFor(me); // Cameron (auto) · Nora
+  const otherName = me === "cameron" ? "Nora" : "Cameron";
+  // Just the two people; Claude picks up what it can from Cameron's side in the background.
+  const chips: Chip[] = base;
 
   const [text, setText] = useState("");
   const [route, setRoute] = useState<Chip>("auto");
