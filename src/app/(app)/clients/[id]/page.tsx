@@ -52,7 +52,7 @@ export default async function ClientPage({
   const [data, onboarding] = await Promise.all([getClientMonth(id, month), getOnboardingStatus(id)]);
   if (!data) notFound();
   // Nora's own workspace gets its own layout: collabs, her plan & tasks, stats. No reviews or creator outreach.
-  if (data.client.kind === "creator") return <CreatorWorkspace data={data} month={month} now={now} />;
+  if (data.client.kind === "creator") return <CreatorWorkspace data={data} month={month} now={now} simple={assigneeFor(user) === "nora"} />;
   const { client, plan, outreach, metrics, posts } = data;
   // Drafts are Cameron's side; Nora doesn't see draft counts here either.
   const draftsToReview = seesDrafts(user) ? data.pendingDrafts : 0;
@@ -596,7 +596,11 @@ function ContentCard({ clientId, posts, month }: { clientId: string; posts: Clie
  * /clients/noraeatsgood: Nora's creator business in one place. Top to bottom: collab requests,
  * this month's plan + her own tasks, stats, collab leads, content. Same plan/task/content cards as a business.
  */
-async function CreatorWorkspace({ data, month, now }: { data: ClientMonth; month: string; now: string }) {
+/**
+ * Nora's workspace. Cameron gets the full back-end view (plan targets, checklist, leads, content). Nora (simple)
+ * gets just her collab requests, deals and stats: her Home already covers shoots, reels and asks.
+ */
+async function CreatorWorkspace({ data, month, now, simple = false }: { data: ClientMonth; month: string; now: string; simple?: boolean }) {
   const { client, plan, posts } = data;
   const [collabs, stats, leads, unfiled, deals] = await Promise.all([
     openCollabRequests(5),
@@ -609,6 +613,22 @@ async function CreatorWorkspace({ data, month, now }: { data: ClientMonth; month
   const seen = new Set(data.openTasks.map((t) => t.id));
   const tasks = [...data.openTasks, ...unfiled.filter((t) => !seen.has(t.id))];
   const needsChecklist = plan.some((p) => p.planned < Math.max(1, p.target));
+
+  if (simple) {
+    return (
+      <>
+        <CreatorHeader client={client} />
+        <div className="grid gap-6">
+          <CreatorRow>
+            <CollabRequestsCard newCount={collabs.newCount} reviewingCount={collabs.reviewingCount} latest={collabs.latest} />
+            <DealsCard data={deals} />
+          </CreatorRow>
+          <CreatorStatsCard platforms={[stats.platforms.instagram, stats.platforms.tiktok]} />
+          <SavedRepliesCard />
+        </div>
+      </>
+    );
+  }
 
   return (
     <>

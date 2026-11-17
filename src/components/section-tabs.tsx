@@ -42,6 +42,9 @@ export const SECTIONS: Record<SectionKey, { label: string; tabs: SectionTab[] }>
   },
 };
 
+/** The tabs Nora sees: her asks, plus her own collab requests and stats. */
+const NORA_TABS = new Set(["todo", "ideas", "done", "collabs", "stats"]);
+
 const under = (path: string, base: string) => path === base || path.startsWith(`${base}/`);
 
 /** Which section a path belongs to (detail pages included) — drives the sidebar's active state. */
@@ -85,10 +88,13 @@ function Tabs({ tab, counts, hideReview }: { tab: string; counts?: Partial<Recor
   const at = activeTab(path, tab);
   if (!at) return null;
   const section = SECTIONS[at.section];
+  // Nora (hideReview) sees only her own tabs; a section with one tab left needs no tab row.
+  const tabs = section.tabs.filter((t) => !(hideReview && !NORA_TABS.has(t.key)));
+  if (tabs.length < 2) return null;
   return (
     <nav aria-label={section.label} className="-mx-4 mb-5 overflow-x-auto px-4 md:mx-0 md:px-0">
       <div className="flex min-w-max gap-1 border-b border-border">
-        {section.tabs.filter((t) => !(hideReview && t.key === "approve")).map((t) => {
+        {tabs.map((t) => {
           const on = t.key === at.key;
           const n = t.count ? (counts?.[t.count] ?? 0) : 0;
           return (

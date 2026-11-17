@@ -32,6 +32,10 @@ const ACTIVITY: Item = { href: "/activity", label: "Activity", icon: "clock" };
 
 const MAIN = [HOME, INBOX, TASKS, CALENDAR];
 const GROW = [OUTREACH, INSIGHTS, CONTRACTS];
+/** Nora's own pages (her HQ): no back-end tools, no list of businesses. */
+const MY_STATS: Item = { href: "/stats", label: "My stats", icon: "trend" };
+const COLLABS: Item = { href: "/collabs", label: "Collab requests", icon: "spark" };
+const NORA_MORE = [CONTRACTS, COLLABS, MY_STATS];
 const INACTIVE_HREF = "/clients?inactive=1";
 
 function useIsActive() {
@@ -56,7 +60,8 @@ export function Sidebar(props: NavProps) {
 
 /* ------------------------------------------------------------------ desktop */
 
-function DesktopSidebar({ user, creator, businesses, inactiveCount, counts }: NavProps) {
+function DesktopSidebar({ user, creator, businesses, inactiveCount, counts, phoneTab }: NavProps) {
+  const nora = phoneTab === "calendar"; // Nora's HQ: only her things
   const active = useIsActive();
   const path = usePathname() ?? "/";
 
@@ -83,14 +88,15 @@ function DesktopSidebar({ user, creator, businesses, inactiveCount, counts }: Na
         </div>
 
         <div>
-          <SideHeading>Grow</SideHeading>
+          <SideHeading>{nora ? "Mine" : "Grow"}</SideHeading>
           <div className="flex flex-col gap-0.5">
-            {GROW.map((item) => (
+            {(nora ? NORA_MORE : GROW).map((item) => (
               <SideLink key={item.href} item={item} active={active(item)} />
             ))}
           </div>
         </div>
 
+        {!nora && (
         <div>
           <div className="flex items-center justify-between pr-2">
             <Link href="/clients" className="rounded-md hover:text-text">
@@ -121,13 +127,14 @@ function DesktopSidebar({ user, creator, businesses, inactiveCount, counts }: Na
             )}
           </div>
         </div>
+        )}
 
         {creator && <CreatorCard creator={creator} active={active(`/clients/${creator.id}`)} />}
       </nav>
 
       <div className="mt-auto pt-6 text-sm">
         <div className="flex gap-1 px-1">
-          {[SETTINGS, ACTIVITY].map((item) => {
+          {(nora ? [SETTINGS] : [SETTINGS, ACTIVITY]).map((item) => {
             const on = active(item);
             return (
               <Link
@@ -221,7 +228,9 @@ function SideLink({ item, active, count = 0 }: { item: Item; active: boolean; co
 function MobileNav({ user, creator, businesses, inactiveCount, counts, phoneTab }: NavProps) {
   const tabItem = phoneTab === "tasks" ? TASKS : CALENDAR;
   // Nora: Tasks and Contracts first; the agency tools (Outreach, Insights) after.
-  const sheetItems = phoneTab === "tasks" ? [CALENDAR, ...GROW] : [TASKS, CONTRACTS, OUTREACH, INSIGHTS];
+  // Nora: her own pages only (Tasks, Contracts, Collab requests, My stats). Cameron: the back-end tools.
+  const sheetItems = phoneTab === "tasks" ? [CALENDAR, ...GROW] : [TASKS, ...NORA_MORE];
+  const nora = phoneTab === "calendar";
   const active = useIsActive();
   const path = usePathname() ?? "/";
   const sheet = useRef<HTMLDialogElement>(null);
@@ -331,6 +340,7 @@ function MobileNav({ user, creator, businesses, inactiveCount, counts, phoneTab 
               ))}
             </SheetGroup>
 
+            {!nora && (
             <SheetGroup title="My businesses">
               {businesses.map((c) => (
                 <SheetLink key={c.id} href={`/clients/${c.id}`} icon="store" active={active(`/clients/${c.id}`)} onClick={close}>
@@ -345,6 +355,7 @@ function MobileNav({ user, creator, businesses, inactiveCount, counts, phoneTab 
               )}
               <NewClientLink variant="row" onClick={close} />
             </SheetGroup>
+            )}
 
             {creator && (
               <SheetGroup>
@@ -356,7 +367,7 @@ function MobileNav({ user, creator, businesses, inactiveCount, counts, phoneTab 
             )}
 
             <SheetGroup>
-              {[SETTINGS, ACTIVITY].map((item) => (
+              {(nora ? [SETTINGS] : [SETTINGS, ACTIVITY]).map((item) => (
                 <SheetLink key={item.href} href={item.href} icon={item.icon} active={active(item)} onClick={close}>
                   {item.label}
                 </SheetLink>
