@@ -10,7 +10,7 @@ const MOVES: Record<AskStatus, Array<{ to: AskStatus; label: string; primary?: b
   ],
   in_progress: [
     { to: "done", label: "Mark done", primary: true },
-    { to: "new", label: "Back to new" },
+    { to: "new", label: "Not started" },
   ],
   done: [
     { to: "in_progress", label: "Reopen" },

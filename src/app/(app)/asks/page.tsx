@@ -18,7 +18,7 @@ type TabKey = "inbox" | "nora" | "cameron" | "ideas" | "done" | "archived";
 const PEOPLE = ["nora", "cameron"] as const;
 
 const TABS: Array<{ key: TabKey; label: string; empty: string }> = [
-  { key: "inbox", label: "Inbox", empty: "Inbox zero. Drop an ask whenever something comes up." },
+  { key: "inbox", label: "Everything", empty: "Nothing open. Drop an ask whenever something comes up." },
   { key: "nora", label: "For Nora", empty: "Nothing waiting on Nora right now." },
   { key: "cameron", label: "For Cameron", empty: "Nothing waiting on Cameron right now." },
   { key: "ideas", label: "Ideas", empty: "No ideas saved yet. Pick “Just an idea” on a new ask to park one here." },
@@ -97,7 +97,8 @@ export default async function AsksPage({ searchParams }: { searchParams: Promise
 
       <nav aria-label="Ask lists" className="relative -mx-4 mb-4 overflow-x-auto px-4">
         <div className="flex min-w-max gap-1 rounded-lg bg-surface-2 p-1 text-sm">
-          {TABS.map((t) => (
+          {/* Ideas and Done are already tabs right above this (Inbox section), so this row is just "who's it for". */}
+          {TABS.filter((t) => t.key !== "ideas" && t.key !== "done").map((t) => (
             <Link
               key={t.key}
               href={t.key === "inbox" ? "/asks" : `/asks?tab=${t.key}`}
