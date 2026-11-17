@@ -4,6 +4,7 @@ import { requireUser } from "@/lib/auth";
 import { getScheduleItem } from "@/lib/ops-schedule";
 import { SHOOT_CHECKLIST } from "@/lib/shoot-checklist";
 import { ShootChecklist } from "@/components/shoot-checklist";
+import { ReelPostedButton } from "@/components/reel-posted-button";
 import { Badge, LinkButton } from "@/components/ui";
 
 export const dynamic = "force-dynamic";
@@ -49,6 +50,12 @@ export default async function ScheduleJobPage({ params }: { params: Promise<{ id
           )}
           {job.dealId && <LinkButton href={`/deals/${job.dealId}`}>Deal</LinkButton>}
           {job.clientId && <LinkButton href={`/clients/${job.clientId}`}>{job.clientName ?? "Business"}</LinkButton>}
+        </div>
+      )}
+
+      {job.needsReel && (
+        <div className="mb-5">
+          <ReelPostedButton id={job.id} posted={!!job.reelPostedAt} />
         </div>
       )}
 
