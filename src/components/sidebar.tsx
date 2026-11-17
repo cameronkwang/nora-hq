@@ -24,11 +24,12 @@ const TASKS: Item = { href: "/tasks", label: "Tasks", icon: "list", badge: (c) =
 const CALENDAR: Item = { href: "/calendar", label: "Calendar", icon: "calendar" };
 const OUTREACH: Item = { href: "/creators", label: "Outreach", icon: "users", section: "outreach" };
 const INSIGHTS: Item = { href: "/numbers", label: "Insights", icon: "chart", section: "insights" };
+const CONTRACTS: Item = { href: "/contracts", label: "Contracts", icon: "file" };
 const SETTINGS: Item = { href: "/settings", label: "Settings", icon: "gear" };
 const ACTIVITY: Item = { href: "/activity", label: "Activity", icon: "clock" };
 
 const MAIN = [HOME, INBOX, TASKS, CALENDAR];
-const GROW = [OUTREACH, INSIGHTS];
+const GROW = [OUTREACH, INSIGHTS, CONTRACTS];
 const INACTIVE_HREF = "/clients?inactive=1";
 
 function useIsActive() {
@@ -450,7 +451,7 @@ function useNewAskShortcut() {
 
 type IconName =
   | "home" | "inbox" | "check" | "list" | "calendar" | "users" | "chart" | "star" | "clock" | "gear"
-  | "plus" | "menu" | "chevron" | "store" | "grid" | "logout" | "target" | "trend" | "spark" | "box";
+  | "plus" | "menu" | "chevron" | "store" | "grid" | "logout" | "target" | "trend" | "spark" | "box" | "file";
 
 const PATHS: Record<IconName, ReactNode> = {
   home: <path d="M3 10.5 12 3l9 7.5M5 9v11h5v-6h4v6h5V9" />,
@@ -502,6 +503,7 @@ const PATHS: Record<IconName, ReactNode> = {
       <rect x="13" y="13" width="7" height="7" rx="1.5" />
     </>
   ),
+  file: <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8zM14 3v5h5M9 13h6M9 17h6" />,
   box: <path d="M3.5 7.5h17v3h-17zM5 10.5V20h14v-9.5M10 14h4" />,
   logout: <path d="M15 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3M10 16l-4-4 4-4M6 12h10" />,
   target: (
