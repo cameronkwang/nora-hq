@@ -24,9 +24,18 @@ export const viewport: Viewport = {
   ],
 };
 
+/**
+ * Applies a saved Light / Dark choice before the first paint, so there's no flash of the wrong theme.
+ * "Auto" (nothing saved) follows the phone's own setting. Kept tiny and dependency-free on purpose.
+ */
+const THEME_SCRIPT = `try{var t=localStorage.getItem("nora-hq:theme");if(t==="light"||t==="dark")document.documentElement.dataset.theme=t}catch(e){}`;
+
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en">
+    <html lang="en" suppressHydrationWarning>
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: THEME_SCRIPT }} />
+      </head>
       <body className="min-h-dvh">{children}</body>
     </html>
   );
