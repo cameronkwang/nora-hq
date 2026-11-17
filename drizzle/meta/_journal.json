@@ -106,6 +106,13 @@
       "when": 1794895673006,
       "tag": "0014_contracts",
       "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "7",
+      "when": 1794895895700,
+      "tag": "0015_schedule_checklist",
+      "breakpoints": true
     }
   ]
 }

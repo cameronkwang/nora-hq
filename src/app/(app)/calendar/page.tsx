@@ -1,3 +1,4 @@
+import { checklistDone } from "@/lib/shoot-checklist";
 import Link from "next/link";
 import { requireUser } from "@/lib/auth";
 import { currentMonth, isMonth, monthLabel, today } from "@/lib/dates";
@@ -73,6 +74,7 @@ async function ScheduleTab({ sp, month, tabs }: { sp: SP; month: string; tabs: R
     reelPostedAt: r.reelPostedAt ? r.reelPostedAt.toISOString() : null,
     dealId: r.dealId,
     payment: r.payment, // Paid / Not paid from the linked deal — never an amount
+    checklistDone: checklistDone(r.checklist),
   });
   const items = rows.map(toEntry);
   const otherReels = pending.filter((r) => r.month !== month).map(toEntry);

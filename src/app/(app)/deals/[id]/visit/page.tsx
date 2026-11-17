@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { requireUser } from "@/lib/auth";
 import { formatDate } from "@/lib/dates";
 import { DELIVERABLE_LABEL, getDeal } from "@/lib/ops-deals";
+import { scheduleItemForDeal } from "@/lib/ops-schedule";
 import { SubmitButton } from "@/components/client-form";
 import { COMP_LABEL, disclosureLine, formatVisit, mapsLinks, telHref } from "@/components/deal-bits";
 import { DealShotList } from "@/components/deal-shot-list";
@@ -20,6 +21,8 @@ export default async function VisitPage({ params, searchParams }: { params: Prom
   const [{ id }, sp] = await Promise.all([params, searchParams]);
   const deal = await getDeal(id);
   if (!deal) notFound();
+  // The schedule job for this deal carries the general B-roll checklist.
+  const job = await scheduleItemForDeal(deal.id);
   const maps = deal.address ? mapsLinks(deal.address) : null;
   const phone = deal.contactPhone;
   const shotDone = deal.status === "shot" || deal.status === "posted" || deal.status === "complete";
@@ -80,6 +83,11 @@ export default async function VisitPage({ params, searchParams }: { params: Prom
         <section aria-labelledby="shots-h">
           <h2 id="shots-h" className="mb-2 text-lg font-semibold">Shot list</h2>
           <DealShotList dealId={deal.id} shots={deal.shotList} large />
+          {job && (
+            <Link href={`/calendar/jobs/${job.id}`} className="mt-2 inline-flex min-h-11 items-center text-[15px] font-medium text-accent hover:underline">
+              B-roll checklist →
+            </Link>
+          )}
         </section>
 
         {deal.deliverables.length > 0 && (
