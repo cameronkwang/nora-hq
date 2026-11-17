@@ -13,6 +13,7 @@ import { QuickAsk } from "@/components/quick-ask";
 import { NotifyHomeCard } from "@/components/notify-home-card";
 import { NewClientLink } from "@/components/onboard-link";
 import { ClientHealth } from "@/components/client-health-strip";
+import { NoraHome } from "@/components/nora-home";
 import { Badge, Card, EmptyState, PageHeader, ProgressBar, clientLabel, cx, formatNumber, humanize } from "@/components/ui";
 
 export const dynamic = "force-dynamic";
@@ -86,6 +87,57 @@ export default async function Home({ searchParams }: { searchParams: Promise<Rec
   const month = currentMonth();
   const now = today();
   const me = personKey(assigneeFor(user));
+
+  // Nora's Home is her day (shoots, reels, payments, her asks), not the agency dashboard.
+  if (me === "nora") {
+    const [forYou, clients] = await Promise.all([getForYou(user.email, me, now), listClients()]);
+    const names = new Map(clients.map((c) => [c.id, clientLabel(c)]));
+    return (
+      <div className="flex flex-col gap-6">
+        <QuickAsk me={me} directUpload={blobEnabled()} />
+        <NotifyHomeCard />
+        <PageHeader title={`${greeting()}, ${user.name.split(" ")[0]}`} subtitle={todayLabel()} />
+        {sent && (
+          <p role="status" className="-mt-2 flex flex-wrap items-center justify-between gap-x-3 rounded-lg bg-ok-soft px-3 py-1 text-sm text-ok">
+            <span className="py-1.5">{SENT[sent]}</span>
+            <Link href="/asks/new" className="inline-flex min-h-11 items-center font-semibold hover:underline md:min-h-8">
+              Add another
+            </Link>
+          </p>
+        )}
+        {(forYou.asks.length > 0 || forYou.tasks.length > 0) && (
+          <Card title="For you">
+            {forYou.asks.length > 0 && (
+              <ul className="divide-y divide-border">
+                {forYou.asks.map((a) => (
+                  <li key={a.id}>
+                    <Link href={`/asks/${a.id}`} className="-mx-2 flex min-h-11 items-center gap-3 rounded-lg px-2 py-2.5 hover:bg-surface-2">
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-sm font-medium">{a.title}</span>
+                        <span className="mt-0.5 flex flex-wrap items-center gap-x-1.5 gap-y-1 text-xs text-muted">
+                          {a.claudeAsked ? <Badge tone="warn">Claude asked a question</Badge> : <Badge tone="info">Ask for you</Badge>}
+                          <span className="truncate">{relativeTime(a.at)}</span>
+                        </span>
+                      </span>
+                      <span aria-hidden className="shrink-0 text-muted">›</span>
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            )}
+            {forYou.tasks.length > 0 && (
+              <TaskList>
+                {forYou.tasks.map((t) => (
+                  <TaskRow key={t.id} task={t} clientName={t.clientId ? names.get(t.clientId) : null} />
+                ))}
+              </TaskList>
+            )}
+          </Card>
+        )}
+        <NoraHome email={user.email} name={user.name} now={now} skipAskIds={forYou.asks.map((a) => a.id)} />
+      </div>
+    );
+  }
 
   const openDue = and(ne(schema.tasks.status, "done"), isNotNull(schema.tasks.dueDate), lte(schema.tasks.dueDate, now));
   const clients = await listClients();

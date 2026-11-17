@@ -118,5 +118,12 @@ await db.insert(schema.clientIntakes).values({
   })).onConflictDoNothing();
 }
 
+// Two asks Nora sent (local dev user nora@local): one Claude answered with a question, one done.
+await db.insert(schema.asks).values([
+  { id: "sample-ask-1", body: "Can you draft a caption for the Sample Pizzeria reel? (fake)", createdBy: "nora@local", status: "in_progress", kind: "request", forWho: "claude", claudeNote: "Asked Nora which pie to lead with." },
+  { id: "sample-ask-2", body: "Add Demo Dumplings to my schedule for Wednesday (fake)", createdBy: "nora@local", status: "done", kind: "request", forWho: "claude", claudeNote: "Added." },
+]).onConflictDoNothing();
+await db.insert(schema.askMessages).values({ id: "sample-askmsg-1", askId: "sample-ask-1", author: "claude", body: "Which pie should the caption lead with? (fake)" }).onConflictDoNothing();
+
 await client.close();
 console.log("sample data ready");

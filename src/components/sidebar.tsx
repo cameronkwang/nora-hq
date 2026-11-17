@@ -220,7 +220,8 @@ function SideLink({ item, active, count = 0 }: { item: Item; active: boolean; co
 
 function MobileNav({ user, creator, businesses, inactiveCount, counts, phoneTab }: NavProps) {
   const tabItem = phoneTab === "tasks" ? TASKS : CALENDAR;
-  const sheetItems = phoneTab === "tasks" ? [CALENDAR, ...GROW] : [TASKS, ...GROW];
+  // Nora: Tasks and Contracts first; the agency tools (Outreach, Insights) after.
+  const sheetItems = phoneTab === "tasks" ? [CALENDAR, ...GROW] : [TASKS, CONTRACTS, OUTREACH, INSIGHTS];
   const active = useIsActive();
   const path = usePathname() ?? "/";
   const sheet = useRef<HTMLDialogElement>(null);
