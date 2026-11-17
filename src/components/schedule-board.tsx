@@ -7,6 +7,7 @@ import { setReelPostedAction } from "@/app/(app)/calendar/schedule-actions";
 import { ScheduleItemForm } from "./schedule-item-form";
 import { ScheduleSheet } from "./schedule-sheet";
 import { Badge, EmptyState, cx } from "./ui";
+import { CHECKLIST_TOTAL } from "@/lib/shoot-checklist";
 
 /**
  * One row of Nora's schedule as the page hands it to the browser. No amount — the table has none. A job that
@@ -24,6 +25,8 @@ export type ScheduleEntry = {
   reelPostedAt: string | null;
   dealId: string | null;
   payment: "paid" | "not_paid" | null;
+  /** Shoot-checklist steps ticked (of CHECKLIST_TOTAL). */
+  checklistDone: number;
 };
 export type ScheduleFilter = "all" | "reels" | "free";
 
@@ -158,17 +161,19 @@ function Row({ item, onEdit, hideDate, showMonth }: { item: ScheduleEntry; onEdi
     <li className="flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2">
       <span className="min-w-0 flex-1">
         <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
-          {item.clientId ? (
-            <Link href={`/clients/${item.clientId}`} className="inline-flex min-h-11 items-center text-sm font-medium text-accent hover:underline md:min-h-0">
-              {item.businessName}
-            </Link>
-          ) : (
-            <span className="text-sm font-medium">{item.businessName}</span>
-          )}
+          {/* The name opens the job: its shoot checklist, plus links to the business and deal. */}
+          <Link href={`/calendar/jobs/${item.id}`} className="inline-flex min-h-11 items-center text-sm font-medium text-accent hover:underline md:min-h-0">
+            {item.businessName}
+          </Link>
           {item.isFree && <Badge tone="ok">Free</Badge>}
           {item.dealId && <DealBadge item={item} />}
         </span>
         {((!hideDate && when) || showMonth) && <span className="block text-xs text-muted">{when}</span>}
+        {item.checklistDone > 0 && (
+          <span className="block text-xs text-muted">
+            Shoot list {item.checklistDone}/{CHECKLIST_TOTAL}
+          </span>
+        )}
       </span>
       {item.needsReel && <ReelCheck item={item} />}
       <button

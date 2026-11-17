@@ -804,6 +804,8 @@ export const scheduleItems = pgTable(
     needsReel: boolean("needs_reel").notNull().default(false), // 📸 in Nora's list = a reel to post
     reelPostedAt: timestamp("reel_posted_at", { withTimezone: true }),
     notes: text("notes"),
+    // Ids of the shoot-checklist steps Nora has ticked (lib/shoot-checklist). Per job, people only.
+    checklist: jsonb("checklist").$type<string[]>().notNull().default([]),
     source: text("source").$type<"paste" | "manual" | "claude">().notNull().default("manual"),
     createdBy: text("created_by").notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),

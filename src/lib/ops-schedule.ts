@@ -9,6 +9,7 @@ import { isMonth, today as todayYmd } from "./dates";
 import { addDeliverable, createDeal, deleteDeal, moveDealVisitToDay, setDealReelsPosted, updateDeliverable, zonedLocalToDate } from "./ops-deals";
 import { looksLikeMoney, matchBusiness, parseSchedule, scheduleNameKey, scrubMoney, type ParsedSchedule, type ParsedScheduleItem } from "./schedule-parse";
 import type { IcalEvent } from "./ical";
+import { CHECKLIST_STEP_IDS } from "./shoot-checklist";
 
 /**
  * Nora's schedule: which businesses she's working with each month, on which day (or "sometime in
@@ -571,4 +572,38 @@ export async function scheduleIcalEvents(fromDate: string, toDate: string, link:
     });
   }
   return events;
+}
+
+/* ───────────────────────── Shoot checklist (per job) ───────────────────────── */
+
+/** One job with its business name (for the job's checklist page). */
+export async function getScheduleItem(id: string): Promise<(schema.ScheduleItem & { clientName: string | null }) | null> {
+  const db = await getDb();
+  const [row] = await db
+    .select({ s: schema.scheduleItems, clientName: schema.clients.name })
+    .from(schema.scheduleItems)
+    .leftJoin(schema.clients, eq(schema.clients.id, schema.scheduleItems.clientId))
+    .where(eq(schema.scheduleItems.id, id));
+  return row ? { ...row.s, clientName: row.clientName } : null;
+}
+
+/**
+ * Tick or untick one shoot-checklist step on a job (people only). A single UPDATE, so two quick taps on
+ * different steps can't overwrite each other. Not logged to Activity: it's Nora's own working list.
+ */
+export async function setChecklistStep(id: string, stepId: string, done: boolean, actor: string): Promise<string[]> {
+  if (MACHINE.has(actor.toLowerCase())) throw new OpsError("Only Nora or Cameron can tick the shoot checklist.");
+  if (!CHECKLIST_STEP_IDS.has(stepId)) throw new OpsError("That checklist step doesn't exist.");
+  const db = await getDb();
+  const col = schema.scheduleItems.checklist;
+  const [row] = await db
+    .update(schema.scheduleItems)
+    .set({
+      checklist: done ? sql`(${col} - ${stepId}::text) || jsonb_build_array(${stepId}::text)` : sql`${col} - ${stepId}::text`,
+      updatedAt: new Date(),
+    })
+    .where(eq(schema.scheduleItems.id, id))
+    .returning({ checklist: col });
+  if (!row) throw new OpsError("That job was removed from the schedule.");
+  return row.checklist;
 }

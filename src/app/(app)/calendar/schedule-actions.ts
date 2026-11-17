@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { requireUser } from "@/lib/auth";
 import { OpsError } from "@/lib/ops";
-import { addScheduleItem, deleteScheduleItem, importSchedule, makeDealFromScheduleItem, markReelPosted, updateScheduleItem, type ImportResult } from "@/lib/ops-schedule";
+import { addScheduleItem, deleteScheduleItem, importSchedule, makeDealFromScheduleItem, markReelPosted, setChecklistStep, updateScheduleItem, type ImportResult } from "@/lib/ops-schedule";
 
 export type ScheduleActionResult = { ok: true; message?: string } | { ok: false; error: string };
 
@@ -88,6 +88,18 @@ export async function makeDealFromScheduleAction(id: string): Promise<{ ok: true
     refresh();
     revalidatePath("/deals");
     return { ok: true, ...r };
+  } catch (e) {
+    return { ok: false, error: errorMessage(e) };
+  }
+}
+
+/** Shoot checklist tick from the job page. Returns the job's ticked step ids. */
+export async function setChecklistStepAction(id: string, stepId: string, done: boolean): Promise<{ ok: true; checklist: string[] } | { ok: false; error: string }> {
+  const user = await requireUser();
+  try {
+    const checklist = await setChecklistStep(id, stepId, !!done, user.email);
+    revalidatePath("/calendar");
+    return { ok: true, checklist };
   } catch (e) {
     return { ok: false, error: errorMessage(e) };
   }
