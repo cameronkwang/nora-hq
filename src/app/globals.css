@@ -137,6 +137,20 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); }
   input[type="checkbox"], input[type="radio"] { width: 1.25rem; height: 1.25rem; }
 }
 
+/* Text links in a card header ("Edit plan", "See all") look small but get a 44px hit area on touch. */
+@media (pointer: coarse) {
+  .card-head a:not(.btn):not(.btn-sm) { position: relative; }
+  .card-head a:not(.btn):not(.btn-sm)::after {
+    content: "";
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: max(100%, 44px);
+    height: 44px;
+    transform: translate(-50%, -50%);
+  }
+}
+
 /* Opt-in for small icon buttons (e.g. a 24px round toggle): keeps the look, grows the hit area to 44px. */
 .tap-target { position: relative; }
 .tap-target::after {

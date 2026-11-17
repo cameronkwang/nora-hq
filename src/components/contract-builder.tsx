@@ -18,6 +18,8 @@ const ME_KEY = "nora-hq:contract-me";
 export function ContractBuilder({ today, businesses }: { today: string; businesses: string[] }) {
   const [f, setF] = useState<ContractFields>(() => defaultFields(today));
   const [busy, setBusy] = useState(false);
+  // Phones: the preview sits below a long form, so it's hidden until she asks for it.
+  const [showPreview, setShowPreview] = useState(false);
   const [error, setError] = useState("");
 
   useEffect(() => {
@@ -213,7 +215,8 @@ export function ContractBuilder({ today, businesses }: { today: string; business
         </Card>
 
         <div className="grid gap-2">
-          <Button variant="primary" onClick={download} disabled={busy}>
+          {/* Desktop: the button sits under the form. Phones use the sticky bar below. */}
+          <Button variant="primary" onClick={download} disabled={busy} className="hidden lg:inline-flex">
             {busy ? "Making PDF…" : "Download PDF"}
           </Button>
           {missing.length > 0 && <p className="text-xs text-warn">Still blank: {missing.join(", ")}. The PDF shows [brackets] there.</p>}
@@ -223,7 +226,14 @@ export function ContractBuilder({ today, businesses }: { today: string; business
       </div>
 
       {/* Live preview: the same text the PDF uses. */}
-      <section aria-label="Preview" className="rounded-xl border border-border bg-surface p-5 md:p-8 lg:sticky lg:top-6 lg:max-h-[calc(100dvh-3rem)] lg:overflow-y-auto">
+      <section
+        id="contract-preview"
+        aria-label="Preview"
+        className={cx(
+          "scroll-mt-4 rounded-xl border border-border bg-surface p-5 md:p-8 lg:sticky lg:top-6 lg:block lg:max-h-[calc(100dvh-3rem)] lg:overflow-y-auto",
+          !showPreview && "hidden",
+        )}
+      >
         <p className="mb-4 text-xs font-semibold uppercase tracking-wide text-muted">Preview</p>
         <h2 className="text-xl font-semibold">{doc.title}</h2>
         <p className="mt-2 text-sm">{doc.intro}</p>
@@ -238,7 +248,7 @@ export function ContractBuilder({ today, businesses }: { today: string; business
                   p.startsWith("•  ") ? (
                     <p key={j} className="pl-4 -indent-3">• {p.slice(3)}</p>
                   ) : (
-                    <p key={j} className={p.startsWith("[") ? "text-warn" : undefined}>{p}</p>
+                    <p key={j} className={p.startsWith("[") && p.endsWith("]") ? "text-warn" : undefined}>{p}</p>
                   ),
                 )}
               </div>
@@ -254,6 +264,30 @@ export function ContractBuilder({ today, businesses }: { today: string; business
           ))}
         </div>
       </section>
+
+      {/* Phones: Preview + Download stay in reach above the bottom tab bar while she scrolls the form. */}
+      <div className="fixed inset-x-0 bottom-[var(--tabbar-h)] z-20 border-t border-border bg-surface/95 px-4 py-2 backdrop-blur lg:hidden">
+        <div className="mx-auto flex max-w-md gap-2">
+          <Button
+            type="button"
+            onClick={() => {
+              const next = !showPreview;
+              setShowPreview(next);
+              if (next) requestAnimationFrame(() => document.getElementById("contract-preview")?.scrollIntoView({ behavior: "smooth" }));
+            }}
+            className="flex-1"
+            aria-expanded={showPreview}
+            aria-controls="contract-preview"
+          >
+            {showPreview ? "Hide preview" : "Preview"}
+          </Button>
+          <Button variant="primary" onClick={download} disabled={busy} className="flex-[2]">
+            {busy ? "Making PDF…" : "Download PDF"}
+          </Button>
+        </div>
+      </div>
+      {/* Room so the sticky bar never covers the last field or the preview. */}
+      <div aria-hidden className="h-16 lg:hidden" />
     </div>
   );
 }
