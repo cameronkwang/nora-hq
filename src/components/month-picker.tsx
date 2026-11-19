@@ -15,11 +15,21 @@ function label(month: string) {
   return new Date(Date.UTC(y, m - 1, 15)).toLocaleDateString("en-US", { month: "long", year: "numeric", timeZone: "UTC" });
 }
 
+function Chevron({ d }: { d: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <path d={d} />
+    </svg>
+  );
+}
+
 /**
  * Prev / next / pick a month. Keeps every other query param, writes ?month=YYYY-MM.
- * `current` is the real current month (shows a "This month" shortcut when viewing another month).
+ * `current` is the real current month (shows a "Back to this month" shortcut when viewing another month).
+ * Drawn as `.monthpick`: no box, the month in 600 between two quiet arrows. Tapping the month opens the
+ * device's own month chooser (an invisible input laid over the words).
  */
-export function MonthPicker({ month, current }: { month: string; current: string }) {
+export function MonthPicker({ month, current, className }: { month: string; current: string; className?: string }) {
   const router = useRouter();
   const pathname = usePathname();
   const params = useSearchParams();
@@ -33,16 +43,14 @@ export function MonthPicker({ month, current }: { month: string; current: string
   };
 
   return (
-    <div className="flex flex-wrap items-center gap-2">
-      <div className="inline-flex items-center rounded-lg border border-border bg-surface">
-        <Link href={href(shift(month, -1))} className="rounded-l-lg px-3 py-2 text-sm hover:bg-surface-2" aria-label={`Previous month, ${label(shift(month, -1))}`} scroll={false}>
-          ←
+    <div className={cx("monthpick-wrap", className)}>
+      <div className="monthpick" role="group" aria-label="Month">
+        <Link href={href(shift(month, -1))} aria-label={`Previous month, ${label(shift(month, -1))}`} scroll={false}>
+          <Chevron d="m15 6-6 6 6 6" />
         </Link>
-        <label className="relative border-x border-border">
+        <label className="m">
           <span className="sr-only">Choose month</span>
-          <span aria-hidden className="pointer-events-none block min-w-36 px-3 py-2 text-center text-sm font-semibold">
-            {label(month)}
-          </span>
+          <span aria-hidden>{label(month)}</span>
           <input
             type="month"
             value={month}
@@ -50,15 +58,14 @@ export function MonthPicker({ month, current }: { month: string; current: string
             onChange={(e) => {
               if (/^\d{4}-\d{2}$/.test(e.target.value)) router.push(href(e.target.value), { scroll: false });
             }}
-            className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
           />
         </label>
-        <Link href={href(shift(month, 1))} className="rounded-r-lg px-3 py-2 text-sm hover:bg-surface-2" aria-label={`Next month, ${label(shift(month, 1))}`} scroll={false}>
-          →
+        <Link href={href(shift(month, 1))} aria-label={`Next month, ${label(shift(month, 1))}`} scroll={false}>
+          <Chevron d="m9 6 6 6-6 6" />
         </Link>
       </div>
       {month !== current && (
-        <Link href={href(current)} className={cx(buttonClass("ghost", "sm"))} scroll={false}>
+        <Link href={href(current)} className={buttonClass("ghost", "sm")} scroll={false}>
           Back to this month
         </Link>
       )}

@@ -11,7 +11,10 @@ const OPTIONS: { value: Theme; label: string }[] = [
   { value: "dark", label: "Dark" },
 ];
 
-/** Auto follows the phone's day/night setting; Light or Dark sticks on this device. */
+/**
+ * Auto follows the phone's day/night setting; Light or Dark sticks on this device.
+ * Drawn as `.seg` (globals.css): three quiet text buttons, the chosen one reads like the current sidebar row.
+ */
 export function ThemeChoice({ className }: { className?: string }) {
   const [theme, setTheme] = useState<Theme>("auto");
 
@@ -34,7 +37,7 @@ export function ThemeChoice({ className }: { className?: string }) {
   }
 
   return (
-    <div role="radiogroup" aria-label="Appearance" className={cx("grid grid-cols-3 gap-1 rounded-lg bg-surface-2 p-1", className)}>
+    <div role="radiogroup" aria-label="Appearance" className={cx("seg", className)}>
       {OPTIONS.map((o) => (
         <button
           key={o.value}
@@ -42,10 +45,6 @@ export function ThemeChoice({ className }: { className?: string }) {
           role="radio"
           aria-checked={theme === o.value}
           onClick={() => choose(o.value)}
-          className={cx(
-            "min-h-9 rounded-md px-2 text-xs font-medium",
-            theme === o.value ? "bg-surface text-text shadow-sm" : "text-muted hover:text-text",
-          )}
         >
           {o.label}
         </button>

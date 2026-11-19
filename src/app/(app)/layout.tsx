@@ -24,7 +24,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   const inactiveCount = businesses.length - active.length;
   const toNav = (c: (typeof everyone)[number]) => ({ id: c.id, name: c.name, location: c.location, kind: c.kind });
   return (
-    <div className="flex min-h-dvh flex-col md:flex-row">
+    <div className="shell">
       <Sidebar
         user={user}
         creator={creator ? toNav(creator) : null}
@@ -33,9 +33,10 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         counts={counts}
         phoneTab={assigneeFor(user) === "cameron" ? "tasks" : "calendar"}
       />
-      {/* On phones the bottom tab bar is fixed; --tabbar-h keeps the last row of content above it. */}
-      <main className="min-w-0 flex-1 pt-5 pb-[calc(var(--tabbar-h)_+_1.5rem)] pl-[max(1rem,env(safe-area-inset-left))] pr-[max(1rem,env(safe-area-inset-right))] md:px-8 md:py-8 xl:px-10">
-        <div className="mx-auto max-w-7xl">
+      {/* .shell-main pads the page (44 / 56 / 64px on desktop; on phones 16px sides and room for the fixed tab bar,
+          via --tabbar-h). Content is left-aligned and at most 1080px wide (.shell-page). */}
+      <main className="shell-main">
+        <div className="shell-page">
           {/* Inbox / Outreach / Insights tabs on their member pages (renders nothing elsewhere). */}
           <SectionTabs counts={{ newAsks: counts.newAsks, needsReview: counts.needsReview }} hideReview={!drafts} />
           {children}

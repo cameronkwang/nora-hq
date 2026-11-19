@@ -1,0 +1,203 @@
+/* STARTING POINT, carried over from the first Ink attempt (built on an older main): the classes its pages used. Today's
+   pages do not use them yet; the home_inbox page step ports the pages onto them, changes them freely, and deletes what
+   it does not need. */
+/* Home, Inbox, Review, Asks. Rules here sit in the "pages" layer: above the shared classes in globals.css,
+   below Tailwind utilities. Only layout that a shared class or a utility cannot say lives here. */
+@layer pages {
+  /* ============================================================ HOME */
+
+  /* Composer: one field that grows as you type, then who it is for, the photo button and Send on one line. */
+  .composer { margin-bottom: 28px; }
+  .composer-input {
+    min-height: var(--control-h);
+    padding: calc((var(--control-h) - var(--leading-base) - 2px) / 2) 12px;
+    font-size: var(--text-base); line-height: var(--leading-base); resize: none;
+  }
+  .composer-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 8px; }
+  .composer-bar > [role="radiogroup"] { display: contents; }   /* the chips and the buttons share one wrapping line */
+  .composer-actions { display: flex; align-items: center; gap: 4px; margin-left: auto; }
+  .composer-icon { width: var(--control-h); padding: 0; }           /* a square ghost button around one icon */
+  .composer-icon svg { width: 20px; height: 20px; stroke-width: 1.6; }
+  .composer-files { display: flex; flex-wrap: wrap; gap: 4px 16px; margin-top: 6px; }
+  .composer-files li { display: inline-flex; align-items: center; gap: 2px; max-width: 100%; font-size: var(--text-sm); color: var(--muted); }
+  .composer-msg { margin-top: 8px; }
+  .composer-msg:empty { display: none; }
+  @media (max-width: 767px), (pointer: coarse) {
+    .composer-bar { gap: 0 8px; margin-top: 4px; }             /* the chips are 44px tall here and bring their own air */
+    .composer-msg { margin-top: 4px; }
+  }
+  @media (max-width: 767px) { .composer { margin-bottom: 20px; } }
+
+  /* Notes above the health strip read as rows of the same ruled list: the strip's top hairline closes them. */
+  .home-notes > .notice { border-bottom: 0; }
+  .home-notes > .notice + .notice { border-top: var(--rule); }
+  .home-notes > .notice:last-child { border-bottom: var(--rule); }   /* no strip under it (no businesses yet) */
+
+  /* Health strip: one row per business, a dot and words. */
+  .health-row { display: grid; grid-template-columns: 16rem minmax(0, 1fr) 14px; column-gap: 16px; }
+  .health-row .status { white-space: normal; }
+
+  /* To approve and For you share their right-hand columns (business, when) with the task rows
+     (.task-link in calendar-tasks.css), so the lists line up. Keep the two column templates equal. */
+  .approve-row { display: grid; grid-template-columns: minmax(0, 1fr) 10.5rem 6.75rem 14px; column-gap: 16px; align-items: baseline; }
+  .approve-row .row-meta { display: contents; }
+  .approve-row .where { grid-column: 2; overflow: hidden; text-overflow: ellipsis; }
+  .approve-row .when { grid-column: 3; text-align: right; }
+  .approve-row .chev { grid-column: 4; }
+  .approve-main { min-width: 0; }
+  .approve-note { margin-left: 8px; font-weight: 400; }
+  .approve-main.is-clamp { display: flex; align-items: baseline; }            /* free text: one line, then the fact */
+  .approve-main.is-clamp .row-title { flex: 0 1 auto; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .approve-main.is-clamp .approve-note { flex: none; margin-left: 12px; }             /* one more fact after a row's title (its kind, who asked) */
+  /* Two lists under one title (asks, then tasks): the hairline carries on between them. */
+  .approve-stack > * + * { border-top: var(--rule); }
+
+  /* Nora's week: an agenda. Day in the margin, visits beside it. Never an amount. */
+  .agenda > li { display: grid; grid-template-columns: 4.75rem minmax(0, 1fr); align-items: baseline; }
+  .agenda > li + li { border-top: var(--rule); }
+  .day-date { display: flex; align-items: baseline; gap: 4px; }
+  .day-date .dow { width: 2.125rem; }                        /* fixed, so the day numerals form a column */
+  .day-date .dom { font-family: var(--font-display); font-size: 1.5rem; line-height: 1; font-weight: 450; font-variant-numeric: lining-nums; letter-spacing: -0.01em; }
+  .is-today .day-date .dow { color: var(--text); }
+  .is-today .day-date .dom { color: var(--accent); }        /* a red-letter day */
+  .agenda .row { column-gap: 12px; }
+  .reel { font-size: var(--text-sm); white-space: nowrap; }
+  .reel.is-later { color: var(--muted); }
+
+  /* Businesses: a ledger. Name (and what is waiting there), then this month's plan, open tasks and views. */
+  .ledger-row { display: grid; grid-template-columns: minmax(0, 1fr) 11.5rem 6.5rem 9.75rem; column-gap: 16px; align-items: baseline; min-height: var(--row-h); padding: calc((var(--row-h) - var(--leading-base)) / 2) 0; }
+  .ledger-main { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 16px; min-width: 0; }
+  .ledger-name { min-width: 0; overflow-wrap: anywhere; }
+  .ledger-name .row-title { font-weight: 500; }
+  .ledger-name a.row-title:hover { text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 3px; }
+  .ledger-name .meta { margin-left: 8px; }
+  .ledger-wait { font-size: var(--text-sm); }
+  .ledger-stats { display: contents; }                        /* columns here; one dotted line when the row stacks */
+  .ledger-stats b { font-weight: 600; color: var(--text); }
+  .ledger-plan { display: inline-flex; align-items: baseline; gap: 8px; min-width: 0; }
+  .ledger-plan .meter, .ledger-plan .bar { flex: none; width: 4.5rem; align-self: center; }
+  .ledger-views { text-align: right; }
+
+  /* Narrow (phones, tablets, small windows): rows become two lines, title then one quiet line of meta. */
+  @media (max-width: 1199px) {
+    .ledger-row { display: block; padding: 10px 0; }
+    .ledger-stats { line-height: 1.375rem; }
+    .ledger-plan { display: block; }
+    .ledger-plan .meter, .ledger-plan .bar { display: none; }      /* the words say it: "Plan 0 of 29" */
+    .ledger-views { text-align: left; }
+  }
+  @media (max-width: 1023px) {
+    /* Name left, status right while both fit on the line; when they don't (a long name, a small phone), the status
+       drops under the name as the row's second line instead of squeezing the name into a narrow column. */
+    .health-row { display: flex; flex-wrap: wrap; justify-content: space-between; column-gap: 12px; }
+    .health-row .chev { display: none; }
+    .health-row .row-title { flex: 0 1 auto; }
+    .health-row .status { flex: 0 1 auto; min-width: 0; }
+
+    .approve-row { grid-template-columns: minmax(0, 1fr) 14px; column-gap: 12px; padding: 10px 0; }
+    .approve-row .approve-main { grid-column: 1; }
+    .approve-main.is-clamp { display: block; }
+    .approve-main.is-clamp .row-title { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; white-space: normal; }
+    .approve-row .row-meta { line-height: 1.375rem; grid-column: 1; grid-row: 2; }
+    .approve-row .where { overflow: visible; }
+    .approve-row .when { text-align: left; }
+    .approve-row .chev { grid-column: 2; grid-row: 1 / span 2; }
+  }
+  @media (max-width: 767px) {
+    .agenda > li { grid-template-columns: 5.5rem minmax(0, 1fr); }
+    .day-date .dow { width: 2.375rem; }
+  }
+  @media (max-width: 767px), (pointer: coarse) {
+    .ledger-wait a { display: inline-flex; align-items: center; min-height: 2.75rem; }   /* each one is its own tap target */
+    .ledger-wait > *::before { top: 50%; transform: translateY(-50%); }                  /* so the dot stays on the text's line */
+  }
+
+  /* Facts on one line, joined by middle dots. When the line wraps, a new line never starts with a dot: every item
+     carries its dot in 16px of left padding and the container hides that strip at the start of each line. */
+  .ledger-wait { display: flex; flex-wrap: wrap; align-items: baseline; margin-left: -16px; clip-path: inset(-8px -8px -8px 16px); }
+  .ledger-wait > * { position: relative; padding-left: 16px; }
+  .ledger-wait > *::before { content: "·"; position: absolute; left: 0; width: 16px; text-align: center; color: var(--muted); font-weight: 400; }
+  @media (max-width: 1199px) {
+    .ledger-stats { display: flex; flex-wrap: wrap; align-items: baseline; margin-left: -16px; clip-path: inset(-8px -8px -8px 16px); }
+    .ledger-stats > * { position: relative; padding-left: 16px; }
+    .ledger-stats > *::before { content: "·"; position: absolute; left: 0; width: 16px; text-align: center; color: var(--muted); font-weight: 400; }
+  }
+  @media (max-width: 1023px) {
+    .approve-row .row-meta { display: flex; flex-wrap: wrap; align-items: baseline; margin-left: -16px; clip-path: inset(-8px -8px -8px 16px); }
+    .approve-row .row-meta > * { position: relative; padding-left: 16px; }
+    .approve-row .row-meta > *::before { content: "·"; position: absolute; left: 0; width: 16px; margin: 0; text-align: center; color: var(--muted); font-weight: 400; }
+  }
+
+  /* ============================================================ ASKS */
+
+  /* A choice chip that wraps a radio (New ask): checked is ink, like any selected chip. */
+  .ask-chips .chip:has(input:checked) > span { background: var(--text); border-color: var(--text); color: var(--bg); }
+  .ask-chips .chip:has(input:focus-visible) { outline: var(--focus-ring); outline-offset: 2px; }
+  .ask-chips .chip[disabled] { cursor: default; }
+  fieldset[disabled] .ask-chips .chip { opacity: 0.45; pointer-events: none; }
+
+  /* The asks list: each ask is a few lines between hairlines (who and when, the words, the latest reply, what next). */
+  .ask-item { padding: 14px 0; }
+  .ask-body { display: block; white-space: pre-wrap; overflow-wrap: anywhere; text-decoration: none; }
+  .ask-body:hover { text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 3px; }
+  .ask-foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 16px; margin-top: 10px; }
+  .ask-facts { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 14px; }
+  /* Phones: the facts, then the moves on a line of their own, always in the same place. */
+  @media (max-width: 767px) { .ask-foot { flex-direction: column; align-items: flex-start; } }
+
+  /* Something quoted (the latest reply, a review, a note): a hairline down its left side, no fill. */
+  .ask-quote { display: block; border-left: 2px solid var(--border); padding-left: 12px; text-decoration: none; }
+  a.ask-quote:hover { border-left-color: var(--border-strong); }
+
+  /* The conversation on an ask: a transcript. Who and when, then the words; hairlines between. */
+  .ask-thread > li { padding: 12px 0; }
+  .ask-who { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 10px; margin-bottom: 2px; font-size: var(--text-sm); }
+  .ask-who b { font-weight: 600; }
+
+  /* A bar that stays in reach while its page scrolls (reply box, Send): solid paper with a hairline on top, like the
+     tab bar it sits above. No blur, no shadow. */
+  .ask-bar { position: sticky; bottom: var(--tabbar-h); z-index: 20; background: var(--bg); border-top: var(--rule); padding: 10px 0; }
+  .queue-bar { background: var(--bg); border-top: var(--rule); }
+  @media (max-width: 767px) {
+    .ask-bar { margin-inline: calc(-1 * max(1rem, env(safe-area-inset-left))) calc(-1 * max(1rem, env(safe-area-inset-right))); padding-inline: max(1rem, env(safe-area-inset-left)) max(1rem, env(safe-area-inset-right)); }
+  }
+  @media (min-width: 768px) { .ask-bar { bottom: 0; padding-bottom: 16px; } }
+
+  /* A quiet disclosure line ("Send back to Claude…", "Add a task for this ask"): a small chevron and muted words. */
+  .inbox-disclose { display: flex; align-items: center; gap: 8px; width: fit-content; min-height: 1.75rem; font-size: var(--text-sm); font-weight: 500; color: var(--muted); cursor: pointer; list-style: none; border-radius: var(--radius-xs); user-select: none; }
+  .inbox-disclose::-webkit-details-marker { display: none; }
+  .inbox-disclose::before { content: ""; flex: none; width: 6px; height: 6px; margin: 0 2px; border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor; transform: rotate(-45deg); }
+  details[open] > .inbox-disclose::before { transform: translateY(-2px) rotate(45deg); }
+  .inbox-disclose:hover, details[open] > .inbox-disclose { color: var(--text); }
+  @media (max-width: 767px), (pointer: coarse) { .inbox-disclose { min-height: 2.75rem; font-size: 0.9375rem; } }
+
+  /* ============================================================ REVIEW */
+
+  /* A draft is a section of its own: ink rule, serif title, one line of facts, then what it answers and the text. */
+  .draft-card { border-top: var(--rule-ink); padding-top: 12px; scroll-margin-top: 5rem; }
+  .draft-facts { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 14px; margin-top: 4px; }
+  .draft-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 20px 48px; margin-top: 16px; }
+  /* Side by side from 1200px (like .cols); below that the context sits above the text instead of squeezing it. */
+  @media (min-width: 1200px) { .draft-grid.has-context { grid-template-columns: minmax(0, 2fr) minmax(0, 3fr); } }
+  .draft-list { display: flex; flex-direction: column; gap: var(--space-10); }
+  @media (max-width: 767px) { .draft-list { gap: var(--space-8); } }
+  /* Facts about what a draft answers: a small ledger, labels in one column and values in the next. */
+  .draft-kv { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 4px 16px; font-size: var(--text-sm); }
+  .draft-kv > div { display: contents; }
+  .draft-kv dt { color: var(--muted); }
+  .draft-kv dd { min-width: 0; overflow-wrap: anywhere; font-weight: 500; }
+  /* The card the keyboard is on (J / K): an ink mark in the margin. */
+  @media (min-width: 768px) {
+    .draft-current { position: relative; }
+    .draft-current::before { content: ""; position: absolute; left: -14px; top: 0; bottom: 0; width: 2px; background: var(--text); }
+  }
+
+  /* Send mode: one row per account to send as. The count that is waiting comes last. */
+  .send-pick { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; width: 100%; min-height: 3.5rem; padding: 12px 0; text-align: left; cursor: pointer; }
+  .send-pick:hover .row-title { text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 3px; }
+  /* A status inside a sentence (a flagged fact in a line of facts): the dot sits in the text and the words wrap. */
+  .status.is-run { display: inline; white-space: normal; }
+  .status.is-run::before { display: inline-block; margin-right: 6px; vertical-align: middle; transform: translateY(-1px); }
+  /* A fixed-size picture of an attachment. */
+  .ask-thumb { display: block; overflow: hidden; border: var(--rule); border-radius: var(--radius-sm); background: var(--surface-2); }
+}

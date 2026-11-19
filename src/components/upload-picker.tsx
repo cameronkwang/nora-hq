@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useId, useMemo, useRef } from "react";
-import { cx } from "./ui";
+import { buttonClass, cx } from "./ui";
 
 export type UploadedFile = { url: string; name: string; contentType?: string };
 
@@ -80,12 +80,9 @@ export function UploadPicker({
       />
       <label
         htmlFor={id}
-        className={cx(
-          "inline-flex cursor-pointer items-center gap-2 rounded-lg border border-dashed border-border bg-surface px-3.5 py-2 text-sm font-medium hover:bg-surface-2",
-          disabled && "pointer-events-none opacity-50",
-        )}
+        className={cx(buttonClass("secondary"), disabled && "pointer-events-none opacity-50")}
       >
-        <span aria-hidden className="text-base leading-none">+</span> {label}
+        <span aria-hidden>+</span> {label}
       </label>
       {previews.length > 0 && (
         <ul className="mt-3 flex flex-wrap gap-2">
@@ -111,7 +108,7 @@ export function UploadPicker({
                   disabled={disabled}
                   onClick={() => onChange(files.filter((_, j) => j !== i))}
                   aria-label={`Remove ${f.name}`}
-                  className="absolute -right-1.5 -top-1.5 flex size-6 items-center justify-center rounded-full border border-border bg-surface text-xs shadow-sm hover:bg-surface-2"
+                  className="tap-target absolute -right-1.5 -top-1.5 flex size-6 items-center justify-center rounded-full border border-border-strong bg-surface text-xs hover:border-text"
                 >
                   ✕
                 </button>
