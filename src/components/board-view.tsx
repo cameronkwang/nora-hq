@@ -5,7 +5,7 @@ import { useOptimistic, useState, useTransition } from "react";
 import { editTaskField } from "@/app/(app)/tasks/actions";
 import { TASK_STATUSES } from "@/lib/schema";
 import type { TaskLite } from "./task-table";
-import { PlatformTag, cx, humanize } from "./ui";
+import { PlatformTag, Status, cx, humanize, type Tone } from "./ui";
 
 const LABEL: Record<string, string> = {
   todo: "To do",
@@ -14,12 +14,12 @@ const LABEL: Record<string, string> = {
   blocked: "Blocked",
   done: "Done",
 };
-const DOT: Record<string, string> = {
-  todo: "bg-muted",
-  in_progress: "bg-info",
-  needs_review: "bg-warn",
-  blocked: "bg-danger",
-  done: "bg-ok",
+const TONE: Record<string, Tone> = {
+  todo: "neutral",
+  in_progress: "info",
+  needs_review: "warn",
+  blocked: "danger",
+  done: "ok",
 };
 
 function shortDate(d: string) {
@@ -28,7 +28,8 @@ function shortDate(d: string) {
 
 /**
  * Kanban board. Desktop (lg+): five columns, drag a card to another column (native HTML5 drag & drop),
- * or use the status select on the card. Phone/tablet: one column at a time with a status switcher.
+ * or use the status select on the card. Phone/tablet: one column at a time with underline tabs to switch.
+ * Columns are plain lists on hairlines (an ink rule and a caps label on top); a card is a row you can drag.
  * Moves are optimistic; the server action revalidates the page.
  */
 export function BoardView({ tasks, today, olderDone, olderDoneHref, doneDays }: { tasks: TaskLite[]; today: string; olderDone: number; olderDoneHref: string; doneDays: number }) {
@@ -74,20 +75,15 @@ export function BoardView({ tasks, today, olderDone, olderDoneHref, doneDays }: 
         setDragging(null);
         if (id) setStatus(id, c.status);
       }}
-      className={cx(
-        "flex min-w-0 flex-col rounded-xl border bg-surface-2/60 transition-colors",
-        over === c.status ? "border-accent bg-accent-soft/50" : "border-transparent",
-        !phone && "min-h-48",
-      )}
+      className={cx("board-col", over === c.status && "is-over")}
     >
       {!phone && (
-        <header className="flex items-center gap-2 px-3 pb-1 pt-3 text-sm font-semibold">
-          <span aria-hidden className={cx("size-2 rounded-full", DOT[c.status])} />
-          {LABEL[c.status]}
-          <span className="font-normal text-muted">{c.tasks.length}</span>
+        <header className="board-head">
+          <Status tone={TONE[c.status]} className="eyebrow text-text">{LABEL[c.status]}</Status>
+          <span className="num">{c.tasks.length}</span>
         </header>
       )}
-      <div className="flex flex-col gap-2 p-2">
+      <div className="board-cards">
         {c.tasks.map((t) => (
           <BoardCard
             key={t.id}
@@ -103,12 +99,12 @@ export function BoardView({ tasks, today, olderDone, olderDoneHref, doneDays }: 
           />
         ))}
         {c.tasks.length === 0 && (
-          <p className="rounded-lg border border-dashed border-border px-3 py-6 text-center text-xs text-muted">
+          <p className="meta py-3">
             {c.status === "done" ? `Nothing finished in the last ${doneDays} days.` : phone ? "Nothing here." : "Drop tasks here"}
           </p>
         )}
         {c.status === "done" && olderDone > 0 && (
-          <Link href={olderDoneHref} className="rounded-lg px-3 py-2 text-center text-xs text-muted hover:bg-surface hover:text-text">
+          <Link href={olderDoneHref} className="board-more">
             + {olderDone} done earlier
           </Link>
         )}
@@ -119,41 +115,30 @@ export function BoardView({ tasks, today, olderDone, olderDoneHref, doneDays }: 
   return (
     <div>
       {error && (
-        <p role="alert" className="mb-3 rounded-lg bg-danger-soft px-3 py-2 text-sm text-danger">{error}</p>
+        <p role="alert" className="notice mb-4">
+          <Status tone="danger" className="whitespace-normal">{error}</Status>
+        </p>
       )}
       <p className="sr-only" aria-live="polite">{announce}</p>
 
       {/* Phone / tablet: one column at a time */}
       <div className="lg:hidden">
-        <div className="relative -mx-4 mb-3 overflow-x-auto px-4 [scrollbar-width:none]">
-          <div role="tablist" aria-label="Status" className="inline-flex gap-1 rounded-xl bg-surface-2 p-1">
-            {cols.map((c) => {
-              const on = mobileCol === c.status;
-              return (
-                <button
-                  key={c.status}
-                  type="button"
-                  role="tab"
-                  aria-selected={on}
-                  onClick={() => setMobileCol(c.status)}
-                  className={cx(
-                    "inline-flex min-h-11 items-center gap-1.5 whitespace-nowrap rounded-lg px-3 text-sm font-medium",
-                    on ? "bg-surface text-text shadow-sm" : "text-muted",
-                  )}
-                >
-                  <span aria-hidden className={cx("size-2 rounded-full", DOT[c.status])} />
-                  {LABEL[c.status]}
-                  <span className={cx("tabular-nums", on ? "text-muted" : "")}>{c.tasks.length}</span>
-                </button>
-              );
-            })}
-          </div>
+        <div role="tablist" aria-label="Status" className="tabs board-tabs mb-1">
+          {cols.map((c) => {
+            const on = mobileCol === c.status;
+            return (
+              <button key={c.status} type="button" role="tab" aria-selected={on} onClick={() => setMobileCol(c.status)}>
+                <Status tone={TONE[c.status]} className="text-inherit">{LABEL[c.status]}</Status>
+                <span className="num font-normal text-muted">{c.tasks.length}</span>
+              </button>
+            );
+          })}
         </div>
         <div role="tabpanel">{column(cols.find((c) => c.status === mobileCol)!, true)}</div>
       </div>
 
       {/* Desktop: all five columns */}
-      <div className="relative hidden gap-3 overflow-x-auto pb-1 lg:grid lg:grid-cols-[repeat(5,minmax(12.5rem,1fr))]">{cols.map((c) => column(c, false))}</div>
+      <div className="board relative hidden lg:grid">{cols.map((c) => column(c, false))}</div>
     </div>
   );
 }
@@ -164,7 +149,6 @@ function BoardCard({
   const done = t.status === "done";
   const overdue = !!t.dueDate && !done && t.dueDate < today;
   const dueToday = !!t.dueDate && !done && t.dueDate === today;
-  const initial = t.assignee === "unassigned" ? null : t.assignee[0].toUpperCase();
   return (
     <article
       draggable
@@ -175,38 +159,30 @@ function BoardCard({
         onDragStart();
       }}
       onDragEnd={onDragEnd}
-      className={cx(
-        "group rounded-lg border border-border bg-surface p-3 shadow-sm transition lg:cursor-grab lg:active:cursor-grabbing",
-        dragging && "opacity-40",
-      )}
+      className={cx("board-card", dragging && "is-dragging", done && "is-done")}
     >
-      <Link href={`/tasks/${t.id}`} draggable={false} className={cx("block break-words text-sm font-medium hover:underline", done && "text-muted line-through")}>
+      <Link href={`/tasks/${t.id}`} draggable={false} className="row-title tap-target break-words">
         {t.title}
       </Link>
-      {t.clientName && <p className="mt-1 truncate text-xs text-muted">{t.clientName}</p>}
-      <div className="mt-2 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-xs">
-        <PlatformTag platform={t.platform} />
+      {/* The facts, a "·" after each; the spaces between them are where the line may break. */}
+      <p className="facts-line">
+        {t.clientName && <span className="whitespace-normal! break-words">{t.clientName}</span>}{" "}
+        {t.platform && (
+          <span>
+            <PlatformTag platform={t.platform} inherit />
+          </span>
+        )}{" "}
+        {t.assignee !== "unassigned" && <span aria-label={`Assigned to ${humanize(t.assignee)}`}>{humanize(t.assignee)}</span>}{" "}
         {t.dueDate && (
-          <span className={cx("text-muted", overdue && "font-semibold text-danger!", dueToday && "font-semibold text-warn!")}>
+          <span className={cx("due", overdue && "is-over", dueToday && "is-today")}>
             {overdue ? "Overdue · " : dueToday ? "Today · " : ""}
             {shortDate(t.dueDate)}
           </span>
         )}
-        <span className="ml-auto flex items-center gap-2">
-          {initial && (
-            <span title={humanize(t.assignee)} aria-label={`Assigned to ${humanize(t.assignee)}`} className="flex size-6 items-center justify-center rounded-full bg-accent-soft text-[11px] font-semibold text-accent">
-              {initial}
-            </span>
-          )}
-        </span>
-      </div>
-      <label className="mt-2 block">
+      </p>
+      <label className="block">
         <span className="sr-only">Status of “{t.title}”</span>
-        <select
-          value={t.status}
-          onChange={(e) => onStatus(e.currentTarget.value)}
-          className="w-full cursor-pointer rounded-md border border-border bg-surface px-2 py-1 text-xs text-muted hover:text-text lg:border-transparent lg:bg-surface-2/60 lg:group-hover:border-border pointer-coarse:min-h-11"
-        >
+        <select value={t.status} onChange={(e) => onStatus(e.currentTarget.value)} className="input board-status">
           {TASK_STATUSES.map((s) => (
             <option key={s} value={s}>{LABEL[s]}</option>
           ))}

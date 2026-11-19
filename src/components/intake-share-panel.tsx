@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useState, useTransition, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { copyIntakeLinkAction, createIntakeLinkAction, revokeIntakeAction } from "@/app/(app)/clients/[id]/intake/actions";
 import { INTAKE_COPY, INTAKE_LANG_CODES } from "@/lib/intake-copy";
@@ -13,8 +13,19 @@ export type IntakeCardStatus =
   | { kind: "sent" | "opened"; id: string; line: string }
   | { kind: "submitted"; id: string };
 
-/** Buttons + link + ready-to-paste messages for the business page's onboarding form card. */
-export function IntakeSharePanel({ clientId, clientName, status }: { clientId: string; clientName: string; status: IntakeCardStatus }) {
+function Chevron() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <path d="m9 6 6 6-6 6" />
+    </svg>
+  );
+}
+
+/**
+ * Buttons + link + ready-to-paste messages for the business page's onboarding form section.
+ * `lead` is put first in the row of buttons (the section passes "View answers" once the form is back).
+ */
+export function IntakeSharePanel({ clientId, clientName, status, lead }: { clientId: string; clientName: string; status: IntakeCardStatus; lead?: ReactNode }) {
   const router = useRouter();
   const [pending, start] = useTransition();
   const [url, setUrl] = useState<string | null>(null);
@@ -55,25 +66,26 @@ export function IntakeSharePanel({ clientId, clientName, status }: { clientId: s
     });
 
   return (
-    <div className="space-y-3">
-      {(status.kind === "off" || live) && <p className="text-sm">{status.line}</p>}
+    <div>
+      {(status.kind === "off" || live) && <p className="mb-3">{status.line}</p>}
 
-      <div className="flex flex-wrap gap-2">
+      <div className="flex flex-wrap items-center gap-2">
+        {lead}
         {status.kind === "none" || status.kind === "off" ? (
-          <button type="button" disabled={pending} onClick={make} className={buttonClass("primary")}>
+          <button type="button" disabled={pending} onClick={make} className={buttonClass("secondary")}>
             {pending ? "Making link…" : status.kind === "none" ? "Send onboarding form" : "Send a new link"}
           </button>
         ) : null}
         {live && !url && (
-          <button type="button" disabled={pending} onClick={show} className={buttonClass("primary")}>
+          <button type="button" disabled={pending} onClick={show} className={buttonClass("secondary")}>
             {pending ? "Loading…" : "Copy link & message"}
           </button>
         )}
         {live && (
-          <>
+          <div className="-ml-2 flex flex-wrap items-center gap-x-1 gap-y-1">
             {confirmNew ? (
-              <button type="button" disabled={pending} onClick={make} className={buttonClass("secondary")}>
-                Yes — make a new link (old one stops working)
+              <button type="button" disabled={pending} onClick={make} className={cx(buttonClass("secondary"), "btn-wrap ml-2")}>
+                Yes, make a new link (old one stops working)
               </button>
             ) : (
               <button type="button" disabled={pending} onClick={() => setConfirmNew(true)} className={buttonClass("ghost")}>
@@ -83,45 +95,47 @@ export function IntakeSharePanel({ clientId, clientName, status }: { clientId: s
             <button type="button" disabled={pending} onClick={revoke} className={cx(buttonClass("ghost"), "text-danger")}>
               Turn off
             </button>
-          </>
+          </div>
         )}
         {status.kind === "submitted" && (
           confirmNew ? (
-            <button type="button" disabled={pending} onClick={make} className={buttonClass("secondary", "sm")}>
+            <button type="button" disabled={pending} onClick={make} className={buttonClass("secondary")}>
               Yes — send a fresh form
             </button>
           ) : (
-            <button type="button" disabled={pending} onClick={() => setConfirmNew(true)} className={buttonClass("ghost", "sm")}>
+            <button type="button" disabled={pending} onClick={() => setConfirmNew(true)} className={buttonClass("ghost")}>
               Send another form
             </button>
           )
         )}
       </div>
 
-      {error && <p role="alert" className="text-sm text-danger">{error}</p>}
+      {error && <p role="alert" className="status is-danger is-small mt-2 flex whitespace-normal">{error}</p>}
 
       {url && (
-        <div className="space-y-3 rounded-lg border border-border p-3">
+        <div className="share-box">
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-            <input readOnly value={url} aria-label="Onboarding form link" className="input min-w-0 flex-1 font-mono text-xs" onFocus={(e) => e.currentTarget.select()} />
-            <CopyButton text={url} label="Copy link" variant="primary" />
+            <input readOnly value={url} aria-label="Onboarding form link" className="input min-w-0 font-mono sm:flex-1" onFocus={(e) => e.currentTarget.select()} />
+            <CopyButton text={url} label="Copy link" />
           </div>
-          <p className="text-xs text-muted">Private to this client — anyone with the link can fill it in. Paste one of these into a text or WeChat:</p>
-          {INTAKE_LANG_CODES.map((code) => {
-            const msg = INTAKE_COPY[code].share.message(clientName, url);
-            return (
-              <details key={code} className="group rounded-lg bg-surface-2 px-3 py-2" open={code === "en"}>
-                <summary className="flex min-h-10 cursor-pointer list-none items-center justify-between gap-2 text-sm font-medium">
-                  <span>Message · {INTAKE_COPY[code].share.label}</span>
-                  <span aria-hidden className="text-muted group-open:rotate-90">›</span>
-                </summary>
-                <p lang={INTAKE_COPY[code].htmlLang} className="mt-2 whitespace-pre-wrap text-sm leading-relaxed">{msg}</p>
-                <div className="mt-2">
-                  <CopyButton text={msg} label="Copy message" size="sm" />
-                </div>
-              </details>
-            );
-          })}
+          <p className="hint">Private to this client: anyone with the link can fill it in. Paste one of these into a text or WeChat:</p>
+          <div className="share-msgs">
+            {INTAKE_LANG_CODES.map((code) => {
+              const msg = INTAKE_COPY[code].share.message(clientName, url);
+              return (
+                <details key={code} open={code === "en"}>
+                  <summary>
+                    <span>Message · {INTAKE_COPY[code].share.label}</span>
+                    <Chevron />
+                  </summary>
+                  <p lang={INTAKE_COPY[code].htmlLang}>{msg}</p>
+                  <div>
+                    <CopyButton text={msg} label="Copy message" size="sm" />
+                  </div>
+                </details>
+              );
+            })}
+          </div>
         </div>
       )}
     </div>

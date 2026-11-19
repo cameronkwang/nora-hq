@@ -1,12 +1,12 @@
 "use client";
 
 import Link from "next/link";
-import { cx } from "./ui";
+import { buttonClass, cx } from "./ui";
 
 export type ViewOption = { value: string; label: string; href: string };
 
 /**
- * Segmented List / Board / Table switch. Plain links (the URL is the source of truth);
+ * List / Board / Table switch. Plain links (the URL is the source of truth);
  * clicking also remembers the choice in a cookie so /tasks opens the same way next time.
  */
 export function ViewToggle({ options, current, cookieName, label = "View" }: { options: ViewOption[]; current: string; cookieName: string; label?: string }) {
@@ -18,7 +18,7 @@ export function ViewToggle({ options, current, cookieName, label = "View" }: { o
     }
   };
   return (
-    <div className="inline-flex rounded-lg bg-surface-2 p-1" role="group" aria-label={label}>
+    <div className="inline-flex gap-1" role="group" aria-label={label}>
       {options.map((o) => {
         const on = o.value === current;
         return (
@@ -27,13 +27,13 @@ export function ViewToggle({ options, current, cookieName, label = "View" }: { o
             href={o.href}
             onClick={() => remember(o.value)}
             aria-current={on ? "page" : undefined}
-            className={cx(
-              "inline-flex min-h-9 items-center gap-1.5 rounded-md px-3 text-sm font-medium transition pointer-coarse:min-h-11",
-              on ? "bg-surface text-text shadow-sm" : "text-muted hover:text-text",
-            )}
+            // Quiet text buttons; the current one reads like the current sidebar row (surface-2, ink, 600).
+            // On a phone only the icon shows (the label stays for screen readers), so the page head keeps to one row.
+            className={cx(buttonClass("ghost", "sm"), "max-md:min-w-11 max-md:justify-center max-md:px-0", on && "bg-surface-2 font-semibold text-text")}
+            title={o.label}
           >
             <ViewIcon view={o.value} />
-            {o.label}
+            <span className="max-md:sr-only">{o.label}</span>
           </Link>
         );
       })}

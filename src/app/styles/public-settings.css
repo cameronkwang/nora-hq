@@ -1,0 +1,124 @@
+/* Public and account pages: /login, the /start onboarding form and its preview, /collab, /drop, Settings
+   (notifications, quick capture), Activity, the 404 and error pages. /kit shares .ps-page. Rules here sit in the
+   "pages" layer: above the shared classes in globals.css, below Tailwind utilities. Every class is prefixed ps-.
+   No prefers-color-scheme here: colours are tokens, so a picked Light / Dark always wins. */
+@layer pages {
+  /* ---- Public pages (no app chrome): one column on paper, content left-aligned inside it. */
+  .ps-page {
+    min-height: 100dvh;
+    padding: max(16px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) max(40px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));
+  }
+  @media (min-width: 768px) { .ps-page { padding-top: 44px; padding-bottom: 64px; } }
+  .ps-col { width: 100%; max-width: 36rem; margin: 0 auto; }
+
+  /* Top row of the owner's pages: the serif name on the left, the language chips on the right (they wrap under it
+     on the narrowest phones). */
+  .ps-top { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px 16px; margin-bottom: 36px; }
+  /* The name is always Latin ("Nora & Cameron"), so it keeps the serif on the Chinese pages too (no CJK to mix with). */
+  .ps-mark { font-family: "Newsreader Variable", "Newsreader", "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif; font-size: 1.375rem; line-height: 1.75rem; font-weight: 500; letter-spacing: -0.01em; font-optical-sizing: auto; white-space: nowrap; }
+  .ps-top .chips { gap: 6px; }
+  @media (max-width: 767px) { .ps-mark { font-size: 1.1875rem; } .ps-top { margin-bottom: 24px; } }
+
+  /* "Step 1 of 3" with one segment per page. */
+  .ps-steps { display: flex; align-items: center; gap: 12px; margin-bottom: 20px; }
+  .ps-steps .meter { width: 5.25rem; flex: none; }
+
+  /* The page's own opening (greeting, "Got one more minute?"): the serif title and one muted line. */
+  .ps-hero .display { overflow-wrap: anywhere; }
+  .ps-hero .ps-lead { margin-bottom: 6px; font-weight: 500; }
+  .ps-hero .sub + .sub { margin-top: 4px; }
+
+  /* A question: label in ink at body size (the owner reads these as questions, not field names), help under it. */
+  .ps-q { display: block; font-weight: 500; }
+  .ps-q-help { margin-top: 2px; font-size: var(--text-sm); color: var(--muted); }
+  .ps-q-help b { font-weight: 500; color: var(--text); }
+  .ps-q + .input, .ps-q-head + .input, .ps-q-head + textarea { margin-top: 8px; }
+  .ps-q-head { margin-bottom: 8px; }
+
+  /* Choices: the ink square (or circle) and its words, a 44px (48px touch) row each. No boxes, no fills. */
+  .ps-opts { display: grid; column-gap: 28px; }
+  @media (min-width: 640px) { .ps-opts.is-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+  .ps-opts.is-wrap { display: flex; flex-wrap: wrap; column-gap: 28px; }
+  .ps-opt {
+    display: flex; align-items: flex-start; gap: 12px; min-width: 0;
+    min-height: var(--row-h); padding: calc((var(--row-h) - var(--leading-base)) / 2) 0;
+    cursor: pointer; user-select: none; -webkit-user-select: none;
+  }
+  .ps-opt .check { margin-top: 2px; }
+  @media (max-width: 767px), (pointer: coarse) { .ps-opt .check { margin-top: 1px; } }
+  .ps-opt .meta { display: block; }
+
+  /* What we found about the business: label and value on hairlines. */
+  .ps-facts > div { display: grid; grid-template-columns: 6.5rem minmax(0, 1fr); column-gap: 16px; align-items: baseline; padding: calc((var(--row-h) - var(--leading-base)) / 2) 0; }
+  .ps-facts > div + div { border-top: var(--rule); }
+  .ps-facts { border-bottom: var(--rule); }
+  .ps-facts dt { font-size: var(--text-sm); color: var(--muted); }
+  .ps-facts dd { font-weight: 500; white-space: pre-line; overflow-wrap: anywhere; }
+
+  /* A block on hairlines with no title (the access steps, the two promises on /collab). */
+  .ps-blocks > * { padding: 16px 0; }
+  .ps-blocks > * + * { border-top: var(--rule); }
+  .ps-blocks.is-ruled { border-top: var(--rule); border-bottom: var(--rule); }
+
+  /* Numbered steps: the numeral in the margin, muted, tabular. */
+  .ps-steps-list { display: grid; gap: 8px; }
+  .ps-steps-list > li { display: grid; grid-template-columns: 1.5rem minmax(0, 1fr); align-items: baseline; }
+  .ps-steps-list > li > .n { color: var(--muted); font-variant-numeric: tabular-nums; }
+
+  /* "Show me how": an ink disclosure with a faint chevron. */
+  .ps-how > summary { display: inline-flex; align-items: center; gap: 8px; min-height: 2.75rem; font-weight: 500; }
+  .ps-how > summary .chev { color: var(--faint); transition: transform 0.15s; }
+  .ps-how[open] > summary .chev { transform: rotate(90deg); }
+
+  /* Error under a field: a red dot and the words (the field's border turns red too). Wraps, unlike a status. */
+  .ps-err { white-space: normal; margin-top: 6px; }
+  .ps-err.status { color: var(--danger); }
+
+  /* The sticky action bar of the public forms (with .sticky-actions and .action-bar): on these pages there is no tab
+     bar, so it sits on the bottom edge and also covers the phone's home indicator. */
+  .ps-bar { padding: 10px 0 calc(10px + env(safe-area-inset-bottom)); }
+
+  /* Settings: rows with an action on the right; two lines on phones. */
+  .ps-row { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 6px 16px; padding: calc((var(--row-h) - var(--leading-base)) / 2) 0; }
+  .ps-row > .ps-row-main { flex: 1 1 18rem; min-width: 0; }
+  .ps-row > .ps-row-end { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; }
+  .ps-env code { font-size: 0.8125rem; font-weight: 600; }
+
+  /* Activity: one line per change on desktop (summary, business, when), two lines under 1024px. */
+  .ps-act { display: grid; grid-template-columns: minmax(0, 1fr) 10.5rem 4.75rem; column-gap: 16px; align-items: baseline; padding: calc((var(--row-h) - var(--leading-base)) / 2) 0; }
+  .ps-act .row-meta { display: contents; }
+  .ps-act .when { text-align: right; }
+  .ps-act .biz { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* The summary's link covers its whole row (a 44px+ target on touch); the business link sits above it. */
+  .ps-act { position: relative; }
+  .ps-act-link::after { content: ""; position: absolute; inset: 0; }
+  .ps-act :is(.biz, .when) { position: relative; z-index: 1; }   /* the time keeps its hover title */
+  @media (max-width: 1023px) {
+    .ps-act { display: block; }
+    .ps-act .row-meta { display: block; }
+    .ps-act .row-meta > * { display: inline; }
+    .ps-act .row-meta > :empty { display: none; }               /* no business: just the time, no leading dot */
+    .ps-act .row-meta > :empty + *::before { content: none; }
+    .ps-act .when { text-align: left; }
+    .ps-act .biz { white-space: normal; }
+  }
+
+  /* A setting's on/off switch with its words and one muted line under them. */
+  .ps-switch { position: relative; align-items: flex-start; }
+  .ps-switch .switch-track { margin-top: 1px; }
+  .ps-switch .t { display: block; }
+  .ps-switch .meta { display: block; font-weight: 400; }
+  @media (max-width: 767px), (pointer: coarse) { .ps-switch { padding: 9px 0; } .ps-switch .switch-track { margin-top: -1px; } }
+
+  /* Notifications: the "not set up" notice and this device's notice share one hairline; buttons keep their air. */
+  .notice + .ps-enable { margin-top: 16px; }
+  .notice + .ps-enable:has(> .notice:first-child) { margin-top: 0; }
+  .notice + .ps-enable > .notice:first-child { border-top: 0; }
+
+  /* Sign in: one narrow column in the middle of the screen. */
+  .ps-login { display: flex; min-height: 100dvh; align-items: center; justify-content: center; padding: 32px max(16px, env(safe-area-inset-right)) 48px max(16px, env(safe-area-inset-left)); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ps-how > summary .chev { transition: none; }
+}

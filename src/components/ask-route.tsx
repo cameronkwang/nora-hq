@@ -48,11 +48,11 @@ export function routeOf(a: Pick<Ask, "kind" | "forWho">): AskRoute {
 
 /** Small badges once an ask is sorted ("Claude", "For Cameron", "Idea", "FYI", "Question"). Nothing while unsorted. */
 export function AskRouteBadges({ ask }: { ask: Pick<Ask, "kind" | "forWho"> }) {
-  const out: Array<{ key: string; label: string; tone: "neutral" | "accent" | "info" | "ok" }> = [];
+  const out: Array<{ key: string; label: string; tone: "neutral" | "ink" | "info" | "ok" }> = [];
   if (ask.kind === "idea") out.push({ key: "k", label: "Idea", tone: "ok" });
   else if (ask.kind === "update") out.push({ key: "k", label: "FYI", tone: "neutral" });
   else if (ask.kind === "question") out.push({ key: "k", label: "Question", tone: "neutral" });
-  if (ask.forWho === "claude") out.push({ key: "f", label: "Claude is on it", tone: "accent" });
+  if (ask.forWho === "claude") out.push({ key: "f", label: "Claude is on it", tone: "ink" });
   else if (ask.forWho === "cameron") out.push({ key: "f", label: "For Cameron", tone: "info" });
   else if (ask.forWho === "nora") out.push({ key: "f", label: "For Nora", tone: "info" });
   if (!out.length) return null;

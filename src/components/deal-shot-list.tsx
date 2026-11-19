@@ -68,44 +68,29 @@ export function DealShotList({ dealId, shots, large = false, editable = false }:
   return (
     <div>
       {list.length > 0 && (
-        <p className={cx("mb-2 font-medium tabular-nums", large ? "text-base" : "text-sm", done === list.length ? "text-ok" : "text-muted")} aria-live="polite">
-          {done}/{list.length} shot{done === list.length ? " — all done" : ""}
+        <p className={cx("num", large ? "font-medium" : "meta", done === list.length && "text-text")} aria-live="polite">
+          {done}/{list.length} shot{done === list.length ? ", all done" : ""}
         </p>
       )}
       {list.length === 0 ? (
-        <p className="rounded-lg border border-dashed border-border px-4 py-6 text-center text-sm text-muted">
-          No shots yet. Claude writes one when the deal is created — or add your own below.
-        </p>
+        <div className="empty">
+          <p>No shots yet</p>
+          <p>Claude writes one when the deal is created, or add your own below.</p>
+        </div>
       ) : (
-        <ul className="divide-y divide-border overflow-hidden rounded-xl border border-border bg-surface">
+        <ul className={cx("list g-shots", large && "is-large")}>
           {list.map((s) => (
-            <li key={s.id} className="flex items-stretch">
+            <li key={s.id}>
               <button
                 type="button"
                 role="checkbox"
                 aria-checked={s.done}
                 onClick={() => toggle(s)}
                 disabled={s.id.startsWith("tmp-")}
-                className={cx(
-                  "flex flex-1 items-center gap-3 px-4 text-left transition active:bg-surface-2",
-                  large ? "min-h-14 py-3 text-[17px] leading-snug" : "min-h-12 py-2.5 text-[15px]",
-                )}
+                className="g-shot"
               >
-                <span
-                  aria-hidden
-                  className={cx(
-                    "flex shrink-0 items-center justify-center rounded-md border-2 transition",
-                    large ? "size-7" : "size-6",
-                    s.done ? "border-ok bg-ok text-surface" : "border-border bg-surface",
-                  )}
-                >
-                  {s.done && (
-                    <svg viewBox="0 0 16 16" className={large ? "size-5" : "size-4"} fill="none" stroke="currentColor" strokeWidth={2.5}>
-                      <path d="M3.5 8.5l3 3 6-7" strokeLinecap="round" strokeLinejoin="round" />
-                    </svg>
-                  )}
-                </span>
-                <span className={cx("min-w-0 flex-1 break-words", s.done && "text-muted line-through decoration-1")}>{s.text}</span>
+                <span aria-hidden className="box" />
+                <span className="t">{s.text}</span>
               </button>
               {editable && (
                 <button
@@ -113,9 +98,9 @@ export function DealShotList({ dealId, shots, large = false, editable = false }:
                   onClick={() => remove(s)}
                   disabled={s.id.startsWith("tmp-")}
                   aria-label={`Remove “${s.text}”`}
-                  className="flex w-12 shrink-0 items-center justify-center text-muted hover:text-danger"
+                  className="g-shot-x"
                 >
-                  <svg viewBox="0 0 16 16" className="size-4" fill="none" stroke="currentColor" strokeWidth={2} aria-hidden>
+                  <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={2} aria-hidden>
                     <path d="M4 4l8 8M12 4l-8 8" strokeLinecap="round" />
                   </svg>
                 </button>
@@ -140,7 +125,7 @@ export function DealShotList({ dealId, shots, large = false, editable = false }:
         />
         <button type="submit" disabled={!text.trim()} className={cx(buttonClass("secondary"), "shrink-0")}>Add</button>
       </form>
-      {error && <p role="alert" className="mt-2 text-sm text-danger">{error}</p>}
+      {error && <p role="alert" className="status is-danger is-small mt-2 whitespace-normal">{error}</p>}
     </div>
   );
 }

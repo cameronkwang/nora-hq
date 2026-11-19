@@ -15,7 +15,7 @@ import {
 } from "@/lib/onboard-services";
 import { ActionForm, SubmitButton } from "./client-form";
 import { OutreachAreasField } from "./onboard-areas";
-import { PlatformTag, cx } from "./ui";
+import { PlatformTag, humanize } from "./ui";
 
 const isFacebookUrl = (u: string) => /^(https?:\/\/)?((www|m|web)\.)?(facebook|fb)\.com\//i.test(u.trim());
 
@@ -35,7 +35,7 @@ export type OnboardPrefill = {
 export type PlanSource = { id: string; name: string; items: number };
 
 /**
- * New client — one screen, one required field. "Business name or link" also takes a pasted
+ * New client: one screen, one required field. "Business name or link" also takes a pasted
  * Instagram / TikTok / Google Maps / website link (or @handle); then it asks for the name separately.
  * The server parses the same field again, so the form works before JS loads.
  */
@@ -58,7 +58,7 @@ export function OnboardForm({ prefill = {}, planSources = [] }: { prefill?: Onbo
   const source = planSources.find((p) => p.id === copyFrom);
 
   return (
-    <ActionForm action={onboardNewClientAction} className="group/onb flex flex-col gap-5" ariaLabel="New client">
+    <ActionForm action={onboardNewClientAction} className="group/onb flex flex-col gap-6" ariaLabel="New client">
       {prefill.leadId && <input type="hidden" name="leadId" value={prefill.leadId} />}
       {/* Lead details ride along; a pasted link in the big field wins over the matching one. */}
       {prefill.instagramHandle && <input type="hidden" name="instagramHandle" value={prefill.instagramHandle} />}
@@ -79,65 +79,54 @@ export function OnboardForm({ prefill = {}, planSources = [] }: { prefill?: Onbo
           autoCapitalize={isLink ? "none" : "words"}
           spellCheck={false}
           enterKeyHint={isLink ? "next" : "go"}
-          className="input py-3 font-medium"
+          className="input h-12 font-medium"
           style={{ fontSize: 18 }}
           placeholder="e.g. Poke Bros"
         />
         {isLink ? (
-          <p className="mt-2 inline-flex max-w-full items-center gap-1.5 rounded-full bg-ok-soft px-3 py-1 text-sm text-ok" role="status">
-            <span aria-hidden>✓</span>
-            <span className="truncate">{pastedFacebook ? "Facebook Page" : PARSED_LABEL[parsed.kind]} · {parsedText(parsed)}</span>
+          <p className="status is-ok mt-2 flex max-w-full whitespace-normal" role="status">
+            <span className="min-w-0 break-words">{pastedFacebook ? "Facebook Page" : PARSED_LABEL[parsed.kind]} · {parsedText(parsed)}</span>
           </p>
         ) : (
-          <p className="mt-1.5 text-xs text-muted">Or paste their Instagram, Facebook, TikTok, Google Maps or website link.</p>
+          <p className="hint">Or paste their Instagram, Facebook, TikTok, Google Maps or website link.</p>
         )}
-        {fromLead.length > 0 && <p className="mt-1.5 text-xs text-muted">From the lead: {fromLead.join(" · ")}</p>}
+        {fromLead.length > 0 && <p className="hint">From the lead: {fromLead.join(" · ")}</p>}
       </div>
 
       {isLink && (
         <div>
           <label className="label" htmlFor="onb-name">Business name</label>
-          <input id="onb-name" name="name" required autoFocus autoComplete="off" className="input font-medium" style={{ fontSize: 18 }} placeholder="e.g. Poke Bros" />
+          <input id="onb-name" name="name" required autoFocus autoComplete="off" className="input h-12 font-medium" style={{ fontSize: 18 }} placeholder="e.g. Poke Bros" />
         </div>
       )}
 
       <div>
-        <label className="label" htmlFor="onb-city">City <span className="font-normal">(optional)</span></label>
+        <label className="label" htmlFor="onb-city">City <span className="font-normal text-muted">(optional)</span></label>
         <input id="onb-city" name="location" defaultValue={prefill.location ?? ""} autoComplete="off" className="input" placeholder="e.g. Richmond" />
       </div>
 
       <fieldset className="min-w-0">
         <legend className="label">What we&apos;ll do for them</legend>
-        <p className="-mt-0.5 mb-2 text-xs text-muted">Tap to pick or unpick. You can change this later.</p>
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-          {SERVICES.map((s) => (
-            <label
-              key={s}
-              className={cx(
-                "group flex min-h-14 cursor-pointer select-none flex-col items-start justify-center rounded-xl border border-border px-3 py-2 text-left leading-tight transition",
-                "has-[:checked]:border-accent has-[:checked]:bg-accent-soft",
-                "has-[:focus-visible]:outline has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-accent",
-              )}
-            >
+        <div className="svc-grid">
+          {SERVICES.map((sv) => (
+            <label key={sv} className="svc">
               <input
                 type="checkbox"
-                id={`onb-svc-${s}`}
+                id={`onb-svc-${sv}`}
                 name="services"
-                value={s}
-                checked={picked.includes(s)}
-                onChange={(e) => toggle(s, e.target.checked)}
-                className="sr-only"
+                value={sv}
+                checked={picked.includes(sv)}
+                onChange={(e) => toggle(sv, e.target.checked)}
+                className="check"
               />
-              <span className="flex items-center gap-1.5 text-sm font-medium group-has-[:checked]:text-accent">
-                <span aria-hidden className="inline-flex size-4 shrink-0 items-center justify-center rounded border border-border text-[10px] group-has-[:checked]:border-accent group-has-[:checked]:bg-accent group-has-[:checked]:text-accent-fg">
-                  <span className="hidden group-has-[:checked]:inline">✓</span>
-                </span>
-                {SERVICE_LABELS[s]}
+              <span>
+                <b>{SERVICE_LABELS[sv]}</b>
+                <span>{SERVICE_HINTS[sv]}</span>
               </span>
-              <span className="mt-0.5 pl-5.5 text-xs text-muted">{SERVICE_HINTS[s]}</span>
             </label>
           ))}
         </div>
+        <p className="hint">Tap to pick or unpick. You can change this later.</p>
       </fieldset>
 
       {/* Shown by CSS when the chip is checked, so it also works before JS loads. */}
@@ -147,27 +136,31 @@ export function OnboardForm({ prefill = {}, planSources = [] }: { prefill?: Onbo
 
       {!pastedFacebook && (
         <div className="hidden group-has-[#onb-svc-facebook:checked]/onb:block">
-          <label className="label" htmlFor="onb-fb">Facebook Page link <span className="font-normal">(optional)</span></label>
+          <label className="label" htmlFor="onb-fb">Facebook Page link <span className="font-normal text-muted">(optional)</span></label>
           <input id="onb-fb" name="facebookPage" autoComplete="off" autoCapitalize="none" spellCheck={false} inputMode="url" className="input" placeholder="facebook.com/their-page" />
-          <p className="mt-1.5 text-xs text-muted">Saved in the business notes.</p>
+          <p className="hint">Saved in the business notes.</p>
         </div>
       )}
 
       {!source && plan.length > 0 && (
-        <div className="rounded-xl bg-surface-2 p-3">
-          <p className="text-sm font-medium">Monthly plan <span className="text-xs font-normal text-muted">({STARTING_PLAN_NOTE})</span></p>
-          <ul className="mt-2 flex flex-col gap-1.5 text-sm">
-            {plan.map((p) => (
-              <li key={p.title} className="flex items-center justify-between gap-3">
-                <span className="flex min-w-0 items-center gap-2">
-                  <PlatformTag platform={p.platform} />
-                  <span className="truncate">{p.title}</span>
-                </span>
-                <span className="shrink-0 tabular-nums text-muted">{p.targetPerMonth ? `${p.targetPerMonth} / month` : "as needed"}</span>
-              </li>
-            ))}
+        <div>
+          <p className="label">Monthly plan <span className="font-normal text-muted">({STARTING_PLAN_NOTE.replace(" — ", ": ")})</span></p>
+          <ul className="plan-preview border-y border-border">
+            {plan.map((p) => {
+              // The platform is only spelled out when the item's own name doesn't already say it.
+              const named = p.platform === "other" || p.title.toLowerCase().includes((p.platform === "tiktok" ? "TikTok" : humanize(p.platform)).toLowerCase());
+              return (
+                <li key={p.title}>
+                  <span className="min-w-0">
+                    {p.title}
+                    {!named && <PlatformTag platform={p.platform} className="ml-2" />}
+                  </span>
+                  <span className="meta num shrink-0">{p.targetPerMonth ? `${p.targetPerMonth} / month` : "as needed"}</span>
+                </li>
+              );
+            })}
           </ul>
-          <p className="mt-2 text-xs text-muted">Change the numbers anytime in Settings &amp; plan.</p>
+          <p className="hint">Change the numbers anytime in Settings &amp; plan.</p>
         </div>
       )}
 
@@ -180,15 +173,19 @@ export function OnboardForm({ prefill = {}, planSources = [] }: { prefill?: Onbo
               <option key={p.id} value={p.id}>Copy from {p.name} ({p.items} item{p.items === 1 ? "" : "s"})</option>
             ))}
           </select>
-          {source && <p className="mt-1.5 text-xs text-muted">Uses {source.name}&apos;s plan instead. You can tweak it later in Settings &amp; plan.</p>}
+          {source && <p className="hint">Uses {source.name}&apos;s plan instead. You can tweak it later in Settings &amp; plan.</p>}
         </div>
       )}
 
-      <div className="sticky-actions -mx-1 flex flex-col gap-2 rounded-xl bg-surface/95 px-1 py-2 backdrop-blur sm:flex-row sm:items-center">
-        <SubmitButton pendingLabel="Setting up…" className="w-full sm:w-auto">
-          {prefill.leadId ? "Start managing" : "Add client"}
-        </SubmitButton>
-        <p className="text-xs text-muted">Sets up the plan and a short checklist. Claude starts the research right away.</p>
+      {/* The screen's one focal action (ink inside the app; New ask stays the only cinnabar). A bar that stays in reach:
+          solid paper, a hairline on top, kept short so the focus clearance covers it. */}
+      <div className="sticky-actions">
+        <div className="action-bar flex items-center gap-x-4">
+          <SubmitButton variant="primary" pendingLabel="Setting up…" className="shrink-0">
+            {prefill.leadId ? "Start managing" : "Add client"}
+          </SubmitButton>
+          <p className="meta min-w-0 flex-1 leading-5">Sets up the plan and a short checklist. Claude starts the research right away.</p>
+        </div>
       </div>
     </ActionForm>
   );

@@ -18,8 +18,8 @@ export function PhoneDisclosure({ summary, className, children }: { summary: Rea
   }, []);
   return (
     <details ref={ref} className={cx("group", className)}>
-      <summary className="no-marker flex min-h-11 cursor-pointer select-none items-center gap-2 text-sm font-medium text-accent md:hidden">
-        <span aria-hidden className="text-lg leading-none transition group-open:rotate-45">+</span>
+      <summary className="no-marker flex min-h-11 cursor-pointer select-none items-center gap-2 font-medium md:hidden">
+        <span aria-hidden className="text-lg leading-none text-faint transition group-open:rotate-45">+</span>
         {summary}
       </summary>
       <div className="pt-3 md:pt-0">{children}</div>

@@ -8,7 +8,7 @@ import { OutreachPipeline } from "@/components/outreach-pipeline";
 import { CreatorMenu } from "@/components/creator-menu";
 import { CreatorTable, type CreatorTableRow } from "@/components/creator-table";
 import { ViewToggle } from "@/components/view-toggle";
-import { Card, EmptyState, LinkButton, PageHeader, Stat, buttonClass, clientLabel, formatNumber, humanize } from "@/components/ui";
+import { Card, EmptyState, LinkButton, PageHeader, Stat, buttonClass, clientLabel, cx, formatNumber, humanize } from "@/components/ui";
 import { moveStageAction } from "./actions";
 import {
   AGREED_STAGES,
@@ -121,8 +121,17 @@ export default async function CreatorsPage({ searchParams }: { searchParams: Pro
         subtitle="Local creators and where each one stands with every business."
         actions={
           <>
+            {/* The view switch sits in the head, as on /tasks. */}
+            <ViewToggle
+              cookieName={VIEW_COOKIE}
+              current={view === "pipeline" ? "board" : "table"}
+              options={[
+                { value: "table", label: "Table", href: href({ view: "table" }) },
+                { value: "board", label: "Pipeline", href: href({ view: "pipeline", stage: "" }) },
+              ]}
+            />
             <CreatorMenu exportHref={`/creators/export${client ? `?client=${encodeURIComponent(client)}` : ""}`} />
-            <LinkButton href={client ? `/creators/new?client=${encodeURIComponent(client)}` : "/creators/new"} variant="primary">
+            <LinkButton href={client ? `/creators/new?client=${encodeURIComponent(client)}` : "/creators/new"} size="sm">
               Add creator
             </LinkButton>
           </>
@@ -130,40 +139,34 @@ export default async function CreatorsPage({ searchParams }: { searchParams: Pro
       />
 
       {error && (
-        <p role="alert" className="mb-4 rounded-lg bg-danger-soft px-3 py-2 text-sm text-danger">
-          {error}
+        <p role="alert" className="notice mb-6">
+          <span className="status is-danger">{error}</span>
         </p>
       )}
 
-      <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+      <div className="figures">
         <Stat label={client ? "Creators in outreach" : "Creators"} value={formatNumber(stats.creators)} hint={client ? clientName.get(client) : hiddenDnc ? `${hiddenDnc} do-not-contact not counted` : undefined} />
         <Stat label="Contacted this month" value={formatNumber(stats.contacted)} hint={monthLabel(month)} />
         <Stat label="Replies" value={formatNumber(stats.replies)} hint="Replied or further, incl. declines" />
         <Stat label="Agreed / posted" value={formatNumber(stats.agreed)} />
-        <Link href={href({ due: "1", view: "table" })} className="col-span-2 block rounded-xl sm:col-span-1">
-          <Stat label="Follow-ups due" value={<span className={stats.due ? "text-warn" : undefined}>{formatNumber(stats.due)}</span>} hint={stats.due ? "Tap to see them" : "All caught up"} />
+        <Link href={href({ due: "1", view: "table" })} className="figure">
+          <span className="eyebrow">Follow-ups due</span>
+          <span className={cx("value", stats.due > 0 && "is-due")}>{formatNumber(stats.due)}</span>
+          <span className="meta">{stats.due ? "Tap to see them" : "All caught up"}</span>
         </Link>
       </div>
 
-      {/* View switch */}
-      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-        <ViewToggle
-          cookieName={VIEW_COOKIE}
-          current={view === "pipeline" ? "board" : "table"}
-          options={[
-            { value: "table", label: "Table", href: href({ view: "table" }) },
-            { value: "board", label: "Pipeline", href: href({ view: "pipeline", stage: "" }) },
-          ]}
-        />
+      {/* Clear filters, when any are on (the view switch is in the head) */}
+      <div className="mb-3 mt-10 flex flex-wrap items-center justify-end gap-2 max-md:mt-8">
         {filtersOn && (
-          <Link href={href({ q: "", stage: "", channel: "", due: "", client: view === "pipeline" ? client : "", view })} className="inline-flex min-h-11 items-center text-sm text-accent hover:underline md:min-h-0">
+          <Link href={href({ q: "", stage: "", channel: "", due: "", client: view === "pipeline" ? client : "", view })} className="link-quiet inline-flex min-h-11 items-center md:pointer-fine:min-h-0">
             Clear filters
           </Link>
         )}
       </div>
 
       {/* Filters: a plain GET form, works without JS. The rarely used ones sit behind "More filters". */}
-      <form method="get" action="/creators" className="mb-5 rounded-xl border border-border bg-surface p-3" role="search">
+      <form method="get" action="/creators" role="search">
         <input type="hidden" name="view" value={view} />
         {showDnc && <input type="hidden" name="dnc" value="1" />}
         <div className="grid items-end gap-3 sm:grid-cols-[minmax(0,2fr)_minmax(0,1fr)_auto]">
@@ -182,14 +185,14 @@ export default async function CreatorsPage({ searchParams }: { searchParams: Pro
           </div>
           <button type="submit" className={buttonClass("secondary")}>Apply</button>
         </div>
-        <details className="group mt-2" open={moreFiltersOn || undefined}>
-          <summary className="no-marker inline-flex min-h-11 cursor-pointer items-center gap-1 text-sm text-muted hover:text-text md:min-h-8">
+        <details className="g-disc is-quiet mt-1" open={moreFiltersOn || undefined}>
+          <summary>
             More filters
-            <svg viewBox="0 0 16 16" aria-hidden className="size-3.5 transition group-open:rotate-180" fill="none" stroke="currentColor" strokeWidth={1.8}>
-              <path d="m4 6 4 4 4-4" strokeLinecap="round" strokeLinejoin="round" />
+            <svg viewBox="0 0 16 16" aria-hidden fill="none" stroke="currentColor" strokeWidth={1.8}>
+              <path d="M6 3.5 10.5 8 6 12.5" strokeLinecap="round" strokeLinejoin="round" />
             </svg>
           </summary>
-          <div className="grid items-end gap-3 pt-2 sm:grid-cols-2 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
+          <div className="grid items-end gap-3 pb-2 pt-1 sm:grid-cols-2 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
             {view === "table" && (
               <div>
                 <label className="label" htmlFor="f-stage">Stage</label>
@@ -210,8 +213,8 @@ export default async function CreatorsPage({ searchParams }: { searchParams: Pro
                 ))}
               </select>
             </div>
-            <label className="flex min-h-11 items-center gap-2 text-sm">
-              <input type="checkbox" name="due" value="1" defaultChecked={due} />
+            <label className="g-inline">
+              <input type="checkbox" name="due" value="1" defaultChecked={due} className="check" />
               Follow-up due
             </label>
           </div>
@@ -230,14 +233,14 @@ export default async function CreatorsPage({ searchParams }: { searchParams: Pro
       ) : all.length === 0 ? (
         <EmptyState title="No creators yet">
           Add one by hand, import a list from Google Sheets, or ask Claude to research local food creators for a business.
-          <div className="mt-3 flex flex-wrap justify-center gap-2">
-            <LinkButton href="/creators/new" variant="primary" size="sm">Add creator</LinkButton>
-            <LinkButton href="/creators/import" size="sm">Import a list</LinkButton>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <LinkButton href="/creators/new" size="sm">Add creator</LinkButton>
+            <LinkButton href="/creators/import" size="sm" variant="ghost">Import a list</LinkButton>
           </div>
         </EmptyState>
       ) : listRows.length === 0 ? (
         <EmptyState title="No creators match these filters">
-          <Link href={href({ q: "", stage: "", channel: "", due: "", client: "", view: "table" })} className="text-accent hover:underline">Clear filters</Link>
+          <Link href={href({ q: "", stage: "", channel: "", due: "", client: "", view: "table" })} className="link">Clear filters</Link>
           {!showDnc && hiddenDnc > 0 && <> · do-not-contact creators are hidden</>}
         </EmptyState>
       ) : (
@@ -246,7 +249,7 @@ export default async function CreatorsPage({ searchParams }: { searchParams: Pro
           title={`${listRows.length} creator${listRows.length === 1 ? "" : "s"}`}
           actions={
             (hiddenDnc > 0 || showDnc) && (
-              <Link href={href({ dnc: showDnc ? "" : "1", view: "table" })} className="inline-flex min-h-11 items-center text-xs text-muted hover:text-text hover:underline md:min-h-0">
+              <Link href={href({ dnc: showDnc ? "" : "1", view: "table" })} className="link-quiet -my-3 inline-flex min-h-11 items-center md:pointer-fine:my-0 md:pointer-fine:min-h-0">
                 {showDnc ? "Hide do-not-contact" : `Show do-not-contact (${hiddenDnc})`}
               </Link>
             )
@@ -278,18 +281,21 @@ function PipelineView({
     return <EmptyState title="No businesses yet">Add a business first, then build its creator pipeline.</EmptyState>;
   }
   return (
-    <div className="space-y-3">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <h2 className="text-sm font-semibold">{clientName}</h2>
-        <LinkButton href={`/creators/new?client=${encodeURIComponent(clientId)}`} size="sm">Add creator to this business</LinkButton>
-      </div>
+    <Card
+      className="g-wraphead"
+      title={clientName}
+      actions={<LinkButton href={`/creators/new?client=${encodeURIComponent(clientId)}`} size="sm" variant="ghost">Add creator to this business</LinkButton>}
+      padded={false}
+    >
       {rows.length === 0 ? (
         <EmptyState title={`No creators in outreach for ${clientName} yet`}>
           Add a creator, or open an existing creator and use “Add to another business”.
         </EmptyState>
       ) : (
-        <OutreachPipeline rows={rows} back={back} moveAction={moveStageAction} now={now} />
+        <div className="pt-3">
+          <OutreachPipeline rows={rows} back={back} moveAction={moveStageAction} now={now} />
+        </div>
       )}
-    </div>
+    </Card>
   );
 }

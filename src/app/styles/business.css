@@ -1,0 +1,252 @@
+/* Business pages: /clients, /clients/new, /clients/[id] and everything under it (settings, onboarding answers,
+   Nora's own workspace). Rules here sit in the "pages" layer: above the shared classes in globals.css, below Tailwind
+   utilities. (The month picker's own rules are in globals.css: Calendar shares it.)
+
+   Row layouts on the business page follow the width of the COLUMN they sit in, not the window (container queries on
+   .biz-col), because a column is anywhere from 290px (a small phone) to 1050px (the full-width sections on a wide
+   desktop). Narrow is the default; wide is the query. */
+@layer pages {
+  /* ---- Page head of a business: handles on one line, the Google status, then the month and the jump links */
+  .biz-meta { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 20px; }
+  .biz-meta a { text-decoration: none; color: var(--text); min-width: 0; white-space: normal; overflow-wrap: anywhere; }
+  .biz-meta a:hover { text-decoration: underline; text-underline-offset: 3px; }
+  .biz-meta a.link { text-decoration: underline; }
+  .biz-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 24px; margin-top: 14px; }
+  .biz-controls .monthpick { margin-left: -8px; }   /* the arrow glyph, not its hit box, lines up with the text above */
+  /* A fact or a state after the serif name (Inactive, Pre-launch): back to the sans, at its own small size. */
+  .display .tag { font-family: var(--font-sans); margin-left: 10px; top: -3px; }
+  .biz-flag { margin-left: 12px; font-family: var(--font-sans); font-size: var(--text-sm); line-height: var(--leading-base); font-weight: 400; letter-spacing: 0; vertical-align: middle; }
+
+  /* "On this page": one quiet line of jump links (what needs doing, then each section). A dot only on the ones that
+     need someone; the rest are muted words. On a phone it is one row that scrolls sideways, edge to edge. */
+  .biz-glance { margin-top: 6px; }
+  .biz-glance ul { display: flex; flex-wrap: wrap; gap: 0 22px; }
+  .biz-glance a { display: inline-flex; align-items: baseline; min-height: 2rem; font-size: var(--text-sm); line-height: 2rem; color: var(--muted); text-decoration: none; white-space: nowrap; }
+  .biz-glance a.status { color: var(--text); }
+  .biz-glance a.status.is-ok { color: var(--muted); }
+  .biz-glance a:hover { color: var(--text); text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 3px; }
+
+  /* The switch as a submit button (a form posts on tap). is-off draws "off" while a save is on its way. */
+  .biz-switch { max-width: 100%; text-align: left; }
+  .biz-switch:disabled { cursor: default; }
+  .biz-switch > .switch-track.is-off { background: var(--border-strong); }
+  .biz-switch > .switch-track.is-off::after { transform: none; }
+  .biz-switch-note { font-weight: 400; color: var(--muted); }
+
+  @media (max-width: 767px), (pointer: coarse) {
+    /* The handles and the website: a 44px hit area that keeps the line's height (the dot is the ::before). */
+    .biz-meta a { position: relative; }
+    .biz-meta a::after { content: ""; position: absolute; left: 0; right: 0; top: 50%; height: 2.75rem; transform: translateY(-50%); }
+    .biz-controls .monthpick { margin-left: -13px; }
+    .biz-glance { margin-inline: -1rem; padding-inline: 1rem; }
+    .biz-glance ul { flex-wrap: nowrap; width: max-content; gap: 0 20px; }
+    .biz-glance a { min-height: 2.75rem; line-height: 2.75rem; }
+  }
+
+  /* ---- Two columns. Children are groups (.biz-col = main, .biz-side = side) in the order a phone shows them; on a
+     wide screen the side groups move to the right column. A side group marked is-tall runs down the whole page.
+     The business page (.is-biz): Outstanding beside the plan, then the reference sections and the set-up across the
+     full width (.is-wide), the set-up as two columns of its own. */
+  .biz-cols { margin-top: 0; }
+  .biz-cols > * { min-width: 0; }
+  .biz-cols > * > :first-child, .biz-cols > * > :first-child > .sec:first-child { margin-top: 0; }
+  .biz-col { container: biz / inline-size; }
+  @media (min-width: 1200px) {
+    .biz-cols { grid-template-rows: auto 1fr; row-gap: var(--space-10); }
+    .biz-cols > .biz-col { grid-column: 1; }
+    .biz-cols > .biz-side { grid-column: 2; }
+    .biz-cols > .biz-side.is-tall { grid-row: 1 / span 2; }
+    /* Nora's workspace has two groups per column (main, side, main, side). Staggered spans keep each column a stack
+       of its own: a short first group on one side no longer waits for a tall one on the other. The empty tracks
+       take no height; the last one is flexible so the long groups have somewhere to grow. */
+    .biz-cols.is-ws { grid-template-rows: auto auto auto 1fr; }
+    .biz-cols.is-ws > :nth-child(1) { grid-row: 1; }
+    .biz-cols.is-ws > :nth-child(2) { grid-row: 1 / span 2; }
+    .biz-cols.is-ws > :nth-child(3) { grid-row: 2 / span 3; }
+    .biz-cols.is-ws > :nth-child(4) { grid-row: 3 / span 2; }
+    .biz-cols.is-biz { grid-template-rows: none; }
+    .biz-cols > .is-wide { grid-column: 1 / -1; }
+  }
+  @media (min-width: 1024px) {
+    .biz-setup { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 64px; align-items: start; }
+    .biz-setup > .sec { margin-top: 0; }
+  }
+  /* A page of forms that has no side column keeps a readable measure. */
+  .biz-measure { max-width: 45rem; }
+  .biz-measure > * > :first-child, .biz-measure > * > :first-child > .sec:first-child { margin-top: 0; }
+
+  /* A section title with a fact after it ("Creators  1 contacted in Nov"): on a phone the fact goes under the title. */
+  @media (max-width: 767px) {
+    .title-stack > .meta { display: block; margin: 0; line-height: 1.25rem; }
+  }
+
+  /* ---- Plan rows: title, one segment per planned item, "3 of 8" */
+  .plan-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 24px; row-gap: 10px; padding: 12px 0 14px; }
+  .plan-row .meter, .plan-row .bar { grid-column: 1 / -1; grid-row: 2; align-self: center; }
+  .plan-row .n { grid-column: 2; grid-row: 1; text-align: right; white-space: nowrap; }
+  .plan-row .n b { font-weight: 600; color: var(--text); }
+  .plan-row .n span { color: var(--muted); }
+  .plan-row .row-title .meta { margin-left: 8px; font-weight: 400; }
+  @container biz (min-width: 35rem) {
+    .plan-row { grid-template-columns: minmax(0, 1fr) clamp(9rem, 35cqw, 15rem) 5.5rem; row-gap: 0; padding: calc((var(--row-h) - var(--leading-base)) / 2) 0; }
+    .plan-row .meter, .plan-row .bar { grid-column: 2; grid-row: 1; }
+    .plan-row .n { grid-column: 3; }
+    .plan-row .n.meta { grid-column: 2 / -1; }   /* "2 done · as needed" has no meter and takes its room */
+  }
+  /* A meter with its count in words beside it (Getting started, the launch checklist). */
+  .biz-progress { display: flex; align-items: baseline; gap: 16px; padding: 2px 0 12px; }
+  .biz-progress > .meter, .biz-progress > .bar { flex: 1; max-width: 15rem; align-self: center; }
+  .biz-progress b { font-weight: 600; color: var(--text); }
+
+  /* ---- Group label inside a section (Ad hoc, This month's checklist): caps on a hairline */
+  .biz-group { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 8px; margin-top: 22px; padding-bottom: 8px; border-bottom: var(--rule); }
+  .sec > div > section:first-child > .biz-group { margin-top: 8px; }   /* straight under the section title */
+  .biz-group > span { font-size: var(--text-sm); font-weight: 400; letter-spacing: 0; text-transform: none; font-variant-numeric: tabular-nums; }
+  .biz-group > .over { margin-left: auto; font-weight: 500; color: var(--danger); }
+  .biz-from { padding-top: 10px; margin-bottom: -4px; }   /* "From Oct" above a task carried over from an earlier month */
+  /* The quick add form at the foot of Outstanding: a hairline above it. */
+  .biz-add { margin-top: 12px; padding-top: 16px; border-top: var(--rule); }
+
+  /* ---- A "needs you" row that opens a queue (drafts to review, reviews without a reply) */
+  .biz-queue .status { flex: 1; min-width: 0; white-space: normal; }
+
+  /* ---- Creators: a small ledger. Narrow: name and stage, then one meta line. Wide: columns under a caps header. */
+  .creator-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 16px; row-gap: 2px; align-items: baseline; padding: 10px 0 12px; }
+  .creator-row .who { grid-column: 1; grid-row: 1; min-width: 0; }
+  .creator-row .status { font-size: inherit; }
+  .creator-row .who .status { margin-left: 10px; font-size: var(--text-sm); }
+  .creator-row .stage { grid-column: 2; grid-row: 1; font-size: var(--text-sm); }
+  .creator-row .rest { grid-column: 1 / -1; grid-row: 2; min-width: 0; font-size: var(--text-sm); line-height: 1.375rem; color: var(--muted); }
+  .creator-row .rest > * + *::before, .creator-row .more > * + *::before { content: "·"; margin: 0 6px; color: var(--muted); font-weight: 400; }
+  .creator-row .more > * { overflow-wrap: anywhere; }
+  .creator-row .is-over { font-weight: 500; color: var(--danger); }
+  .creator-head { display: none; min-height: 0; padding: 12px 0 8px; }
+  .creator-head > * { font: inherit; letter-spacing: inherit; }
+  @container biz (min-width: 38rem) {
+    .creator-head { display: grid; }
+    .creator-head, .creator-row { grid-template-columns: minmax(0, 1fr) 6.5rem 8rem 8.5rem; }
+    .creator-row { row-gap: 0; padding: 11px 0 12px; }
+    .creator-head { padding: 12px 0 8px; }
+    .creator-row .rest { display: contents; }
+    .creator-row .rest > * + *::before { content: none; }
+    .creator-row .ch { grid-column: 2; grid-row: 1; font-size: var(--text-sm); color: var(--muted); }
+    .creator-row .fu { grid-column: 3; grid-row: 1; font-size: var(--text-sm); color: var(--muted); }
+    .creator-row .fu .k { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }   /* the column header says it */
+    .creator-row .stage { grid-column: 4; font-size: var(--text-base); }
+    .creator-row .more { grid-column: 1 / -1; grid-row: 2; font-size: var(--text-sm); line-height: 1.375rem; color: var(--muted); }
+  }
+
+  /* ---- Content this month: when, what, where, state */
+  .post-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 16px; row-gap: 0; padding: 10px 0; }
+  .post-row .row-title { grid-column: 1; grid-row: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .post-row .row-title.is-none { font-weight: 400; color: var(--muted); }
+  .post-row .st { grid-column: 2; grid-row: 1; }
+  .post-row .post-meta { grid-column: 1 / -1; grid-row: 2; font-size: var(--text-sm); line-height: 1.375rem; color: var(--muted); }
+  .post-row .post-meta > * + *::before, .post-row .where > * + *::before { content: "·"; margin: 0 6px; }
+  @container biz (min-width: 38rem) {
+    .post-row { grid-template-columns: 4.25rem minmax(0, 1fr) 9.5rem 6.5rem; padding: calc((var(--row-h) - var(--leading-base)) / 2) 0; }
+    .post-row .post-meta { display: contents; }
+    .post-row .post-meta > * { font-size: var(--text-sm); color: var(--muted); grid-row: 1; white-space: nowrap; }
+    .post-row .post-meta > * + *::before { content: none; }
+    .post-row .when { grid-column: 1; }
+    .post-row .row-title { grid-column: 2; }
+    .post-row .where { grid-column: 3; }
+    .post-row .st { grid-column: 4; }
+  }
+
+  /* ---- Label and value pairs on hairlines (what the form knows, the owner's answers) */
+  .kv > div { display: grid; grid-template-columns: var(--kv-k, 5.5rem) minmax(0, 1fr); column-gap: 16px; align-items: baseline; padding: 9px 0; }
+  .kv > div + div { border-top: var(--rule); }
+  .kv dt { font-size: var(--text-sm); color: var(--muted); }
+  .kv dd { min-width: 0; overflow-wrap: anywhere; }
+  .kv.is-wide { --kv-k: 14rem; }
+  @media (max-width: 767px) {
+    .kv.is-wide > div { grid-template-columns: minmax(0, 1fr); row-gap: 2px; }
+  }
+
+  /* ---- A link to hand to the owner: the link itself, then one ready-to-paste message per language */
+  .share-box { margin-top: 14px; padding-top: 14px; border-top: var(--rule); }
+  .share-msgs { margin-top: 10px; border-bottom: var(--rule); }
+  .share-msgs > details { border-top: var(--rule); }
+  .biz-disc > summary, .share-msgs summary { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: var(--row-h); font-weight: 500; cursor: pointer; list-style: none; border-radius: var(--radius-xs); }
+  .biz-disc > summary::-webkit-details-marker, .share-msgs summary::-webkit-details-marker { display: none; }
+  .biz-disc > summary svg, .share-msgs summary svg { flex: none; width: 16px; height: 16px; color: var(--faint); stroke-width: 2; }
+  .biz-disc[open] > summary svg, .share-msgs details[open] > summary svg { transform: rotate(90deg); }
+  .share-msgs details > p { padding: 0 0 10px; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .share-msgs details > div { padding-bottom: 14px; }
+  /* A disclosure that is a quiet line of its own (enter numbers, show as table). */
+  .biz-disc { border-top: var(--rule); }
+  .biz-disc.is-quiet { border-top: 0; }
+  .biz-disc.is-quiet > summary { justify-content: flex-start; gap: 6px; min-height: 2rem; font-size: var(--text-sm); font-weight: 400; color: var(--muted); }
+  .biz-disc.is-quiet > summary:hover { color: var(--text); }
+  @media (max-width: 767px), (pointer: coarse) { .biz-disc.is-quiet > summary { min-height: 2.75rem; } }
+
+  /* A button whose label is a whole sentence may wrap instead of pushing the page sideways. */
+  .btn-wrap { height: auto; min-height: var(--h); padding-top: 6px; padding-bottom: 6px; line-height: 1.375rem; text-align: left; white-space: normal; }
+
+  /* ---- Views chart: the tooltip and the table view */
+  .viz-legend { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 20px; margin: 4px 0 8px; font-size: var(--text-sm); color: var(--muted); }
+  .viz-tip { position: absolute; top: 0; z-index: 10; width: 10.5rem; padding: 8px 12px; transform: translateX(-50%); pointer-events: none; font-size: var(--text-sm); line-height: 1.375rem; }
+  .viz-table { width: 100%; min-width: 18rem; text-align: left; font-size: var(--text-sm); font-variant-numeric: tabular-nums; }
+  .viz-table th, .viz-table td { padding: 6px 12px 6px 0; }
+  .viz-table thead th { color: var(--muted); font-weight: 500; }
+  .viz-table tbody tr { border-top: var(--rule); }
+  .viz-table tbody th { font-weight: 400; }
+  .viz-table :is(th, td):not(:first-child) { text-align: right; padding-right: 0; padding-left: 12px; }
+
+  /* ---- /clients: one row per business */
+  .biz-row { display: grid; grid-template-columns: minmax(0, 1fr) auto 14px; column-gap: 16px; row-gap: 0; padding: 11px 0 12px; }
+  .biz-row .row-title { grid-column: 1; grid-row: 1; }
+  .biz-row .prog { grid-column: 2; grid-row: 1; display: flex; align-items: baseline; gap: 14px; white-space: nowrap; }
+  .biz-row .prog .meter, .biz-row .prog .bar { width: 7.5rem; align-self: center; }
+  .biz-row .prog b { font-weight: 600; }
+  .biz-row .prog span { color: var(--muted); }
+  .biz-row .chev { grid-column: 3; grid-row: 1; }
+  .biz-row .biz-facts { grid-column: 1 / 3; grid-row: 2; font-size: var(--text-sm); line-height: 1.375rem; color: var(--muted); }
+  .biz-row .biz-facts > * + *::before { content: "·"; margin: 0 6px; }
+  .biz-row.is-inactive .row-title, .biz-row.is-inactive .prog { color: var(--muted); }
+  @media (max-width: 767px) {
+    .biz-row .prog .meter, .biz-row .prog .bar { display: none; }   /* the words stay; a thin bar here would read as another rule */
+  }
+
+  /* ---- New client: what we'll do for them, as plain checkboxes in a grid */
+  .svc-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 16px; }
+  .svc { display: flex; align-items: flex-start; gap: 10px; min-height: 2.75rem; padding: 8px 0; cursor: pointer; }
+  .svc .check { margin-top: 2px; }
+  .svc > span { min-width: 0; }
+  .svc b { display: block; font-weight: 500; }
+  .svc > span > span { display: block; font-size: var(--text-sm); line-height: 1.25rem; color: var(--muted); }
+  .opt { display: inline-flex; align-items: center; gap: 8px; min-height: 2.25rem; margin-right: 20px; cursor: pointer; }
+  @media (min-width: 640px) { .svc-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+  @media (max-width: 767px), (pointer: coarse) { .opt { min-height: 2.75rem; } }
+  /* The plan a new business starts with: item, then how many a month */
+  .plan-preview > li { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; padding: 7px 0; }
+  .plan-preview > li + li { border-top: var(--rule); }
+
+  /* ---- Settings: the monthly plan editor, one item per block on hairlines */
+  .plan-edit { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 10px 8px; padding: 14px 0; }
+  .plan-edit .f-title { grid-column: 1 / -1; }
+  .plan-edit .f-foot { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
+  .plan-edit > [role="status"]:not(.sr-only) { grid-column: 1 / -1; margin-top: 0; }   /* "Saved." under the whole item */
+  @media (min-width: 640px) {
+    .plan-edit { grid-template-columns: minmax(0, 1fr) 8.5rem 5.5rem; }
+    .plan-edit .f-title { grid-column: 1; }
+  }
+  /* The saved items read as a ledger on a wide screen: the field names once, as a caps header over the list. */
+  .plan-edit-head { display: none; }
+  @media (min-width: 640px) {
+    .plan-edit-head { display: grid; grid-template-columns: minmax(0, 1fr) 8.5rem 5.5rem; column-gap: 8px; padding: 12px 0 8px; }
+    .plan-list .plan-edit .label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+    .plan-list .plan-edit { row-gap: 8px; padding: 12px 0; }
+  }
+
+  /* ---- Nora's own workspace */
+  .ws-owed { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 10px; text-decoration: none; }
+  .ws-owed .value { font-family: var(--font-display); font-size: 1.75rem; line-height: 2.25rem; font-weight: 450; letter-spacing: -0.01em; font-variant-numeric: lining-nums tabular-nums; }
+  .ws-row { column-gap: 12px; }
+  .ws-row .row-title { display: block; }
+  .ws-row .two { flex: 1; min-width: 0; }
+  .ws-row .two > .meta { display: block; white-space: normal; line-height: 1.25rem; }
+  .ws-row .two > .meta span { font-size: inherit !important; }   /* a next-step date from another area sits on this line at this size */
+  .ws-row .is-over { font-weight: 500; color: var(--danger); }
+}

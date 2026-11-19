@@ -1,17 +1,20 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { THEME_KEY as KEY } from "@/lib/theme";
 import { cx } from "./ui";
 
 type Theme = "auto" | "light" | "dark";
-const KEY = "nora-hq:theme";
 const OPTIONS: { value: Theme; label: string }[] = [
   { value: "auto", label: "Auto" },
   { value: "light", label: "Light" },
   { value: "dark", label: "Dark" },
 ];
 
-/** Auto follows the phone's day/night setting; Light or Dark sticks on this device. */
+/**
+ * Auto follows the phone's day/night setting; Light or Dark sticks on this device.
+ * Drawn as `.seg` (globals.css): three quiet text buttons, the chosen one reads like the current sidebar row.
+ */
 export function ThemeChoice({ className }: { className?: string }) {
   const [theme, setTheme] = useState<Theme>("auto");
 
@@ -25,6 +28,7 @@ export function ThemeChoice({ className }: { className?: string }) {
     const root = document.documentElement;
     if (next === "auto") delete root.dataset.theme;
     else root.dataset.theme = next;
+    // The phone's browser and status bar follow data-theme too: the root layout's script watches it.
     try {
       if (next === "auto") localStorage.removeItem(KEY);
       else localStorage.setItem(KEY, next);
@@ -34,7 +38,7 @@ export function ThemeChoice({ className }: { className?: string }) {
   }
 
   return (
-    <div role="radiogroup" aria-label="Appearance" className={cx("grid grid-cols-3 gap-1 rounded-lg bg-surface-2 p-1", className)}>
+    <div role="radiogroup" aria-label="Appearance" className={cx("seg", className)}>
       {OPTIONS.map((o) => (
         <button
           key={o.value}
@@ -42,10 +46,6 @@ export function ThemeChoice({ className }: { className?: string }) {
           role="radio"
           aria-checked={theme === o.value}
           onClick={() => choose(o.value)}
-          className={cx(
-            "min-h-9 rounded-md px-2 text-xs font-medium",
-            theme === o.value ? "bg-surface text-text shadow-sm" : "text-muted hover:text-text",
-          )}
         >
           {o.label}
         </button>

@@ -5,7 +5,7 @@ import { relativeTime } from "@/lib/dates";
 import { googleSyncInfo, type GoogleSyncInfo, type GoogleSyncOpts } from "@/lib/google-status";
 import { findConnection } from "@/lib/integrations/connections";
 import type { Client } from "@/lib/schema";
-import { Badge, clientLabel, cx } from "./ui";
+import { Status, clientLabel, cx } from "./ui";
 
 /**
  * Per-business Google review sync status: what the last sync actually found for THIS business
@@ -34,7 +34,10 @@ export function googleSyncFixHref(info: GoogleSyncInfo, clientId: string, onSett
   }
 }
 
-/** One line: [badge] when · hint · (optional) action link. `prefix` e.g. "Google reviews". */
+/**
+ * The status in one meta line that wraps: the prefix, a dot and the words, when it last synced, what to do, and
+ * (optional) the link that fixes it. `prefix` e.g. "Google reviews".
+ */
 export function GoogleSyncLine({
   info, clientId, prefix, action = true, onSettings = false, className,
 }: {
@@ -48,15 +51,16 @@ export function GoogleSyncLine({
 }) {
   const fix = action ? googleSyncFixHref(info, clientId, onSettings) : null;
   const when = info.at ? `${info.state === "error" ? "tried" : info.stale ? "last synced" : "synced"} ${relativeTime(info.at)}` : null;
+
   return (
-    <p className={cx("flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted", className)}>
+    <p className={cx("meta flex flex-wrap items-baseline gap-x-2.5 gap-y-0.5", className)}>
       {prefix && <span className="font-medium text-text">{prefix}</span>}
-      <Badge tone={info.tone}>{info.label}</Badge>
+      <Status tone={info.tone} small>{info.label}</Status>
       {when && <span>{when}</span>}
-      {info.hint && <span className={info.tone === "warn" ? "text-warn" : undefined}>{info.hint}</span>}
-      {info.error && <span className="min-w-0 break-words text-danger">{info.error}</span>}
+      {info.hint && <span>{info.hint}</span>}
+      {info.error && <span className="min-w-0 break-words text-text">{info.error}</span>}
       {fix && (
-        <Link href={fix.href} className="inline-flex items-center font-medium text-accent hover:underline pointer-coarse:min-h-11">
+        <Link href={fix.href} className="link tap-target">
           {fix.label}
         </Link>
       )}
@@ -79,32 +83,33 @@ export async function ClientGoogleSync({ client, ...rest }: { client: SyncClient
 }
 
 /**
- * Account-level badge for the Google card in Settings. With a working connection it counts businesses that are
+ * Account-level status for the Google card in Settings. With a working connection it counts businesses that are
  * really syncing ("2 of 3 businesses syncing") instead of claiming "Connected". A business that has no listing and
  * no Google item in its plan isn't meant to sync, so it is left out of the count.
  */
 export async function GoogleSyncSummaryBadge({ clients, connection }: { clients: SyncClient[]; connection: { status: string } | null | undefined }) {
-  if (!connection) return <Badge>Not connected</Badge>;
-  if (connection.status === "expired") return <Badge tone="warn">Expired — reconnect</Badge>;
-  if (connection.status !== "ok") return <Badge tone="danger">Problem</Badge>;
+  if (!connection) return <Status tone="neutral" small>Not connected</Status>;
+  if (connection.status === "expired") return <Status tone="warn" small>Expired: reconnect</Status>;
+  if (connection.status !== "ok") return <Status tone="danger" small>Problem</Status>;
   const work = await googleWork();
   const counted = clients.map((c) => googleSyncInfo(c, true, undefined, optsFor(work, c.id))).filter((i) => i.state !== "unlinked" || i.needsAttention);
   const n = counted.length;
   const good = counted.filter((i) => !i.needsAttention).length;
-  if (n === 0) return <Badge tone="ok">Signed in</Badge>;
-  if (good === n) return <Badge tone="ok">{n === 1 ? "Syncing" : `All ${n} businesses syncing`}</Badge>;
-  return <Badge tone="warn">{good} of {n} {n === 1 ? "business" : "businesses"} syncing</Badge>;
+  if (n === 0) return <Status tone="ok" small>Signed in</Status>;
+  if (good === n) return <Status tone="ok" small>{n === 1 ? "Syncing" : `All ${n} businesses syncing`}</Status>;
+  return <Status tone="warn" small>{good} of {n} {n === 1 ? "business" : "businesses"} syncing</Status>;
 }
 
-/** Every business with its own status line (Settings → Google Business Profile). */
+/** Every business with its own status line (Settings → Google Business Profile). A plain list on hairlines. */
 export async function GoogleSyncList({ clients, connected }: { clients: SyncClient[]; connected: boolean }) {
   if (clients.length === 0) return null;
   const work = await googleWork();
   return (
-    <ul className="divide-y divide-border rounded-lg border border-border">
+    <ul className="list is-ruled">
       {clients.map((c) => (
-        <li key={c.id} className="flex flex-col gap-1 px-3 py-2.5">
-          <Link href={`/clients/${c.id}`} className="self-start text-sm font-medium hover:underline">{clientLabel(c)}</Link>
+        <li key={c.id} className="flex flex-col gap-0.5 py-2.5">
+          {/* The name is the row's way in: a 44px hit area on touch, and a long name and city wrap instead of running off a small phone. */}
+          <Link href={`/clients/${c.id}`} className="inline-flex min-h-11 min-w-0 items-center self-start font-medium [overflow-wrap:anywhere] hover:underline md:pointer-fine:min-h-0">{clientLabel(c)}</Link>
           <GoogleSyncLine info={googleSyncInfo(c, connected, undefined, optsFor(work, c.id))} clientId={c.id} onSettings />
         </li>
       ))}

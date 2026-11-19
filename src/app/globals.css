@@ -1,85 +1,144 @@
+/* Layer order, stated before Tailwind states its own: "pages" (the per-area stylesheets in ./styles) sits above the
+   shared component classes and below utilities, so a page class refines a shared class and a utility still wins. */
+@layer theme, base, components, pages, utilities;
+
 @import "tailwindcss";
 
-/* Design tokens. Use via Tailwind arbitrary values or the utility aliases below (bg-surface, text-muted, ...). */
+/* One stylesheet per area of the app (see docs/design.md). Each wraps its rules in @layer pages. */
+@import "./styles/home-inbox.css";
+@import "./styles/business.css";
+@import "./styles/calendar-tasks.css";
+@import "./styles/grow.css";
+@import "./styles/public-settings.css";
+
+/* ============================================================ 1. TOKENS
+   The "Ink" design system: paper, ink, one seal. Rules for using these are in docs/design.md.
+   Use them through the Tailwind aliases below (bg-surface, text-muted, border-border-strong, ...) or as var(--token).
+
+   Day and night: the light palette is the default. The dark palette applies when the device is in dark mode ("Auto",
+   nothing saved) unless the person picked Light, or always when they picked Dark: data-theme on <html>, set before the
+   first paint by the script in app/layout.tsx and changed by <ThemeChoice>. The two dark blocks below must stay equal. */
 :root {
-  --bg: #f7f6f3;
-  --surface: #ffffff;
-  --surface-2: #f1efea;
-  --border: #e4e1da;
-  --text: #1d1b18;
-  --muted: #6b665d;
-  --accent: #c2410c;        /* warm "food" orange */
-  --accent-fg: #ffffff;
-  --accent-soft: #fdeee4;
-  --ok: #147a3b;            /* a touch darker so "Free" badges read on their pale green */
-  --ok-soft: #e6f4ea;
-  --warn: #b45309;
-  --warn-soft: #fdf3e1;
-  --danger: #b91c1c;
-  --danger-soft: #fdecec;
-  --info: #1d4ed8;
-  --info-soft: #e8eefc;
-  --ig: #c13584;
+  --bg: #fbfaf7;                /* paper */
+  --surface: #ffffff;           /* inputs, sheets, menus (raised things only) */
+  --surface-2: #f2f0ea;         /* hover, selected nav row, kbd */
+  --border: #e6e3db;            /* hairline between rows */
+  --text: #1a1916;              /* ink */
+  --muted: #66625a;             /* secondary text (AA on bg, surface and surface-2) */
+  --accent: #c2371a;            /* cinnabar: New ask, the phone "+", counts that need you, today's date */
+  --accent-fg: #ffffff;         /* text on accent */
+  --accent-soft: #f9e9e3;
+  --ok: #2f6b3f;
+  --ok-soft: #e7f1e8;
+  --warn: #8f5a00;
+  --warn-soft: #f8eed9;
+  --danger: #b0212b;
+  --danger-soft: #f9e6e6;
+  --info: #2a55b8;
+  --info-soft: #e6ecf8;
+  --ig: #b02a76;
   --tt: #111111;
-  --google: #1a73e8;
-  --facebook: #1877f2;
+  --google: #1a66d6;
+  --facebook: #1565d8;
+  --border-strong: #8c887f;     /* outline of inputs, checkboxes, secondary buttons (3:1) */
+  --faint: #8c887f;             /* chevrons and other non-text glyphs (3:1), never body text */
+  --check-mark: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%23fbfaf7' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m3.6 8.4 2.9 2.9 5.9-6.6'/%3E%3C/svg%3E"); /* tick drawn in the page colour on an ink box */
+  --shadow-pop: 0 1px 2px rgb(0 0 0 / 0.06), 0 12px 32px rgb(0 0 0 / 0.14); /* menus and sheets only */
   color-scheme: light;
+
+  /* Type. Sans is the device's own UI font; the only webfont is the display serif (self-hosted, see layout.tsx).
+     --text-xs / --text-sm / --text-base are also Tailwind's own names, so text-xs / text-sm / text-base follow them.
+     Nothing is smaller than 12px, on any screen. */
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI Variable Text", "Segoe UI", Roboto, "Helvetica Neue", Arial, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei UI", "Microsoft YaHei", "Noto Sans SC", "Noto Sans CJK SC", sans-serif;
+  --font-display: "Newsreader Variable", "Newsreader", "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei UI", "Microsoft YaHei", "Noto Sans SC", "Noto Sans CJK SC", serif;
+  --text-xs: 0.75rem;        /* 12px  caps eyebrow, tags, tab labels: the smallest text anywhere */
+  --text-sm: 0.8125rem;      /* 13px  meta, counts, small buttons */
+  --text-base: 0.9375rem;    /* 15px  rows, body */
+  --text-title: 1.3125rem;   /* 21px  section title (serif) */
+  --text-display: 2.5rem;    /* 40px  page title (serif) */
+  --leading-base: 1.375rem;  /* 22px  every row sits on this line */
+
+  /* Space: 4px steps. Rows are 44px tall; sections are 40px apart. */
+  --space-1: 0.25rem; --space-2: 0.5rem; --space-3: 0.75rem; --space-4: 1rem;
+  --space-6: 1.5rem; --space-8: 2rem; --space-10: 2.5rem; --space-16: 4rem;
+  --row-h: 2.75rem;          /* 44px */
+  --control-h: 2.25rem;      /* 36px buttons and inputs with a mouse; 44px on touch */
+  --tick-w: 25px;            /* room a task tick takes at the start of a row */
+  --tick-top: 7px;           /* its top offset in a two-line row */
+
+  /* Shape. Small radii only; nothing is a card.
+     (Tailwind's rounded-* utilities are mapped onto these three sizes in the @theme block below.) */
+  --radius-xs: 4px;          /* tags, checkboxes, kbd */
+  --radius-sm: 6px;          /* buttons, inputs, nav rows */
+  --radius-lg: 14px;         /* bottom sheets, dialogs, the phone "+" */
+  --radius-pill: 999px;      /* filter chips, switch */
+  --rule: 1px solid var(--border);     /* hairline between rows */
+  --rule-ink: 1px solid var(--text);   /* the one strong rule above each section title */
+  --focus-ring: 2px solid var(--text);
 }
 
-/* Night: warm, low-glare dark. Follows the phone's own light/dark setting ("Auto"), unless the person picked
-   Light or Dark in the menu (data-theme on <html>, set before first paint by the script in app/layout). */
+/* Night, following the device ("Auto"). Keep equal to the [data-theme="dark"] block below. */
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    --bg: #141311;
-    --surface: #1c1b18;
-    --surface-2: #24221f;
-    --border: #34312c;
-    --text: #e8e3da;          /* softer than pure white: less glare at night */
-    --muted: #a39e94;
-    --accent: #fb8a4c;
-    --accent-fg: #1a0f08;
-    --accent-soft: #3a2316;
-    --ok: #62c98a;
-    --ok-soft: #14301d;
-    --warn: #e8b24f;
-    --warn-soft: #36290f;
-    --danger: #ef8c8c;
-    --danger-soft: #3b1717;
-    --info: #93b4fd;
-    --info-soft: #1a2442;
-    --ig: #f472b6;
-    --tt: #e5e5e5;
+    --bg: #131311;
+    --surface: #1a1a17;
+    --surface-2: #232320;
+    --border: #2e2d29;
+    --text: #edebe4;              /* ink: warm and a little soft, so a dark room is not glare */
+    --muted: #a5a299;
+    --accent: #ee6a4b;
+    --accent-fg: #1b0b06;
+    --accent-soft: #3a1c13;
+    --ok: #72c48c;
+    --ok-soft: #16291c;
+    --warn: #e2aa4c;
+    --warn-soft: #32260f;
+    --danger: #f2827b;
+    --danger-soft: #3a1917;
+    --info: #8fb1f2;
+    --info-soft: #19233d;
+    --ig: #ee7fb7;
+    --tt: #e8e8e6;
     --google: #8ab4f8;
-    --facebook: #6ea8ff;
+    --facebook: #7fb0ff;
+    --border-strong: #75726a;
+    --faint: #75726a;
+    --check-mark: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%23131311' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m3.6 8.4 2.9 2.9 5.9-6.6'/%3E%3C/svg%3E");
+    --shadow-pop: 0 1px 2px rgb(0 0 0 / 0.4), 0 12px 32px rgb(0 0 0 / 0.5);
     color-scheme: dark;
   }
 }
+/* Night, picked by hand (Dark). Keep equal to the block above. */
 :root[data-theme="dark"] {
-  --bg: #141311;
-  --surface: #1c1b18;
-  --surface-2: #24221f;
-  --border: #34312c;
-  --text: #e8e3da;          /* softer than pure white: less glare at night */
-  --muted: #a39e94;
-  --accent: #fb8a4c;
-  --accent-fg: #1a0f08;
-  --accent-soft: #3a2316;
-  --ok: #62c98a;
-  --ok-soft: #14301d;
-  --warn: #e8b24f;
-  --warn-soft: #36290f;
-  --danger: #ef8c8c;
-  --danger-soft: #3b1717;
-  --info: #93b4fd;
-  --info-soft: #1a2442;
-  --ig: #f472b6;
-  --tt: #e5e5e5;
+  --bg: #131311;
+  --surface: #1a1a17;
+  --surface-2: #232320;
+  --border: #2e2d29;
+  --text: #edebe4;
+  --muted: #a5a299;
+  --accent: #ee6a4b;
+  --accent-fg: #1b0b06;
+  --accent-soft: #3a1c13;
+  --ok: #72c48c;
+  --ok-soft: #16291c;
+  --warn: #e2aa4c;
+  --warn-soft: #32260f;
+  --danger: #f2827b;
+  --danger-soft: #3a1917;
+  --info: #8fb1f2;
+  --info-soft: #19233d;
+  --ig: #ee7fb7;
+  --tt: #e8e8e6;
   --google: #8ab4f8;
-  --facebook: #6ea8ff;
+  --facebook: #7fb0ff;
+  --border-strong: #75726a;
+  --faint: #75726a;
+  --check-mark: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%23131311' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m3.6 8.4 2.9 2.9 5.9-6.6'/%3E%3C/svg%3E");
+  --shadow-pop: 0 1px 2px rgb(0 0 0 / 0.4), 0 12px 32px rgb(0 0 0 / 0.5);
   color-scheme: dark;
 }
 
-/* Tailwind's dark: variant follows the same choice. */
+/* Tailwind's dark: variant follows the same choice (device setting, unless Light or Dark was picked). */
 @custom-variant dark {
   @media (prefers-color-scheme: dark) {
     &:where(:root:not([data-theme="light"]) *) {
@@ -91,13 +150,45 @@
   }
 }
 
+/* Phones (the 768px breakpoint): type goes one size up (the 12px floor stays 12px). */
+@media (max-width: 767px) {
+  :root {
+    --text-sm: 0.875rem;       /* 14px */
+    --text-base: 1rem;         /* 16px: inputs never trigger iOS zoom */
+    --text-title: 1.375rem;    /* 22px */
+    --text-display: 2rem;      /* 32px */
+    --leading-base: 1.5rem;    /* 24px */
+  }
+}
+/* Phones and anything driven by a finger: 48px rows, 44px controls. */
+@media (max-width: 767px), (pointer: coarse) {
+  :root {
+    --row-h: 3rem;             /* 48px rows */
+    --control-h: 2.75rem;      /* 44px buttons and inputs */
+    --tick-w: 20px;            /* the 44px tick target overlaps the gap, so it takes less room */
+    --tick-top: 0px;
+  }
+}
+
+/* Chinese (the owner-facing forms set lang="zh-Hans" / "zh-Hant" on their shell). Newsreader has no CJK glyphs, so a
+   Chinese title would mix a Latin serif with a CJK sans. Under a zh lang the display face becomes the sans (titles then
+   take weight 600 and no tracking, see .display / .title), and zh-Hant swaps in the Traditional fonts. */
+:lang(zh) {
+  --font-display: var(--font-sans);
+}
+:lang(zh-Hant), :lang(zh-TW), :lang(zh-HK) {
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI Variable Text", "Segoe UI", Roboto, "Helvetica Neue", Arial, "PingFang TC", "PingFang HK", "Microsoft JhengHei UI", "Microsoft JhengHei", "Noto Sans TC", "Noto Sans CJK TC", sans-serif;
+}
+
 @theme inline {
   --color-bg: var(--bg);
   --color-surface: var(--surface);
   --color-surface-2: var(--surface-2);
   --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
   --color-text: var(--text);
   --color-muted: var(--muted);
+  --color-faint: var(--faint);
   --color-accent: var(--accent);
   --color-accent-fg: var(--accent-fg);
   --color-accent-soft: var(--accent-soft);
@@ -113,48 +204,85 @@
   --color-tt: var(--tt);
   --color-google: var(--google);
   --color-facebook: var(--facebook);
-  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI Variable Text", "Segoe UI", Roboto, "Helvetica Neue", Arial, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei UI", "Microsoft YaHei", "Noto Sans SC", "Noto Sans CJK SC", sans-serif;
+
+  /* Tailwind's own scales, folded onto the system so a leftover utility cannot leave it.
+     Radii: only 4px (tags, checkboxes), 6px (buttons, inputs, nav rows) and 14px (sheets, dialogs) exist.
+     "inline" writes these values into the utilities, so they do not collide with the same-named tokens above. */
+  --radius-xs: 4px;
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 6px;
+  --radius-xl: 14px;
+  --radius-2xl: 14px;
+  --radius-3xl: 14px;
+  /* Shadows: none, except on things that float (menus, sheets, dialogs use shadow-lg and up). */
+  --shadow-2xs: 0 0 #0000;
+  --shadow-xs: 0 0 #0000;
+  --shadow-sm: 0 0 #0000;
+  --shadow-md: 0 0 #0000;
+  --shadow-lg: var(--shadow-pop);
+  --shadow-xl: var(--shadow-pop);
+  --shadow-2xl: var(--shadow-pop);
+  /* text-base sits on the same line as body text. */
+  --text-base--line-height: var(--leading-base);
 }
 
+/* ============================================================ 2. BASE */
 html, body { background: var(--bg); color: var(--text); }
 /* Wide content scrolls inside its own container; the page itself never scrolls sideways on a phone. */
 html, body { overflow-x: clip; }
 body {
   font-family: var(--font-sans);
+  font-size: var(--text-base);
+  line-height: var(--leading-base);
   -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
   -webkit-text-size-adjust: 100%;
   text-size-adjust: 100%;
 }
-:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* Unlayered on purpose: focus and selection apply everywhere. One ink ring, 2px, offset 2px. */
+:focus-visible { outline: var(--focus-ring); outline-offset: 2px; }
+/* A sideways scroller (tab and chip strips) clips anything outside it top and bottom, so there the ring is drawn just
+   inside the control instead. Sheets keep a little room at their edges for a focused row's ring. */
+:where(.overflow-x-auto, .overflow-x-scroll, .board-tabs) :focus-visible { outline-offset: -2px; }
+.sheet-panel, .sheet-panel .overflow-y-auto { scroll-padding-block: 8px; }
+::selection { background: var(--text); color: var(--bg); }
+/* Inputs thicken their border instead (unlayered too, or the ring above would win). */
+.input:focus, .input.is-focus { border-color: var(--text); outline: 1px solid var(--text); outline-offset: 0; }
 /* No grey flash on tap, no 300ms double-tap-zoom delay. */
 a, button, summary, label, input, select, textarea, [role="button"] {
   -webkit-tap-highlight-color: transparent;
   touch-action: manipulation;
 }
 summary { cursor: pointer; }
-::selection { background: var(--accent-soft); color: var(--text); }
 
 /* Shell geometry. --tabbar-h is the phone bottom tab bar (0 on desktop) so sticky bars can sit above it. */
 :root { --tabbar-h: calc(4rem + env(safe-area-inset-bottom)); }
 @media (min-width: 768px) { :root { --tabbar-h: 0px; } }
 
-/* Form controls share one look. */
-.input {
-  width: 100%;
-  border: 1px solid var(--border);
-  background: var(--surface);
-  color: var(--text);
-  border-radius: 0.5rem;
-  padding: 0.5rem 0.75rem;
-  font-size: 0.875rem;
+/* Focus clearance. Keyboard focus (and anything scrolled into view) stops above the phone tab bar, and above a bar
+   that stays in reach when the page has one: a sticky or fixed action bar (.sticky-actions, .action-bar, the review
+   queue and reply bars, or a bar pinned with bottom-[var(--tabbar-h)]). 5.5rem clears the tallest of them (the owner
+   form's bar, a two-button phone bar). Unlayered: it is a rule about the page, not a look. */
+html { scroll-padding-bottom: calc(var(--tabbar-h) + 0.75rem); }
+html:has(.sticky-actions, .action-bar, .queue-bar, .ask-bar, [class*="bottom-[var(--tabbar-h)]"], [class*="bottom-[calc(var(--tabbar-h)"]) {
+  scroll-padding-bottom: calc(var(--tabbar-h) + 5.5rem);
 }
-.input:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
-.input::placeholder { color: var(--muted); opacity: 0.8; }
-textarea.input { min-height: 6rem; resize: vertical; }
-.label { display: block; font-size: 0.75rem; font-weight: 600; color: var(--muted); margin-bottom: 0.25rem; }
+/* Sideways strips (tab and chip rows): a focused chip stops one gutter from the edge, not flush against it. The
+   scrolling itself is a small focus helper in the root layout (Chrome leaves a half-visible chip where it is). */
+:where(.overflow-x-auto, .overflow-x-scroll, .board-tabs) { scroll-padding-inline: 1rem; }
+/* Two phone bars are taller than 5.5rem: the send mode bar (two rows of 44px buttons, about 7rem) and the floating
+   bulk-select panel on /tasks (about 10.5rem). While one is up, focus stops above its top edge. More specific than the
+   rule above, so it wins while the bar is on the page. */
+@media (max-width: 767px) {
+  html:has(.queue-bar.send-bar) { scroll-padding-bottom: calc(var(--tabbar-h) + 7.75rem); }
+  html:has(.bulk-bar.bulk-bar) { scroll-padding-bottom: calc(var(--tabbar-h) + 12rem); }
+}
 
-/* Checkboxes and radios pick up the brand colour. */
-input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); }
+/* Checkboxes and radios that do not use .check still print in ink. */
+input[type="checkbox"], input[type="radio"] { accent-color: var(--text); }
 
 /* iOS Safari zooms the page when a focused field is under 16px. Phones and touch tablets get 16px;
    desktop keeps the denser 14px. Unlayered on purpose so a stray text-sm utility can't undo it. */
@@ -167,26 +295,9 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); }
   }
 }
 
-/* Touch: everything you tap is at least 44px tall. */
-@media (pointer: coarse) {
-  .input, select.input { min-height: 44px; }
-  .btn { min-height: 44px; }
-  .btn-sm { min-height: 40px; padding-left: 0.75rem; padding-right: 0.75rem; }
-  input[type="checkbox"], input[type="radio"] { width: 1.25rem; height: 1.25rem; }
-}
-
-/* Text links in a card header ("Edit plan", "See all") look small but get a 44px hit area on touch. */
-@media (pointer: coarse) {
-  .card-head a:not(.btn):not(.btn-sm) { position: relative; }
-  .card-head a:not(.btn):not(.btn-sm)::after {
-    content: "";
-    position: absolute;
-    left: 50%;
-    top: 50%;
-    width: max(100%, 44px);
-    height: 44px;
-    transform: translate(-50%, -50%);
-  }
+/* Touch: plain checkboxes and radios are big enough to hit (buttons and inputs get 44px from --control-h). */
+@media (max-width: 767px), (pointer: coarse) {
+  input[type="checkbox"]:not(.check), input[type="radio"]:not(.check) { width: 1.375rem; height: 1.375rem; }
 }
 
 /* Opt-in for small icon buttons (e.g. a 24px round toggle): keeps the look, grows the hit area to 44px. */
@@ -201,16 +312,16 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); }
   transform: translate(-50%, -50%);
 }
 
-/* Sticky action bar for long forms: sits above the phone tab bar, at the bottom edge on desktop. */
+/* Sticky action bar for long forms: it sits flush on top of the phone tab bar, and on the bottom edge on desktop
+   (--tabbar-h is 0 there). Give the bar inside it the .action-bar look (solid paper, a hairline on top) so nothing
+   shows underneath. Position only, and unlayered, as before: the smoke tests and the owner form rely on it. */
 .sticky-actions {
   position: sticky;
-  bottom: calc(var(--tabbar-h) + 0.5rem);
+  bottom: var(--tabbar-h);
   z-index: 10;
 }
-@media (min-width: 768px) { .sticky-actions { bottom: 1rem; } }
 
-/* Native <dialog> used as a bottom sheet on phones. */
-dialog.sheet { margin: 0; padding: 0; border: 0; background: transparent; color: var(--text); max-width: 100vw; max-height: 100dvh; }
+/* Native <dialog> used as a bottom sheet on phones. (Its box reset is in @layer base below, so md:m-auto / md:max-w-* centre it on desktop.) */
 dialog.sheet::backdrop { background: rgb(0 0 0 / 0.4); }
 @media (prefers-reduced-motion: no-preference) {
   dialog.sheet[open] > .sheet-panel { animation: sheet-in 180ms ease-out; }
@@ -221,10 +332,489 @@ dialog.sheet::backdrop { background: rgb(0 0 0 / 0.4); }
 summary.no-marker { list-style: none; }
 summary.no-marker::-webkit-details-marker { display: none; }
 
-/* Grid items default to min-width:auto, so one long word, chart or form can push a single-column grid
-   wider than the phone screen. Let them shrink; anything that must scroll does so in its own container. */
 @layer base {
+  /* Grid items default to min-width:auto, so one long word, chart or form can push a single-column grid
+     wider than the phone screen. Let them shrink; anything that must scroll does so in its own container. */
   .grid > * {
     min-width: 0;
   }
+  /* An element that states its language takes that language's sans stack (the zh-Hant override above only changes
+     the variable; this makes body text inside the owner-facing shells use it). Titles keep their own face. */
+  [lang] { font-family: var(--font-sans); }
+  /* Native <dialog> as a sheet: no UA box. Layered, so a call site's utilities (md:m-auto md:max-w-md) still win. */
+  dialog.sheet { margin: 0; padding: 0; border: 0; background: transparent; color: var(--text); max-width: 100vw; max-height: 100dvh; }
+}
+
+@layer components {
+  /* ============================================================ 3. TYPE */
+  .display {            /* page title: the only large thing on a page */
+    font-family: var(--font-display);
+    font-size: var(--text-display);
+    line-height: 1.1;
+    font-weight: 450;
+    letter-spacing: -0.02em;
+    font-optical-sizing: auto;
+    font-variant-numeric: lining-nums;
+  }
+  .title {              /* section title */
+    font-family: var(--font-display);
+    font-size: var(--text-title);
+    line-height: 1.75rem;
+    font-weight: 500;
+    letter-spacing: -0.01em;
+    font-optical-sizing: auto;
+    font-variant-numeric: lining-nums;
+  }
+  .serif {              /* the display face on its own (agenda day numeral, a figure): pair with a size utility */
+    font-family: var(--font-display);
+    font-optical-sizing: auto;
+    font-variant-numeric: lining-nums;
+  }
+  .sub { margin-top: 6px; color: var(--muted); }
+  .eyebrow {            /* small caps label: sidebar groups, day groups, table heads */
+    font-size: var(--text-xs);
+    line-height: 1rem;
+    font-weight: 600;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+  :lang(zh) .eyebrow { letter-spacing: 0; text-transform: none; }
+  .meta { font-size: var(--text-sm); color: var(--muted); }
+  .num { font-variant-numeric: tabular-nums; }
+  .count {              /* a number that needs you: cinnabar, no pill */
+    font-size: var(--text-sm);
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    color: var(--accent);
+  }
+  .link { color: var(--text); text-decoration: underline; text-decoration-color: var(--border-strong); text-decoration-thickness: 1px; text-underline-offset: 3px; }
+  .link:hover { text-decoration-color: var(--text); }
+  .link-quiet { font-size: var(--text-sm); color: var(--muted); text-decoration: none; white-space: nowrap; }
+  .link-quiet:hover { color: var(--text); }
+  .emoji { filter: grayscale(1); font-style: normal; }   /* emoji are printed in ink too */
+
+  /* Chinese titles: the sans (see tokens), a little heavier, no tracking. */
+  :lang(zh) .display, :lang(zh) .title, :lang(zh) .serif { font-weight: 600; letter-spacing: 0; }
+
+  /* ============================================================ 4. SHELL (sidebar.tsx, (app)/layout.tsx) */
+  .shell { display: flex; min-height: 100dvh; }
+
+  /* --- desktop sidebar: a table of contents. Text only, no icons, no fills. */
+  .side {
+    position: sticky; top: 0;
+    display: flex; flex-direction: column;
+    width: 17.5rem; height: 100dvh; flex: none;
+    padding: 26px 16px 16px;
+    border-right: var(--rule);
+    overflow-y: auto;
+  }
+  .wordmark {
+    font-family: var(--font-display); font-size: 1.375rem; line-height: 1.75rem; font-weight: 500; letter-spacing: -0.01em;
+    text-decoration: none; padding: 0 10px; margin-bottom: 18px; align-self: flex-start; border-radius: var(--radius-xs);
+  }
+  .side-new { justify-content: flex-start; margin-bottom: 22px; padding: 0 10px; flex: none; }
+  .side-new kbd { margin-left: auto; }
+  .side-nav { display: flex; flex-direction: column; gap: 22px; }
+  .side-group { display: flex; flex-direction: column; gap: 1px; }
+  .side-heading { display: flex; align-items: center; justify-content: space-between; padding: 0 10px 6px; }
+  .side-heading a:not(.side-add) { color: inherit; text-decoration: none; border-radius: var(--radius-xs); }
+  .side-heading a:not(.side-add):hover { color: var(--text); }
+  .side-add { display: grid; place-items: center; width: 20px; height: 20px; margin: -2px -4px -2px 0; border-radius: var(--radius-xs); color: var(--muted); text-decoration: none; }
+  .side-add:hover { background: var(--surface-2); color: var(--text); }
+  .side-link {
+    display: flex; align-items: baseline; gap: 8px;
+    min-height: 32px; padding: 5px 10px;
+    border-radius: var(--radius-sm);
+    font-size: 0.875rem; line-height: 1.375rem;
+    text-decoration: none;
+  }
+  .side-link:hover { background: var(--surface-2); }
+  .side-link[aria-current="page"] { background: var(--surface-2); font-weight: 600; }
+  .side-link .t { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .side-link .place { flex: 0 9999 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.75rem; font-weight: 400; color: var(--muted); }   /* the place gives way first, never the name */
+  .side-link.is-quiet { font-size: 0.8125rem; color: var(--muted); align-items: center; gap: 4px; }
+  .side-link.is-quiet[aria-current="page"] { color: var(--text); }
+  .side-note { padding: 5px 10px; font-size: 0.8125rem; color: var(--muted); }
+  .side-rule { border-top: var(--rule); padding-top: 12px; }
+  .side-foot { margin-top: auto; padding: 20px 10px 0; font-size: 0.8125rem; color: var(--muted); }
+  .side-foot a, .side-foot form button { color: inherit; text-decoration: none; background: none; border: 0; padding: 0; cursor: pointer; border-radius: var(--radius-xs); }
+  .side-foot a:hover, .side-foot form button:hover { color: var(--text); }
+  .side-foot a[aria-current="page"] { color: var(--text); font-weight: 600; }
+  .side-foot .links { display: flex; align-items: center; gap: 8px; }
+  .side-foot .seg { margin: 10px 0 0 -8px; }
+  .side-foot .user { display: flex; justify-content: space-between; gap: 8px; margin-top: 12px; padding-top: 12px; border-top: var(--rule); }
+  .side-foot .user b { font-weight: 500; color: var(--text); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  @media (pointer: coarse) {                 /* a tablet with the sidebar showing: rows grow to finger size */
+    .side-link { min-height: 44px; padding: 11px 10px; }
+    .side-foot a, .side-foot form button { display: inline-flex; align-items: center; min-height: 44px; }
+    .side-foot .user { align-items: center; margin-top: 0; padding-top: 0; }
+    .side-add { width: 44px; height: 44px; margin: -14px -16px -14px 0; }
+    .side .wordmark { display: inline-flex; align-items: center; min-height: 44px; margin-bottom: 10px; }
+    .side-heading a:not(.side-add) { display: inline-flex; align-items: center; min-height: 44px; margin: -14px 0; }
+  }
+
+  /* --- main column: left-aligned, at most 1080px of content */
+  .shell-main { flex: 1; min-width: 0; padding: 44px 56px 64px; }
+  .shell-page { max-width: 67.5rem; }
+  @media (max-width: 1023px) { .shell-main { padding-left: 32px; padding-right: 32px; } }   /* small tablets: the sidebar already took 280px */
+
+  /* --- phone: slim wordmark row on top, tab bar under the thumb */
+  .topbar { display: none; }
+  .tabbar { display: none; }
+  @media (max-width: 767px) {
+    .shell { flex-direction: column; }
+    .side { display: none; }
+    .topbar {
+      display: flex; align-items: center; height: calc(3rem + env(safe-area-inset-top));
+      padding: env(safe-area-inset-top) max(1rem, env(safe-area-inset-right)) 0 max(1rem, env(safe-area-inset-left));
+    }
+    .topbar .wordmark { display: flex; align-items: center; height: 100%; min-height: 44px; margin: 0; padding: 0; font-size: 1.1875rem; align-self: center; }
+    .shell-main {
+      padding: 4px max(1rem, env(safe-area-inset-right)) calc(var(--tabbar-h) + 1.5rem) max(1rem, env(safe-area-inset-left));
+    }
+    .tabbar {
+      display: block; position: fixed; inset: auto 0 0 0; z-index: 30;
+      border-top: var(--rule);
+      background: var(--bg);                 /* solid paper: no blur, no translucency */
+      padding: 0 env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+    }
+    .tabbar-in { display: grid; grid-template-columns: repeat(5, 1fr); height: 4rem; max-width: 28rem; margin: 0 auto; }
+    .tab {
+      display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
+      font-size: var(--text-xs); line-height: 0.875rem; font-weight: 500; color: var(--muted);
+      text-decoration: none; background: none; border: 0; padding: 0; cursor: pointer;
+    }
+    .tab svg { width: 24px; height: 24px; stroke-width: 1.6; }
+    .tab[aria-current="page"], .tab.is-current { color: var(--text); font-weight: 600; }
+    .tab[aria-current="page"] svg, .tab.is-current svg { stroke-width: 2; }
+    .tab:focus-visible { outline-offset: -4px; }
+    .tab-icon { position: relative; }
+    .tab-badge {
+      position: absolute; top: -5px; left: 14px;
+      min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px;
+      background: var(--accent); color: var(--accent-fg);
+      font-size: var(--text-xs); line-height: 18px; font-weight: 600; font-variant-numeric: tabular-nums; text-align: center;
+      box-shadow: 0 0 0 2px var(--bg);
+    }
+    .tab-new span {               /* the seal: the one block of colour on a phone */
+      display: grid; place-items: center; width: 48px; height: 48px;
+      border-radius: var(--radius-lg); background: var(--accent); color: var(--accent-fg);
+    }
+    .tab-new svg, .tab-new[aria-current="page"] svg { stroke-width: 2.2; }
+    .tab-new[aria-current="page"] span { box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--accent); }
+  }
+
+  /* --- the phone "More" sheet: everything the tab bar has no room for. A raised surface, rows on hairlines. */
+  .more-sheet { background: var(--surface); border-radius: var(--radius-lg) var(--radius-lg) 0 0; box-shadow: var(--shadow-pop); }
+  .more-head { position: sticky; top: 0; z-index: 1; display: flex; align-items: center; justify-content: space-between; padding: 14px 6px 2px 16px; background: var(--surface); border-radius: var(--radius-lg) var(--radius-lg) 0 0; }
+  .more-grip { position: absolute; left: 50%; top: 8px; width: 36px; height: 4px; margin-left: -18px; border-radius: 2px; background: var(--border); }
+  .more-group { padding: 0 16px; }
+  .more-group + .more-group { margin-top: 20px; }
+  .more-group > .eyebrow { padding: 0 0 6px; border-bottom: var(--rule); }
+  .more-group > .eyebrow + .seg { margin-top: 10px; }
+  .more-list > * + * { border-top: var(--rule); }
+  .more-row {
+    display: flex; align-items: baseline; gap: 12px;
+    min-height: 3rem; margin: 0 -8px; padding: 12px 8px;
+    font-size: 1rem; line-height: 1.5rem; text-decoration: none;
+  }
+  .more-row:active { background: var(--surface-2); }
+  .more-row[aria-current="page"] { background: var(--surface-2); font-weight: 600; }
+  .more-row .t { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
+  .more-row .place { flex: none; max-width: 50%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.875rem; font-weight: 400; color: var(--muted); }
+  .more-row.is-quiet { color: var(--muted); }
+  .more-row svg { align-self: center; flex: none; }
+  .more-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 20px 16px 0; padding-top: 12px; border-top: var(--rule); }
+
+  /* --- a quiet segmented choice (Appearance: Auto / Light / Dark). Text buttons; the chosen one reads like the current
+     sidebar row (surface-2, ink, 600). Markup: <div class="seg" role="radiogroup"><button role="radio" aria-checked>… */
+  .seg { display: inline-flex; flex-wrap: wrap; gap: 2px; }
+  .seg > :is(button, a) {
+    display: inline-flex; align-items: center; justify-content: center; min-height: 1.75rem; padding: 0 10px;
+    border: 0; border-radius: var(--radius-sm); background: none; color: var(--muted);
+    font: inherit; font-size: var(--text-sm); font-weight: 500; text-decoration: none; white-space: nowrap; cursor: pointer;
+  }
+  .seg > :is(button, a):hover { color: var(--text); background: var(--surface-2); }
+  .seg > :is([aria-checked="true"], [aria-pressed="true"], [aria-current="page"]) { background: var(--surface-2); color: var(--text); font-weight: 600; }
+  @media (max-width: 767px), (pointer: coarse) { .seg > :is(button, a) { min-height: 2.75rem; min-width: 2.75rem; padding: 0 14px; } }
+
+  /* ============================================================ 5. SECTIONS, LISTS, ROWS (this replaces the card) */
+  /* Page head: optional breadcrumb, the serif title with its actions on the same baseline, one muted line under it. */
+  .page-head { margin-bottom: 28px; }
+  .crumb { margin-bottom: 4px; font-size: var(--text-sm); color: var(--muted); }
+  .crumb a { text-decoration: none; }
+  .crumb a:hover { color: var(--text); }
+  @media (max-width: 767px), (pointer: coarse) {   /* a 44px hit area; the negative margins keep the line's height */
+    .crumb a { position: relative; z-index: 1; display: inline-flex; align-items: center; justify-content: center; min-height: 44px; min-width: 2.75rem; margin: -13px 0; }   /* above the title it overlaps */
+  }
+  .head-row { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 4px 24px; }   /* actions wrap under the title when there is no room */
+  .head-row > .display { min-width: 0; overflow-wrap: anywhere; }
+  .head-actions { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; }
+  @media (max-width: 767px) { .page-head { margin-bottom: 20px; } }
+
+  .sec { margin-top: var(--space-10); }
+  .cols > * > .sec:first-child { margin-top: 0; }
+  .sec-head {
+    display: flex; align-items: baseline; justify-content: space-between; gap: 16px;
+    border-top: var(--rule-ink);            /* the one strong line: ink rule, then serif title */
+    padding: 12px 0 6px;
+  }
+  .sec-head > .title { min-width: 0; }
+  /* The section's quiet action (a text link, wherever it sits in the head) keeps its small look but gets a 44px hit
+     area (same as .tap-target). */
+  .sec-head a:not(.btn) { position: relative; }
+  .sec-head a:not(.btn)::after { content: ""; position: absolute; left: 50%; top: 50%; width: max(100%, 44px); height: max(100%, 44px); transform: translate(-50%, -50%); }
+  .sec-head .title .count { font-family: var(--font-sans); letter-spacing: 0; margin-left: 4px; }
+  .sec-head .title .meta { font-family: var(--font-sans); letter-spacing: 0; font-weight: 400; margin-left: 6px; }
+  .sec-note { padding: 2px 0 10px; font-size: var(--text-sm); color: var(--muted); }
+  .sec-note b { font-weight: 600; color: var(--text); }
+  .sec-body { padding-top: 8px; }          /* prose or a form under a section title (lists bring their own row padding) */
+  .sec.is-untitled { border-top: var(--rule); padding-top: 12px; }   /* a section with no title: a hairline, not the ink rule */
+
+  .list > li + li { border-top: var(--rule); }
+  .list.is-ruled { border-top: var(--rule); border-bottom: var(--rule); }   /* a strip with no title of its own */
+  .row {
+    display: flex; align-items: baseline; column-gap: 16px; row-gap: 0;
+    min-height: var(--row-h);
+    padding: calc((var(--row-h) - var(--leading-base)) / 2) 0;
+    text-decoration: none;
+  }
+  .row-title { flex: 1; min-width: 0; font-weight: 500; overflow-wrap: anywhere; }
+  .row-title.is-plain { font-weight: 400; }
+  .row .meta { white-space: nowrap; }
+  .row > svg, .row .chev { align-self: center; color: var(--faint); }
+  a.row:hover .row-title, .row a.row-title:hover { text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 3px; }
+  a.row-title { text-decoration: none; }
+  /* Narrow (under 1024px) rows go to two lines: the title, then .row-meta, its facts joined by a middle dot. */
+  @media (max-width: 1023px) {
+    .row-meta > * + *::before { content: "·"; margin: 0 6px; color: var(--muted); font-weight: 400; }
+    .row-meta > :empty { display: none; }
+  }
+
+  /* Notice (was the soft-coloured callout box): one row between two hairlines, a status then its action as a link. */
+  .notice { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 2px 16px; border-top: var(--rule); border-bottom: var(--rule); padding: calc((var(--row-h) - var(--leading-base)) / 2) 0; }
+  .notice + .notice { border-top: 0; }
+  .notice .status { white-space: normal; }
+
+  /* Empty state: two plain lines where the rows would be. No dashed box. */
+  .empty { padding: 10px 0 16px; }
+  .empty > :first-child { font-weight: 500; }
+  .empty > * + * { margin-top: 2px; font-size: var(--text-sm); color: var(--muted); }
+
+  /* Figure (was the Stat / metric tile): caps label, a serif number, one meta line. No box. */
+  .figure .value { display: block; margin-top: 2px; font-family: var(--font-display); font-size: 1.75rem; line-height: 2.25rem; font-weight: 450; letter-spacing: -0.01em; font-variant-numeric: lining-nums tabular-nums; }
+  .figure .eyebrow, .figure .meta { display: block; }
+  .figures { display: flex; flex-wrap: wrap; gap: 16px 48px; }
+  /* Phones: two columns. Each figure's label, number and meta line share rows with its neighbour's (subgrid), so a
+     label that wraps to two lines doesn't push its number below the one beside it. */
+  @media (max-width: 767px) {
+    .figures { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px 24px; }
+    .figures > .figure { display: grid; grid-row: span 3; grid-template-rows: subgrid; row-gap: 0; align-content: start; }
+  }
+
+  .cols { display: grid; grid-template-columns: minmax(0, 1fr) 18.75rem; column-gap: 64px; align-items: start; margin-top: var(--space-10); }
+  @media (max-width: 1199px) { .cols { grid-template-columns: minmax(0, 1fr); row-gap: var(--space-10); } }
+  @media (max-width: 767px) { .sec, .cols { margin-top: var(--space-8); } .cols { row-gap: var(--space-8); } }
+  /* A parent that already spaces its children (a grid, a flex column, a space-y stack) owns the gap. Keep this last. */
+  :where(.grid, .flex, .inline-flex, [class*="space-y-"]) > .sec { margin-top: 0; }
+
+  /* Things that float (menus, popovers, dialogs): the one place a shadow is allowed. */
+  .pop { background: var(--surface); border: var(--rule); border-radius: var(--radius-sm); box-shadow: var(--shadow-pop); }
+  .pop.is-sheet { border: 0; border-radius: var(--radius-lg); }
+
+  /* A bar that stays in reach while its page scrolls (Save, Send, Download PDF), sticky (inside .sticky-actions) or
+     fixed above the tab bar: a solid paper strip with a hairline on top, like the tab bar it sits on. No blur, no
+     shadow, no rounded box. (html gets the focus clearance for it, see BASE.) */
+  .action-bar { background: var(--bg); border-top: var(--rule); padding-top: 8px; padding-bottom: 8px; }
+
+  /* ============================================================ 6. CONTROLS */
+  .btn {
+    --h: var(--control-h);
+    /* wrap + align-content keeps the label centred when a call site makes the button taller (min-h-12) or pads it */
+    display: inline-flex; flex-wrap: wrap; align-items: baseline; align-content: center; justify-content: center; gap: 0 6px;
+    height: var(--h); padding: 0 14px;
+    border: 1px solid transparent; border-radius: var(--radius-sm);
+    background: none; color: var(--text);
+    /* line-height fills the button, so the label is centred and the button can sit on a text baseline */
+    font-size: 0.875rem; line-height: calc(var(--h) - 2px); font-weight: 500; white-space: nowrap; text-decoration: none; cursor: pointer;
+  }
+  .btn svg { width: 16px; height: 16px; stroke-width: 2; align-self: center; }
+  /* Cinnabar: the screen's one accent action. In the app that is "New ask" in the sidebar (the "+" on a phone), so a
+     page's own primary button is drawn in ink instead (see below); cinnabar stays on the pages without the app shell
+     (login, the owner form, /collab, /drop, /kit) and in a dialog, where it is the only action in view. */
+  .btn-primary { background: var(--accent); color: var(--accent-fg); font-weight: 600; }
+  .btn-primary:hover { filter: brightness(0.94); }
+  /* Ink: the page's focal action inside the app (filled with ink, paper label: the inverse, like a selected chip). */
+  .btn-ink, .shell-main .btn-primary { background: var(--text); color: var(--bg); font-weight: 600; filter: none; }
+  .btn-ink:hover, .shell-main .btn-primary:hover { background: color-mix(in srgb, var(--text) 84%, var(--bg)); filter: none; }
+  .shell-main dialog .btn-primary { background: var(--accent); color: var(--accent-fg); }
+  .shell-main dialog .btn-primary:hover { background: var(--accent); filter: brightness(0.94); }
+  .btn-secondary { border-color: var(--border-strong); }
+  .btn-secondary:hover { border-color: var(--text); }
+  .btn-ghost { color: var(--muted); padding: 0 8px; }
+  .btn-ghost:hover { color: var(--text); background: var(--surface-2); }
+  .btn-danger { border-color: var(--border-strong); color: var(--danger); }
+  .btn-danger:hover { border-color: var(--danger); background: var(--danger-soft); }
+  .btn-sm { --h: 1.75rem; padding: 0 10px; font-size: 0.8125rem; }
+  .btn-sm.btn-ghost { padding: 0 6px; }
+  .btn[disabled], .btn[aria-disabled="true"] { opacity: 0.45; pointer-events: none; }
+  kbd {
+    font: inherit; font-size: 0.75rem; line-height: 1rem; font-weight: 500; align-self: center;
+    min-width: 1.125rem; padding: 0 4px; text-align: center;
+    border: 1px solid color-mix(in srgb, currentColor 40%, transparent); border-radius: var(--radius-xs);
+  }
+  @media (max-width: 767px), (pointer: coarse) {
+    .btn { font-size: 1rem; }
+    .btn-sm { --h: 2.75rem; padding: 0 14px; font-size: 0.9375rem; }      /* 44px: nothing you tap is shorter */
+    .btn-sm.btn-ghost { padding: 0 10px; }
+  }
+
+  .label { display: block; margin-bottom: 6px; font-size: var(--text-sm); line-height: 1.125rem; font-weight: 500; color: var(--text); }
+  .hint { margin-top: 6px; font-size: var(--text-sm); color: var(--muted); }
+  .input {
+    display: block; width: 100%; height: var(--control-h); padding: 0 12px;
+    border: 1px solid var(--border-strong); border-radius: var(--radius-sm);
+    background: var(--surface); color: var(--text);
+    font: inherit; font-size: 0.875rem;
+  }
+  textarea.input { height: auto; min-height: 6rem; padding: 8px 12px; line-height: 1.375rem; resize: vertical; }
+  .input::placeholder { color: var(--muted); opacity: 1; }
+  .input:hover { border-color: var(--muted); }
+  /* (.input:focus is with the base rules above, unlayered, next to the global focus ring.) */
+  select.input {
+    appearance: none; -webkit-appearance: none; padding-right: 32px;
+    background-image: linear-gradient(45deg, transparent 50%, var(--muted) 50%), linear-gradient(135deg, var(--muted) 50%, transparent 50%);
+    background-position: calc(100% - 17px) 50%, calc(100% - 12px) 50%; background-size: 5px 5px; background-repeat: no-repeat;
+  }
+  select.input[multiple] { height: auto; padding: 4px 8px; background-image: none; }
+  input[type="file"].input { height: auto; min-height: var(--control-h); padding: 6px 12px; }
+
+  /* Checkbox: an ink square. Empty = to do, filled = done. */
+  .check {
+    appearance: none; -webkit-appearance: none; flex: none;
+    width: 1.125rem; height: 1.125rem; margin: 0;
+    border: 1.5px solid var(--border-strong); border-radius: var(--radius-xs);
+    background: var(--surface) center / 100% no-repeat; cursor: pointer; vertical-align: -3px;
+  }
+  .check:hover { border-color: var(--text); }
+  .check:checked { border-color: var(--text); background-color: var(--text); background-image: var(--check-mark); }
+  .check[type="radio"] { border-radius: 50%; }
+  .check[type="radio"]:checked { background-image: none; box-shadow: inset 0 0 0 3px var(--surface); }
+  .check:disabled { opacity: 0.45; cursor: default; }
+  @media (max-width: 767px), (pointer: coarse) { .check { width: 1.375rem; height: 1.375rem; border-radius: 5px; } .check[type="radio"] { border-radius: 50%; } }
+
+  /* The task tick: the same ink square as a button. 18px drawn with a mouse; 22px drawn inside a 44px target on touch.
+     Negative margins keep the big target from changing the row height or the text indent (--tick-w, --tick-top are tokens). */
+  .tick { flex: none; align-self: center; display: grid; place-items: center; width: 28px; height: 28px; margin: -3px 2px -3px -5px; padding: 0; background: none; border: 0; border-radius: var(--radius-sm); cursor: pointer; }
+  .tick i { display: block; width: 1.125rem; height: 1.125rem; border: 1.5px solid var(--border-strong); border-radius: var(--radius-xs); background: var(--surface) center / 100% no-repeat; }
+  .tick:hover i { border-color: var(--text); }
+  .tick.is-done i, .tick[aria-pressed="true"] i, .tick[aria-checked="true"] i { border-color: var(--text); background-color: var(--text); background-image: var(--check-mark); }
+  @media (max-width: 767px), (pointer: coarse) {
+    .tick { width: 44px; height: 44px; margin: -11px -13px -11px -11px; }
+    .tick i { width: 1.375rem; height: 1.375rem; border-radius: 5px; }
+  }
+
+  /* Switch */
+  .switch { display: inline-flex; align-items: center; gap: 10px; min-height: 28px; cursor: pointer; font-size: 0.875rem; font-weight: 500; }
+  .switch input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+  .switch-track { position: relative; flex: none; width: 34px; height: 20px; border-radius: var(--radius-pill); background: var(--border-strong); transition: background 0.15s; }
+  .switch-track::after { content: ""; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background: var(--bg); transition: transform 0.15s; }
+  .switch input:checked + .switch-track, .switch-track.is-on, [aria-checked="true"] > .switch-track { background: var(--text); }
+  .switch input:checked + .switch-track::after, .switch-track.is-on::after, [aria-checked="true"] > .switch-track::after { transform: translateX(14px); }
+  .switch input:focus-visible + .switch-track { outline: var(--focus-ring); outline-offset: 2px; }
+  @media (max-width: 767px), (pointer: coarse) {
+    .switch { min-height: 44px; font-size: 1rem; }
+    .switch-track { width: 44px; height: 26px; }
+    .switch-track::after { width: 22px; height: 22px; }
+    .switch input:checked + .switch-track::after, .switch-track.is-on::after, [aria-checked="true"] > .switch-track::after { transform: translateX(18px); }
+  }
+
+  /* Filter chips: outlined pills; the selected one is filled with ink. The button is 44px tall on touch, the pill inside is 34px.
+     Selected = aria-pressed="true" on a button, aria-current on a link, aria-checked="true" on a radio, or .is-on. */
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; }
+  .chip { display: inline-flex; align-items: center; min-height: 2rem; padding: 0; background: none; border: 0; border-radius: var(--radius-pill); cursor: pointer; text-decoration: none; }
+  .chip > span {
+    display: inline-flex; align-items: center; gap: 6px; height: 2rem; padding: 0 12px;
+    border: 1px solid var(--border-strong); border-radius: var(--radius-pill);
+    font-size: 0.8125rem; font-weight: 500; white-space: nowrap;
+  }
+  .chip i { font-style: normal; font-weight: 400; font-variant-numeric: tabular-nums; color: var(--muted); }
+  .chip:hover > span { border-color: var(--text); }
+  .chip:is([aria-pressed="true"], [aria-current], [aria-checked="true"], .is-on) > span { background: var(--text); border-color: var(--text); color: var(--bg); }
+  .chip:is([aria-pressed="true"], [aria-current], [aria-checked="true"], .is-on) i { color: inherit; opacity: 0.72; }
+  @media (max-width: 767px), (pointer: coarse) {
+    .chip { min-height: 2.75rem; }
+    .chip > span { height: 2.125rem; padding: 0 13px; font-size: 0.9375rem; }
+  }
+
+  /* Tag: a fact about a row (Free, Creator). Outlined, small caps. Never coloured. 12px, like every small label. */
+  .tag {
+    display: inline-block; height: 1.25rem; padding: 0 5px; margin-left: 6px;
+    border: 1px solid var(--border-strong); border-radius: var(--radius-xs);
+    font-size: var(--text-xs); line-height: 1.125rem; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; color: var(--muted);
+    vertical-align: middle; position: relative; top: -1px; white-space: nowrap;
+  }
+  .tag.is-bare { margin-left: 0; top: 0; }   /* a tag that stands on its own in a flex row, not after a name */
+  /* Chinese has no capitals and reads badly tracked: plain 12px, no tracking ("必填"). */
+  :lang(zh) .tag { text-transform: none; letter-spacing: 0; }
+
+  /* Status: a coloured dot and plain words. Colour lives in the dot only; this replaces every soft-coloured pill. */
+  .status { display: inline-flex; align-items: baseline; gap: 8px; white-space: nowrap; }
+  .status::before { content: ""; flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--dot, var(--faint)); transform: translateY(-1.5px); }
+  .status.is-ok { --dot: var(--ok); color: var(--muted); }
+  .status.is-warn { --dot: var(--warn); }
+  .status.is-danger { --dot: var(--danger); }
+  .status.is-info { --dot: var(--info); }
+  .status.is-accent { --dot: var(--accent); }
+  .status.is-ink { --dot: var(--text); }            /* settled, not a warning (a post that is ready): never red */
+  .status.is-idle { color: var(--muted); }
+  .status.is-idle::before { background: none; box-shadow: inset 0 0 0 1.5px var(--faint); }
+  .status.is-ig { --dot: var(--ig); }
+  .status.is-tt { --dot: var(--tt); }
+  .status.is-google { --dot: var(--google); }
+  .status.is-facebook { --dot: var(--facebook); }
+  .status.is-small { font-size: var(--text-sm); gap: 6px; }   /* in a meta line */
+  .status.is-wrap { white-space: normal; }                    /* a long status that may wrap (a narrow column, a warning) */
+
+  /* Progress: one segment per planned item. Ink = done. (Over 12 items: a single 3px bar.) */
+  .meter { display: flex; gap: 3px; height: 4px; align-self: center; }
+  .meter i { flex: 1; min-width: 3px; border-radius: 1px; background: var(--border); }
+  .meter i.on { background: var(--text); }
+  .bar { height: 3px; border-radius: 2px; background: var(--border); overflow: hidden; }
+  .bar i { display: block; height: 100%; background: var(--text); }
+
+  /* Underline tabs */
+  .tabs { display: flex; gap: 24px; border-bottom: var(--rule); }
+  .tabs :is(a, button) { display: inline-flex; align-items: center; gap: 6px; min-height: 2.5rem; margin-bottom: -1px; padding: 0; border: 0; border-bottom: 2px solid transparent; background: none; color: var(--muted); font-weight: 500; text-decoration: none; white-space: nowrap; cursor: pointer; }
+  .tabs :is(a, button):hover { color: var(--text); }
+  /* A tab strip that scrolls sideways keeps every tab at its full width (they would otherwise shrink to 44px and their
+     nowrap labels overlap). */
+  .tabs:is(.overflow-x-auto, .board-tabs) :is(a, button) { flex: none; }
+  .tabs :is(a, button):is([aria-current="page"], [aria-selected="true"], [aria-pressed="true"]) { color: var(--text); border-bottom-color: var(--text); font-weight: 600; }
+  @media (max-width: 767px), (pointer: coarse) { .tabs :is(a, button) { min-height: 2.75rem; min-width: 2.75rem; justify-content: center; } }
+  /* Small phones: tighter tabs so a four-tab row (Inbox, Insights) fits instead of cutting its last tab at the edge. */
+  @media (max-width: 399px) { .tabs { gap: 16px; } }
+  @media (max-width: 359px) { .tabs :is(a, button) { font-size: 0.9375rem; } }
+
+  /* Month switcher (<MonthPicker>): no box, just the month between two arrows. Tapping the month opens the device's own
+     month chooser (an invisible month input laid over the words). "Back to this month" follows as a ghost button. */
+  .monthpick-wrap { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 0 8px; }
+  .monthpick { display: inline-flex; align-items: center; gap: 2px; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .monthpick .m { position: relative; display: grid; place-items: center; min-width: 8.5rem; height: 2rem; text-align: center; border-radius: var(--radius-sm); cursor: pointer; }
+  .monthpick .m:hover { background: var(--surface-2); }
+  .monthpick .m input { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }
+  .monthpick .m:has(input:focus-visible) { outline: var(--focus-ring); outline-offset: 2px; }
+  .monthpick a { display: grid; place-items: center; width: 2rem; height: 2rem; border-radius: var(--radius-sm); color: var(--muted); text-decoration: none; }
+  .monthpick a:hover { background: var(--surface-2); color: var(--text); }
+  .monthpick svg { width: 16px; height: 16px; stroke-width: 2; }
+  @media (max-width: 767px), (pointer: coarse) {
+    .monthpick a { width: 2.75rem; height: 2.75rem; }
+    .monthpick .m { height: 2.75rem; }
+    .monthpick svg { width: 18px; height: 18px; }
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .switch-track, .switch-track::after { transition: none; }
 }

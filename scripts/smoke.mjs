@@ -11,7 +11,10 @@ const { chromium } = require("playwright");
 
 const BASE = (process.env.BASE_URL ?? "http://localhost:3200").replace(/\/$/, "");
 const MODE = process.argv[2] ?? "all";
-const EMAIL = process.env.SMOKE_EMAIL ?? "nora@local";
+// Cameron by default: since #21 and #25 he is the one who sees everything (the review queue, every business, the
+// sidebar's business list); Nora's own HQ shows only her things. Steps about Nora's view sign in as Nora explicitly.
+const EMAIL = process.env.SMOKE_EMAIL ?? "cameron@local";
+const ME_NAME = /^nora/i.test(EMAIL) ? "Nora" : "Cameron";
 const PASSWORD = process.env.SMOKE_PASSWORD ?? "dev";
 const CLIENT_IDS = ["yummy-red-bowl-richmond", "yummy-red-bowl-sc", "crab-o-clock", "poke-bros", "maxs-virginia-beach", "snf-kingdom"];
 const ROUTES = ["/", "/asks", "/asks/new", "/tasks", "/tasks?view=list", "/tasks?view=board", "/tasks?view=table", "/tasks/import", "/review", "/calendar", "/calendar/new",
@@ -20,6 +23,9 @@ const ROUTES = ["/", "/asks", "/asks/new", "/tasks", "/tasks?view=list", "/tasks
   "/review?tab=approved", "/review?tab=approved&send=1",
   "/start-preview/snf-kingdom", "/start-preview/snf-kingdom?lang=zh-Hans", "/start-preview/snf-kingdom?lang=zh-Hant", "/start-preview/maxs-virginia-beach",
   ...CLIENT_IDS.flatMap((id) => [`/clients/${id}`, `/clients/${id}/settings`])];
+/** Nora's own HQ (signed in as nora@local): her Home, Inbox and simple ask page, Calendar, workspace and Mine pages. */
+const NORA_ROUTES = ["/", "/asks", "/asks/new", "/tasks", "/calendar", "/calendar?tab=posts", "/contracts", "/collabs", "/stats", "/settings", "/settings/notifications",
+  "/clients/noraeatsgood", "/kit-settings", "/deals"];
 const PUBLIC_ROUTES = ["/collab", "/start/smoke-not-a-real-token", "/start/smoke-not-a-real-token?lang=zh-Hans", "/start/smoke-not-a-real-token?lang=zh-Hant"];
 const VIEWPORTS = [{ name: "desktop", width: 1280, height: 900 }, { name: "mobile", width: 390, height: 844 }];
 
@@ -183,6 +189,18 @@ async function flows(browser) {
   const page = await context.newPage();
   const { errors } = watch(page);
   page.setDefaultTimeout(30000);
+  // Since #21 the review queue is Cameron's (Nora never sees drafts), so approving and sending happen as Cameron;
+  // `npage` is Nora's own HQ, for the steps about what she sees.
+  const camContext = await browser.newContext({ viewport: { width: 1280, height: 900 }, deviceScaleFactor: 1 });
+  await login(camContext, "cameron@local");
+  const cpage = await camContext.newPage();
+  const { errors: camErrors } = watch(cpage);
+  cpage.setDefaultTimeout(30000);
+  const noraContext = await browser.newContext({ viewport: { width: 1280, height: 900 }, deviceScaleFactor: 1 });
+  await login(noraContext, "nora@local");
+  const npage = await noraContext.newPage();
+  const { errors: noraErrors } = watch(npage);
+  npage.setDefaultTimeout(30000);
   const stamp = Date.now().toString(36);
   const month = ym(new Date());
   const prev = ym(new Date(new Date().getFullYear(), new Date().getMonth() - 1, 1));
@@ -322,21 +340,25 @@ async function flows(browser) {
       igDraftId = (JSON.stringify(ig).match(/"(drf_[^"]+)"/) ?? [])[1] ?? "";
       if (!dmDraftId || !igDraftId) throw new Error(`draft ids missing: ${JSON.stringify(dm).slice(0, 200)} / ${JSON.stringify(ig).slice(0, 200)}`);
     });
-    await step("review: approve IG draft", async () => {
-      await page.goto(`${BASE}/review?draft=${igDraftId}`, { waitUntil: "networkidle" });
-      await page.locator("button:has-text('Approve')").first().click();
-      await page.waitForLoadState("networkidle"); await page.waitForTimeout(1500);
-      await page.goto(`${BASE}/review?draft=${igDraftId}`, { waitUntil: "networkidle" });
-      const t = await page.locator("main").innerText();
-      if (/Needs review/.test(t) && (await page.locator("button:has-text('Approve')").count())) throw new Error("IG draft still awaiting approval");
+    await step("review: approve IG draft (as Cameron)", async () => {
+      await cpage.goto(`${BASE}/review?draft=${igDraftId}`, { waitUntil: "networkidle" });
+      await cpage.locator("button:has-text('Approve')").first().click();
+      await cpage.waitForLoadState("networkidle"); await cpage.waitForTimeout(1500);
+      await cpage.goto(`${BASE}/review?draft=${igDraftId}`, { waitUntil: "networkidle" });
+      const t = await cpage.locator("main").innerText();
+      if (/Needs review/.test(t) && (await cpage.locator("button:has-text('Approve')").count())) throw new Error("IG draft still awaiting approval");
     });
-    await step("review: approve + mark sent DM draft", async () => {
-      await page.goto(`${BASE}/review?draft=${dmDraftId}`, { waitUntil: "networkidle" });
-      await page.locator("button:has-text('Approve')").first().click();
-      await page.waitForLoadState("networkidle"); await page.waitForTimeout(1500);
-      await page.goto(`${BASE}/review?draft=${dmDraftId}`, { waitUntil: "networkidle" });
-      await page.locator("button:has-text('Mark sent')").first().click();
-      await page.waitForLoadState("networkidle"); await page.waitForTimeout(1500);
+    await step("review: Nora's HQ has no review queue (drafts are Cameron's)", async () => {
+      await npage.goto(`${BASE}/review?draft=${dmDraftId}`, { waitUntil: "networkidle" });
+      if (await npage.locator("main button:has-text('Approve')").count()) throw new Error("Nora sees an Approve button on a draft");
+    });
+    await step("review: approve + mark sent DM draft (as Cameron)", async () => {
+      await cpage.goto(`${BASE}/review?draft=${dmDraftId}`, { waitUntil: "networkidle" });
+      await cpage.locator("button:has-text('Approve')").first().click();
+      await cpage.waitForLoadState("networkidle"); await cpage.waitForTimeout(1500);
+      await cpage.goto(`${BASE}/review?draft=${dmDraftId}`, { waitUntil: "networkidle" });
+      await cpage.locator("button:has-text('Mark sent')").first().click();
+      await cpage.waitForLoadState("networkidle"); await cpage.waitForTimeout(1500);
     });
     await step("outreach stage became contacted", async () => {
       await page.goto(creatorUrl, { waitUntil: "networkidle" });
@@ -434,12 +456,12 @@ async function flows(browser) {
       const q = `Which day should the crab boil post go out? (${stamp})`;
       const r = await tool("reply_to_ask", { ask_id: askId, body: q, status: "in_progress" });
       if (r.askStatus !== "in_progress") throw new Error(`askStatus ${r.askStatus}`);
-      await page.goto(`${BASE}/asks/${askId}`, { waitUntil: "networkidle" });
-      await page.locator(`text=${q}`).first().waitFor();
+      await npage.goto(`${BASE}/asks/${askId}`, { waitUntil: "networkidle" });
+      await npage.locator(`text=${q}`).first().waitFor();
       const ans = `Friday please (${stamp})`;
-      await page.fill("#ask-reply", ans);
-      await page.locator("form:has(#ask-reply) button[type='submit']").click();
-      await page.locator(`text=${ans}`).first().waitFor({ timeout: 15000 });
+      await npage.fill("#ask-reply", ans);
+      await npage.locator("form:has(#ask-reply) button[type='submit']").click();
+      await npage.locator(`text=${ans}`).first().waitFor({ timeout: 15000 });
       const again = await tool("list_asks", {});
       const s = JSON.stringify(again);
       if (!s.includes(ans)) throw new Error("reply not visible via MCP list_asks");
@@ -451,20 +473,27 @@ async function flows(browser) {
   /* ── ask routing, leads, onboarding ── */
   if (process.env.MCP_TOKEN) {
     const camAsk = `Smoke for Cameron ${stamp}: reset the TikTok password`;
-    await step("ask with the Cameron chip → Cameron's task + For me", async () => {
-      await page.goto(`${BASE}/asks/new`, { waitUntil: "networkidle" });
-      await page.locator("#ask-body").fill(camAsk);
-      await page.locator("label", { hasText: /^Cameron$/ }).first().click();
-      await page.locator("button[type='submit']:has-text('Send')").click();
-      await page.waitForURL(/\/\?sent=cameron/, { timeout: 60000 });
-      const cam = await browser.newContext({ viewport: { width: 1280, height: 900 } });
-      await login(cam, "cameron@local");
-      const cp = await cam.newPage();
+    // Since #23 the "Cameron" chip sends the ask to Cameron's side (route auto): Claude sorts it in the background, and
+    // a job only Cameron can do becomes his task when it is routed to him.
+    await step("ask with the Cameron chip → Cameron's For me tab, then his task once it's routed to him", async () => {
+      await npage.goto(`${BASE}/asks/new`, { waitUntil: "networkidle" });
+      await npage.locator("#ask-body").fill(camAsk);
+      await npage.locator("label", { hasText: /^Cameron$/ }).first().click();
+      await npage.locator("button[type='submit']:has-text('Send')").click();
+      await npage.waitForURL(/\/\?sent=(auto|cameron)/, { timeout: 60000 });
+      const cp = cpage;
+      await cp.goto(`${BASE}/asks`, { waitUntil: "networkidle" });
+      if (!(await cp.locator(`text=${camAsk}`).count())) throw new Error("ask not in Cameron's Inbox");
+      const list = JSON.stringify(await tool("list_asks", {}));
+      const i = list.indexOf(camAsk);
+      const id = i < 0 ? "" : ([...list.slice(0, i).matchAll(/"(ask_[^"]+)"/g)].pop() ?? [])[1];
+      if (!id) throw new Error("new ask not visible via list_asks");
+      const r = await tool("triage_ask", { ask_id: id, kind: "request", for_who: "cameron" });
+      if (!r.taskCreated) throw new Error(`no taskCreated: ${JSON.stringify(r).slice(0, 300)}`);
       await cp.goto(`${BASE}/asks?tab=me`, { waitUntil: "networkidle" });
-      if (!(await cp.locator(`text=${camAsk}`).count())) throw new Error("ask not in Cameron's For me tab");
+      if (!(await cp.locator(`text=${camAsk}`).count())) throw new Error("routed ask not in Cameron's For me tab");
       await cp.goto(`${BASE}/tasks?assignee=me&view=list`, { waitUntil: "networkidle" });
       if (!(await cp.locator(`text=Smoke for Cameron ${stamp}`).count())) throw new Error("no task for Cameron on /tasks?assignee=me");
-      await cam.close();
     });
 
     const autoAsk = `Smoke triage ${stamp}: please film the new dessert`;
@@ -481,8 +510,8 @@ async function flows(browser) {
       if (!r.taskCreated) throw new Error(`no taskCreated: ${JSON.stringify(r).slice(0, 300)}`);
       const again = await tool("triage_ask", { ask_id: id, kind: "request", for_who: "nora" });
       if (again.taskCreated) throw new Error("re-triage created a second task");
-      await page.goto(`${BASE}/tasks?assignee=me&view=list`, { waitUntil: "networkidle" });
-      if (!(await page.locator(`text=Smoke triage ${stamp}`).count())) throw new Error("routed task not on Nora's list");
+      await npage.goto(`${BASE}/tasks?assignee=me&view=list`, { waitUntil: "networkidle" });
+      if (!(await npage.locator(`text=Smoke triage ${stamp}`).count())) throw new Error("routed task not on Nora's list");
     });
 
     await step("Find leads form creates a Claude ask", async () => {
@@ -523,12 +552,12 @@ async function flows(browser) {
         body: "Hi! I'm Nora, a Richmond food creator. Your noodles look amazing and I noticed lots of Google reviews without replies — I help with that. Quick chat? If it's not for you, no worries." });
       const id = d.draftId;
       if (!id) throw new Error(`no draftId: ${JSON.stringify(d).slice(0, 200)}`);
-      await page.goto(`${BASE}/review?draft=${id}`, { waitUntil: "networkidle" });
-      await page.locator(`#d-${id} button:has-text('Approve')`).first().click();
-      await page.waitForLoadState("networkidle"); await page.waitForTimeout(1500);
-      await page.goto(`${BASE}/review?draft=${id}`, { waitUntil: "networkidle" });
-      await page.locator(`#d-${id} button:has-text('Mark sent')`).first().click();
-      await page.waitForLoadState("networkidle"); await page.waitForTimeout(1500);
+      await cpage.goto(`${BASE}/review?draft=${id}`, { waitUntil: "networkidle" });
+      await cpage.locator(`#d-${id} button:has-text('Approve')`).first().click();
+      await cpage.waitForLoadState("networkidle"); await cpage.waitForTimeout(1500);
+      await cpage.goto(`${BASE}/review?draft=${id}`, { waitUntil: "networkidle" });
+      await cpage.locator(`#d-${id} button:has-text('Mark sent')`).first().click();
+      await cpage.waitForLoadState("networkidle"); await cpage.waitForTimeout(1500);
       const l = JSON.stringify(await tool("get_lead", { lead_id: leadId }));
       if (!l.includes('"stage":"contacted"')) throw new Error(`lead not contacted: ${l.slice(0, 300)}`);
     });
@@ -589,21 +618,24 @@ async function flows(browser) {
       return msg;
     };
     const qClaude = `Smoke composer ${stamp}: caption ideas for the crab boil`;
-    await step("Home composer: Claude chip sends an ask without leaving Home", async () => {
-      const msg = await composer(qClaude, /^Claude$/);
-      if (!/Claude/.test(msg)) throw new Error(`unexpected confirmation: ${msg}`);
+    // Since #23 the composer has two chips, Cameron (Claude helps in the background) and Nora.
+    await step("Home composer: Cameron chip sends an ask (Claude helps) without leaving Home", async () => {
+      const msg = await composer(qClaude, /^Cameron$/);
+      if (!/Cameron/.test(msg) || !/Claude/.test(msg)) throw new Error(`unexpected confirmation: ${msg}`);
       const s = JSON.stringify(await tool("list_asks", {}));
       if (!s.includes(qClaude)) throw new Error("ask not visible via list_asks");
     });
-    const qAdhoc = `Smoke adhoc ${stamp}: pick up the gift cards`;
-    await step("Home composer: Ad hoc task chip puts a task on Cameron's list", async () => {
-      const msg = await composer(qAdhoc, /^Ad hoc task$/);
-      if (!/Cameron/.test(msg)) throw new Error(`unexpected confirmation: ${msg}`);
-      const s = JSON.stringify(await tool("list_tasks", { assignee: "cameron", scope: "adhoc" }));
-      if (!s.includes("Smoke adhoc " + stamp)) throw new Error("no ad hoc task for Cameron via list_tasks scope=adhoc");
-      const plan = JSON.stringify(await tool("list_tasks", { assignee: "cameron", scope: "plan" }));
-      if (plan.includes("Smoke adhoc " + stamp)) throw new Error("ad hoc task leaked into scope=plan");
+    const qNora = `Smoke composer for Nora ${stamp}: film the crab boil`;
+    await step("Home composer: Nora chip sends the ask to Nora without leaving Home", async () => {
+      const msg = await composer(qNora, /^Nora$/);
+      if (!/Nora/.test(msg)) throw new Error(`unexpected confirmation: ${msg}`);
+      const asks = await tool("list_asks", { limit: 100 });
+      const list = Array.isArray(asks) ? asks : asks.asks ?? asks.items ?? [];
+      const a = list.find((x) => x.body?.includes(qNora)) ?? null;
+      if (!a) throw new Error("ask not visible via list_asks");
+      if (a.forWho !== "nora" && a.for_who !== "nora") throw new Error(`not for Nora: ${JSON.stringify(a).slice(0, 200)}`);
     });
+    const qAdhoc = `Smoke adhoc ${stamp}: pick up the gift cards`;
 
     let key = null;
     const capture = (body, headers = {}, token = key) =>
@@ -616,6 +648,17 @@ async function flows(browser) {
       await page.locator("#cap-new-token").waitFor({ timeout: 30000 });
       key = await page.locator("#cap-new-token").inputValue();
       if (!/^nhq_/.test(key)) throw new Error(`bad key: ${key}`);
+    });
+    // The composer's "task for the other person" chip went away in #23; the route lives on in the iPhone Shortcut.
+    await step("capture API: route=adhoc puts a task on the other person's list (not the monthly plan)", async () => {
+      const r = await capture(JSON.stringify({ text: qAdhoc, route: "adhoc" }), { "content-type": "application/json" });
+      if (r.status !== 200 || !r.json?.ok) throw new Error(`HTTP ${r.status} ${JSON.stringify(r.json)}`);
+      const who = /Task added for (\w+)/.exec(r.json.message ?? "")?.[1]?.toLowerCase();
+      if (!who) throw new Error(`unexpected confirmation: ${JSON.stringify(r.json)}`);
+      const s = JSON.stringify(await tool("list_tasks", { assignee: who, scope: "adhoc" }));
+      if (!s.includes("Smoke adhoc " + stamp)) throw new Error(`no ad hoc task for ${who} via list_tasks scope=adhoc`);
+      const plan = JSON.stringify(await tool("list_tasks", { assignee: who, scope: "plan" }));
+      if (plan.includes("Smoke adhoc " + stamp)) throw new Error("ad hoc task leaked into scope=plan");
     });
     const cText = `Smoke capture ${stamp}: post the new hours`;
     await step("capture API: JSON route=cameron → task for Cameron", async () => {
@@ -698,6 +741,10 @@ async function flows(browser) {
   }
 
   for (const e of errors) if (!DEV_BLIP.test(e)) fail(`flows: ${e}`);
+  for (const e of camErrors) if (!DEV_BLIP.test(e)) fail(`flows (Cameron): ${e}`);
+  for (const e of noraErrors) if (!DEV_BLIP.test(e)) fail(`flows (Nora): ${e}`);
+  await noraContext.close();
+  await camContext.close();
   await context.close();
 }
 
@@ -771,10 +818,24 @@ async function noraFlows(browser) {
     const a = page.locator(`a[href^='/collabs/']`, { hasText: biz }).first();
     await a.waitFor({ timeout: 15000 });
     reqId = (await a.getAttribute("href")).split("/").pop().split("?")[0];
+    // What Nora herself sees (since #25 her HQ has its own, simpler workspace page and Inbox): signed in as Nora.
+    const nora = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+    await login(nora, "nora@local");
+    const np = await nora.newPage();
+    np.setDefaultTimeout(30000);
+    try {
+      await np.goto(`${BASE}/clients/noraeatsgood`, { waitUntil: "networkidle" });
+      if (!(await np.locator(`text=${biz}`).count())) throw new Error("not on Nora's Collab requests card (Nora's view)");
+      await np.goto(`${BASE}/asks?tab=nora`, { waitUntil: "networkidle" });
+      if (!(await np.locator(`text=${biz}`).count())) throw new Error("no ask in For Nora (Nora's view)");
+    } finally {
+      await nora.close();
+    }
+    // Cameron sees them too.
     await page.goto(`${BASE}/clients/noraeatsgood`, { waitUntil: "networkidle" });
-    if (!(await page.locator(`text=${biz}`).count())) throw new Error("not on Nora's Collab requests card");
+    if (!(await page.locator(`text=${biz}`).count())) throw new Error("not on Nora's Collab requests card (Cameron's view)");
     await page.goto(`${BASE}/asks?tab=nora`, { waitUntil: "networkidle" });
-    if (!(await page.locator(`text=${biz}`).count())) throw new Error("no ask in For Nora");
+    if (!(await page.locator(`text=${biz}`).count())) throw new Error("no ask in For Nora (Cameron's view)");
     const r = await tool("get_collab_request", { id: reqId });
     leadId = r.leadId ?? r.request?.leadId ?? "";
     if (!leadId) throw new Error(`no leadId: ${JSON.stringify(r).slice(0, 300)}`);
@@ -783,14 +844,23 @@ async function noraFlows(browser) {
     await page.goto(`${BASE}/leads?opp=collab`, { waitUntil: "networkidle" });
     if (!(await page.locator(`text=${biz}`).count())) throw new Error("not on /leads?opp=collab");
   });
-  await step("Home: Nora's card first, with the new-requests chip", async () => {
-    await page.goto(`${BASE}/`, { waitUntil: "networkidle" });
-    // the Businesses grid (the Client health strip above it links to businesses too, and leaves Nora's workspace out)
-    const grid = page.locator("main section", { has: page.locator("h2", { hasText: /^Businesses$/ }) }).last();
-    const first = grid.locator("a[href^='/clients/']").filter({ hasNotText: /^New client$/ }).first();
-    const href = await first.getAttribute("href");
-    if (href !== "/clients/noraeatsgood") throw new Error(`first business card is ${href}`);
-    if (!(await page.locator("a[href='/collabs']", { hasText: /new collab request/ }).count())) throw new Error("no 'new collab requests' chip");
+  // Since #20 Nora has her own Home (her shoots, reels, asks); the Businesses list lives on Cameron's Home.
+  await step("Home (Cameron's): Nora's card first, with the new-requests chip", async () => {
+    const cam = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+    await login(cam, "cameron@local");
+    const cp = await cam.newPage();
+    cp.setDefaultTimeout(30000);
+    try {
+      await cp.goto(`${BASE}/`, { waitUntil: "networkidle" });
+      // the Businesses list (Nora's workspace first; each business row also carries its health line)
+      const grid = cp.locator("main section", { has: cp.locator("h2", { hasText: /^Businesses$/ }) }).last();
+      const first = grid.locator("a[href^='/clients/']").filter({ hasNotText: /^New client$/ }).first();
+      const href = await first.getAttribute("href");
+      if (href !== "/clients/noraeatsgood") throw new Error(`first business card is ${href}`);
+      if (!(await cp.locator("a[href='/collabs']", { hasText: /new collab request/ }).count())) throw new Error("no 'new collab requests' chip");
+    } finally {
+      await cam.close();
+    }
   });
   await step("honeypot-filled submit looks fine but stores nothing", async () => {
     const bot = `Smoke Bot Diner ${stamp}`;
@@ -1893,13 +1963,14 @@ async function v7Flows(browser) {
     await page.reload({ waitUntil: "networkidle" });
     if ((await page.inputValue("#pf-phone")) !== "(757) 555-0188") throw new Error("the edited phone didn't save");
     const status = await page.locator("[data-facts-status]").innerText();
-    if (!/Checked .* by Nora/.test(status) || !status.includes("Nothing missing")) throw new Error(`status line: ${status}`);
+    // "checked by them": the person signed in (Cameron by default).
+    if (!new RegExp(`Checked .* by ${ME_NAME}`).test(status) || !status.includes("Nothing missing")) throw new Error(`status line: ${status}`);
     await page.fill("#pf-sells", "login pw: Hunter2!!x");
     await page.locator("form[aria-label='Public facts'] button[type='submit']").click();
     await page.locator("form[aria-label='Public facts'] >> text=Not saved").first().waitFor({ timeout: 30000 });
     if ((await page.locator("form[aria-label='Public facts'] p[role='status']").innerText()).includes("Hunter2")) throw new Error("the refusal echoes the password");
     const m = await tool("get_client_month", { client_id: id });
-    if (m.business.publicFacts?.phone !== "(757) 555-0188" || m.business.publicFacts?.sells !== "Dumplings and noodle soups" || !String(m.business.publicFacts?.checkedBy).includes("nora")) throw new Error(`facts after the edit: ${JSON.stringify(m.business.publicFacts)}`);
+    if (m.business.publicFacts?.phone !== "(757) 555-0188" || m.business.publicFacts?.sells !== "Dumplings and noodle soups" || !String(m.business.publicFacts?.checkedBy).includes(EMAIL.split("@")[0])) throw new Error(`facts after the edit: ${JSON.stringify(m.business.publicFacts)}`);
     await page.goto(`${BASE}/activity`, { waitUntil: "networkidle" });
     if (!(await page.locator("main").innerText()).includes("Phone: “(757) 555-0142” → “(757) 555-0188”")) throw new Error("the edit isn't in the activity log with before → after");
     // The owner sees the edit straight away (preview = their view).
@@ -2118,7 +2189,16 @@ async function v8Flows(browser) {
     if (!m || Number(m[1]) < 30 || Number(m[2]) < 1) throw new Error(`subtitle: ${m?.[0]}`);
     if (!/Sometime in November/.test(body)) throw new Error("no 'Sometime in November' group");
     if (/\$\d|Zelle|🚩/.test(body)) throw new Error("money shown on the schedule");
-    if (!(await page.locator("main a[href='/clients/crab-o-clock']").count())) throw new Error("Crab O’Clock not linked to its business");
+    // Since #17 a schedule name opens its job (the shoot checklist), and the job page links to the business.
+    const job = page.locator("main a[href^='/calendar/jobs/']", { hasText: /Crab O.?Clock/i }).first();
+    if (!(await job.count())) throw new Error("Crab O’Clock not linked to its job");
+    const jp = await page.context().newPage();
+    try {
+      await jp.goto(BASE + (await job.getAttribute("href")), { waitUntil: "networkidle" });
+      if (!(await jp.locator("main a[href='/clients/crab-o-clock']").count())) throw new Error("Crab O’Clock's job not linked to its business");
+    } finally {
+      await jp.close();
+    }
     if (SHOTS) await page.screenshot({ path: `${SHOTS}/schedule-nov-1440.png` });
   });
   await step("tick a reel posted → shows ✓ Reel posted and the count drops", async () => {
@@ -2262,8 +2342,11 @@ async function v8Flows(browser) {
     await page.goto(`${BASE}/clients?inactive=1`, { waitUntil: "networkidle" });
     if (!(await page.locator(`main a[href='/clients/${bistroId}']`).count())) throw new Error("not on /clients?inactive=1");
   });
-  await step("business page Active/Inactive switch turns it back on", async () => {
+  // Since #24 the Active/Inactive switch lives on the business's Settings & plan page.
+  await step("business Settings & plan: Active/Inactive switch turns it back on", async () => {
     await page.goto(`${BASE}/clients/${bistroId}`, { waitUntil: "networkidle" });
+    if (!(await page.locator(`main a[href='/clients/${bistroId}/settings']`).count())) throw new Error("no Settings & plan link on the business page");
+    await page.goto(`${BASE}/clients/${bistroId}/settings`, { waitUntil: "networkidle" });
     const sw = page.locator("main button[role='switch']").first();
     if ((await sw.getAttribute("aria-checked")) !== "false") throw new Error("switch not off");
     await sw.click();
@@ -3115,39 +3198,42 @@ async function v10Flows(browser) {
   });
   await pub.close();
 
-  /* ── #11 Client health strip on Home ── */
-  await step("#11 Home → Client health: one row per active business with its single worst issue ('Opening in 12 days', 'N reviews unanswered', 'All good'); an overdue task outranks the opening and the row opens the right page; Nora's workspace isn't listed", async () => {
+  /* ── #11 Client health on Home: each business's health line sits in its row of the Businesses ledger ── */
+  await step("#11 Home → Businesses: each active business's row carries its single worst issue ('Opening in 12 days', 'N reviews unanswered', 'All good'); an overdue task outranks the opening and the issue opens the right page; Nora's workspace has no health line", async () => {
     await page.goto(`${BASE}/`, { waitUntil: "networkidle" });
-    const c = card(page, /^Client health$/);
+    const c = card(page, /^Businesses$/);
     await c.waitFor({ timeout: 15000 });
     const active = (await tool("list_clients", {})).filter((x) => x.kind === "business").length;
-    if ((await c.locator("li").count()) !== active) throw new Error(`${await c.locator("li").count()} rows for ${active} active businesses`);
-    if (await c.locator("li", { hasText: "noraeatsgood" }).count()) throw new Error("Nora's own workspace is on the strip");
+    const bizRows = c.locator("li").filter({ hasNotText: "noraeatsgood" });
+    if ((await bizRows.count()) !== active) throw new Error(`${await bizRows.count()} business rows for ${active} active businesses`);
+    if ((await c.locator("li .status").count()) !== active) throw new Error(`${await c.locator("li .status").count()} health lines for ${active} active businesses`);
+    if (await c.locator("li", { hasText: "noraeatsgood" }).locator(".status").count()) throw new Error("Nora's own workspace has a health line");
     const row = (name) => c.locator("li", { hasText: name }).first();
+    const issue = (name) => row(name).locator("a.ledger-health");
     let t = flat(await row(depot).innerText());
     if (!/Heads-up: Opening in 12 days/.test(t) || /more/.test(t)) throw new Error(`pre-launch row: ${t}`);
-    if ((await row(depot).locator("a").getAttribute("href")) !== `/clients/${depotId}`) throw new Error("the opening row doesn't open the business page");
+    if ((await issue(depot).getAttribute("href")) !== `/clients/${depotId}`) throw new Error("the opening line doesn't open the business page");
     if (!/OK: All good/.test(flat(await row(grill).innerText()))) throw new Error(`a business with nothing wrong reads: ${flat(await row(grill).innerText())}`);
-    // Crab O Clock has sample reviews: while any is unanswered, that is its worst issue and the row opens its reviews
+    // Crab O Clock has sample reviews: while any is unanswered, that is its worst issue and the line opens its reviews
     const unanswered = (await tool("list_reviews", { client_id: "crab-o-clock", unreplied_only: true, limit: 50 })).length;
     if (unanswered) {
       const crab = flat(await row("Crab O Clock").innerText());
       if (!new RegExp(`Needs attention: ${unanswered} reviews? unanswered`).test(crab)) throw new Error(`Crab O Clock with ${unanswered} unanswered reviews reads: ${crab}`);
-      if ((await row("Crab O Clock").locator("a").getAttribute("href")) !== "/reviews?client=crab-o-clock") throw new Error("the reviews row doesn't open the reviews");
+      if ((await issue("Crab O Clock").getAttribute("href")) !== "/reviews?client=crab-o-clock") throw new Error("the reviews line doesn't open the reviews");
     }
-    await v10Audit(page, "Home with the health strip (1440)", { touch: false });
+    await v10Audit(page, "Home with the health lines (1440)", { touch: false });
     if (SHOTS) { await toTop(c, 90); await page.screenshot({ path: `${SHOTS}/home-health-1440.png` }); }
     const { ctx, p } = await phonePage();
     await p.goto(`${BASE}/`, { waitUntil: "networkidle" });
-    await v10Audit(p, "Home with the health strip (390)");
-    if (SHOTS) { await toTop(card(p, /^Client health$/), 70); await p.screenshot({ path: `${SHOTS}/home-health-390.png` }); }
+    await v10Audit(p, "Home with the health lines (390)");
+    if (SHOTS) { await toTop(card(p, /^Businesses$/), 70); await p.screenshot({ path: `${SHOTS}/home-health-390.png` }); }
     await ctx.close();
-    // a worse issue takes the row; the opening is counted behind it
+    // a worse issue takes the line; the opening is counted behind it
     const late = await tool("create_task", { client_id: depotId, title: `V10 overdue ${stamp}`, assignee: "nora", due_date: plusDays(today, -2) });
     await page.goto(`${BASE}/`, { waitUntil: "networkidle" });
     t = flat(await row(depot).innerText());
     if (!/Needs attention: 1 task overdue · \+1 more/.test(t)) throw new Error(`with an overdue task: ${t}`);
-    await Promise.all([page.waitForURL(new RegExp(`/tasks\\?client=${depotId}&scope=all`), { timeout: 30000 }), row(depot).locator("a").click()]);
+    await Promise.all([page.waitForURL(new RegExp(`/tasks\\?client=${depotId}&scope=all`), { timeout: 30000 }), issue(depot).click()]);
     await page.waitForLoadState("networkidle");
     if (!(await page.locator("main a", { hasText: `V10 overdue ${stamp}` }).count())) throw new Error("the row didn't open that business's tasks");
     await tool("update_task", { task_id: late.taskId, status: "done" });
@@ -3165,7 +3251,8 @@ async function v10Flows(browser) {
     await page.goto(`${BASE}/clients/${depotId}`, { waitUntil: "networkidle" });
     const open = page.locator("main button", { hasText: "They're open" });
     await open.click();
-    await open.waitFor({ state: "detached", timeout: 30000 });
+    // The button reads "Saving…" while the action runs, so wait until neither label is left (the card is gone).
+    await page.locator("main button", { hasText: /^(They're open|Saving…)$/ }).first().waitFor({ state: "detached", timeout: 30000 });
     await page.reload({ waitUntil: "networkidle" });
     if (await card(page, /^Launch checklist$/).count()) throw new Error("still showing the launch checklist after 'They're open'");
     if ((await tool("list_clients", {})).find((x) => x.id === depotId)?.prelaunch) throw new Error("list_clients still says pre-launch");
@@ -3384,14 +3471,21 @@ async function responsive(browser) {
       viewport: { width: vp.width, height: vp.height }, deviceScaleFactor: 1, colorScheme: scheme,
       isMobile: !!vp.touch, hasTouch: !!vp.touch,
     });
-    await login(context);
-    for (const [ctx, list] of [[context, routes], [pub, [...publicRoutes, ...(kitLive ? ["/kit"] : [])]]]) {
+    // Nora's own HQ too (since #20 and #25 her Home, Calendar, workspace and ask pages differ from Cameron's), and she
+    // is the phone-first user: her pages get the same audit, signed in as her.
+    const noraCtx = await browser.newContext({
+      viewport: { width: vp.width, height: vp.height }, deviceScaleFactor: 1, colorScheme: scheme,
+      isMobile: !!vp.touch, hasTouch: !!vp.touch,
+    });
+    await login(context, "cameron@local");
+    await login(noraCtx, "nora@local");
+    for (const [ctx, list, who] of [[context, routes, "cameron"], [noraCtx, NORA_ROUTES, "nora"], [pub, [...publicRoutes, ...(kitLive ? ["/kit"] : [])], "logged out"]]) {
     const page = await ctx.newPage();
     const errs = [];
     page.on("console", (m) => { if (m.type() === "error") errs.push(m.text().slice(0, 200)); });
     page.on("pageerror", (e) => errs.push(e.message.slice(0, 200)));
     for (const path of list) {
-      const where = `${vp.name}${scheme === "dark" ? "d" : ""}`;
+      const where = `${vp.name}${scheme === "dark" ? "d" : ""} ${who}`;
       let res, a, navErr = null;
       // `next dev` restarts itself when it nears its memory limit; that drops connections mid-run.
       // Wait for it to come back and retry the page instead of reporting a dev-server blip as an app bug.
@@ -3418,12 +3512,13 @@ async function responsive(browser) {
     }
     }
     await context.close();
+    await noraCtx.close();
     await pub.close();
   };
   const queue = [...combos];
   await Promise.all(Array.from({ length: 4 }, async () => { while (queue.length) await runCombo(queue.shift()); }));
   for (const [msg, where] of found) fail(`responsive ${msg} [${[...where].join(",")}]`);
-  console.log(`  checked ${pages} page loads (${routes.length} routes + ${publicRoutes.length} logged-out × ${combos.length} viewport/scheme combos)`);
+  console.log(`  checked ${pages} page loads (${routes.length} routes as Cameron + ${NORA_ROUTES.length} as Nora + ${publicRoutes.length} logged-out × ${combos.length} viewport/scheme combos)`);
 }
 
 const browser = await chromium.launch();

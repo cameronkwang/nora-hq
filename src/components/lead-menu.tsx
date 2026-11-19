@@ -30,12 +30,11 @@ export function LeadMenu({ exportHref }: { exportHref: string }) {
     };
   }, [open]);
 
-  const item = "flex min-h-11 items-center rounded-md px-3 text-sm hover:bg-surface-2 focus:bg-surface-2 focus:outline-none md:min-h-9";
   return (
     <div ref={ref} className="relative">
-      <button ref={btn} type="button" className={buttonClass("secondary")} aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
+      <button ref={btn} type="button" className={buttonClass("secondary", "sm")} aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
         More
-        <svg viewBox="0 0 16 16" aria-hidden className={cx("size-3.5 transition", open && "rotate-180")} fill="none" stroke="currentColor" strokeWidth={1.8}>
+        <svg viewBox="0 0 16 16" aria-hidden className={cx("transition", open && "rotate-180")} fill="none" stroke="currentColor" strokeWidth={1.8}>
           <path d="m4 6 4 4 4-4" strokeLinecap="round" strokeLinejoin="round" />
         </svg>
       </button>
@@ -43,7 +42,7 @@ export function LeadMenu({ exportHref }: { exportHref: string }) {
         <div
           role="menu"
           aria-label="More lead actions"
-          className="absolute right-0 z-20 mt-1 w-56 rounded-lg border border-border bg-surface p-1 shadow-lg"
+          className="pop g-menu"
           onKeyDown={(e) => {
             if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
             e.preventDefault();
@@ -52,13 +51,13 @@ export function LeadMenu({ exportHref }: { exportHref: string }) {
             items[(i + (e.key === "ArrowDown" ? 1 : items.length - 1)) % items.length]?.focus();
           }}
         >
-          <Link href="/leads/new" role="menuitem" className={item} onClick={() => setOpen(false)}>
+          <Link href="/leads/new" role="menuitem" onClick={() => setOpen(false)}>
             Add a lead by hand
           </Link>
-          <Link href="/leads/import" role="menuitem" className={item} onClick={() => setOpen(false)}>
+          <Link href="/leads/import" role="menuitem" onClick={() => setOpen(false)}>
             Import CSV
           </Link>
-          <a href={exportHref} download role="menuitem" className={item} onClick={() => setOpen(false)}>
+          <a href={exportHref} download role="menuitem" onClick={() => setOpen(false)}>
             Export CSV
           </a>
         </div>

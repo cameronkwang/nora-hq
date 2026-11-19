@@ -3,11 +3,13 @@
 import { useState } from "react";
 import { setChecklistStepAction } from "@/app/(app)/calendar/schedule-actions";
 import type { ChecklistSection } from "@/lib/shoot-checklist";
-import { cx } from "./ui";
+import { Status, cx } from "./ui";
 
 /**
  * The shoot checklist as big one-thumb rows. Ticks show at once and save in the background; a failed save
  * puts the tick back and says so.
+ * Ink: each part (Day before, On site, After) is a section on the ink rule with its "3/13" on the right, then one
+ * row per step on hairlines: an ink box, the step, its hint in muted under it. The whole row is the target.
  */
 export function ShootChecklist({ jobId, sections, initialDone }: { jobId: string; sections: ChecklistSection[]; initialDone: string[] }) {
   const [done, setDone] = useState(() => new Set(initialDone));
@@ -35,50 +37,44 @@ export function ShootChecklist({ jobId, sections, initialDone }: { jobId: string
   }
 
   return (
-    <div className="grid gap-5">
+    <div className="shoot">
       {error && (
-        <p role="alert" className="rounded-lg bg-danger-soft px-3 py-2 text-sm text-danger">
-          {error}
+        <p role="alert" className="notice">
+          <Status tone="danger" className="whitespace-normal">
+            {error}
+          </Status>
         </p>
       )}
       {sections.map((section) => {
         const count = section.steps.filter((s) => done.has(s.id)).length;
         const all = count === section.steps.length;
         return (
-          <section key={section.key} aria-labelledby={`sec-${section.key}`}>
-            <div className="mb-2 flex items-baseline justify-between gap-2">
-              <h2 id={`sec-${section.key}`} className="text-base font-semibold">
+          <section key={section.key} aria-labelledby={`sec-${section.key}`} className="sec">
+            <header className="sec-head">
+              <h2 id={`sec-${section.key}`} className="title">
                 {section.title}
               </h2>
-              <span className={cx("text-sm tabular-nums", all ? "font-semibold text-ok" : "text-muted")}>
-                {count}/{section.steps.length}
-              </span>
-            </div>
-            {section.note && <p className="mb-2 text-sm text-muted">{section.note}</p>}
-            <ul className="divide-y divide-border overflow-hidden rounded-xl border border-border bg-surface">
+              {all ? (
+                <Status tone="ok" small className="num">
+                  {count}/{section.steps.length}
+                </Status>
+              ) : (
+                <span className="meta num">
+                  {count}/{section.steps.length}
+                </span>
+              )}
+            </header>
+            {section.note && <p className="sec-note">{section.note}</p>}
+            <ul className="list">
               {section.steps.map((step) => {
                 const on = done.has(step.id);
                 return (
                   <li key={step.id}>
-                    <button
-                      type="button"
-                      role="checkbox"
-                      aria-checked={on}
-                      onClick={() => toggle(step.id)}
-                      className="flex min-h-14 w-full items-center gap-3 px-4 py-2.5 text-left active:bg-surface-2"
-                    >
-                      <span
-                        aria-hidden
-                        className={cx(
-                          "flex size-6 shrink-0 items-center justify-center rounded-md border-2 text-sm font-bold",
-                          on ? "border-accent bg-accent text-accent-fg" : "border-border",
-                        )}
-                      >
-                        {on ? "✓" : ""}
-                      </span>
-                      <span className="min-w-0 flex-1">
-                        <span className={cx("block text-[15px]", on && "text-muted line-through")}>{step.label}</span>
-                        {step.hint && <span className="block text-xs text-muted">{step.hint}</span>}
+                    <button type="button" role="checkbox" aria-checked={on} onClick={() => toggle(step.id)} className={cx("shoot-step", on && "is-done")}>
+                      <i aria-hidden />
+                      <span className="min-w-0">
+                        <span className="shoot-label">{step.label}</span>
+                        {step.hint && <span className="meta block">{step.hint}</span>}
                       </span>
                     </button>
                   </li>

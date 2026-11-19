@@ -10,7 +10,7 @@ import { LeadCityFilter } from "@/components/lead-city-filter";
 import { LeadCard, LeadRow } from "@/components/lead-row";
 import { OutreachBoard } from "@/components/outreach-board";
 import { ViewToggle } from "@/components/view-toggle";
-import { EmptyState, PageHeader, cx } from "@/components/ui";
+import { Card, EmptyState, PageHeader } from "@/components/ui";
 import { ACTIVE_STAGES, OPP_LABEL, STAGE_LABEL } from "./shared";
 
 export const dynamic = "force-dynamic";
@@ -58,9 +58,20 @@ export default async function LeadsPage({ searchParams }: { searchParams: Promis
     <>
       <PageHeader
         title="Leads"
-        subtitle="Places that could use us. Claude does the research — you pick who to pitch."
+        subtitle="Places that could use us. Claude does the research, you pick who to pitch."
         actions={
           <>
+            {/* The view switch sits in the head, as on /tasks (only once there are leads to show two ways). */}
+            {all.length > 0 && (
+              <ViewToggle
+                cookieName={VIEW_COOKIE}
+                current={view}
+                options={[
+                  { value: "list", label: "List", href: href({ view: "list" }) },
+                  { value: "board", label: "Board", href: href({ view: "board" }) },
+                ]}
+              />
+            )}
             <LeadMenu exportHref={`/leads/export${exportQs ? `?${exportQs}` : ""}`} />
             <FindLeads defaultArea={city || topCity} autoOpen={one(sp.find) === "1"} />
           </>
@@ -68,7 +79,7 @@ export default async function LeadsPage({ searchParams }: { searchParams: Promis
       />
 
       {error && (
-        <p role="alert" className="mb-4 rounded-lg bg-danger-soft px-3 py-2 text-sm text-danger">{error}</p>
+        <p role="alert" className="notice mb-6"><span className="status is-danger">{error}</span></p>
       )}
 
       {all.length === 0 ? (
@@ -77,9 +88,9 @@ export default async function LeadsPage({ searchParams }: { searchParams: Promis
         </EmptyState>
       ) : (
         <>
-          {/* Filters: opportunity chips + city. Plain links — the URL is the source of truth. */}
-          <div className="mb-4 flex flex-wrap items-center gap-2">
-            <nav aria-label="What for" className="flex flex-wrap gap-1.5">
+          {/* Filters: opportunity chips + city. Plain links: the URL is the source of truth. */}
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+            <nav aria-label="What for" className="chips">
               <Chip href={href({ opp: "" })} on={!opp}>All</Chip>
               {LEAD_OPPORTUNITIES.map((o) => (
                 <Chip key={o} href={href({ opp: o })} on={opp === o}>{OPP_LABEL[o]}</Chip>
@@ -92,52 +103,46 @@ export default async function LeadsPage({ searchParams }: { searchParams: Promis
                 hrefs={Object.fromEntries([["", href({ city: "" })], ...cities.map((c) => [c, href({ city: c })])])}
               />
             )}
-            <div className="ml-auto">
-              <ViewToggle
-                cookieName={VIEW_COOKIE}
-                current={view}
-                options={[
-                  { value: "list", label: "List", href: href({ view: "list" }) },
-                  { value: "board", label: "Board", href: href({ view: "board" }) },
-                ]}
-              />
-            </div>
           </div>
 
           {leads.length === 0 ? (
             <EmptyState title="No leads match">
-              <Link href="/leads" className="text-accent hover:underline">Show all leads</Link>
+              <Link href="/leads" className="link">Show all leads</Link>
             </EmptyState>
           ) : view === "board" ? (
-            <OutreachBoard
-              columns={ACTIVE_STAGES.map((s) => {
-                const rows = byStage.get(s) ?? [];
-                return {
-                  stage: s,
-                  label: STAGE_LABEL[s],
-                  count: rows.length,
-                  content: rows.length ? rows.map((l) => <LeadCard key={l.id} lead={l} today={today} back={back} now={now} />) : <p className="px-1 py-4 text-center text-xs text-muted">Nothing here</p>,
-                };
-              })}
-            />
+            <div className="mt-8">
+              <OutreachBoard
+                columns={ACTIVE_STAGES.map((s) => {
+                  const rows = byStage.get(s) ?? [];
+                  return {
+                    stage: s,
+                    label: STAGE_LABEL[s],
+                    count: rows.length,
+                    content: rows.length ? (
+                      <ul key={s} className="list">{rows.map((l) => <LeadCard key={l.id} lead={l} today={today} back={back} now={now} />)}</ul>
+                    ) : (
+                      <p key={s} className="g-col-empty">Nothing here</p>
+                    ),
+                  };
+                })}
+              />
+            </div>
           ) : activeCount === 0 ? (
             <EmptyState title="Nothing in the pipeline right now">Tap Find leads to get a fresh batch.</EmptyState>
           ) : (
-            <div className="space-y-5">
-              {ACTIVE_STAGES.map((s) => {
-                const rows = byStage.get(s) ?? [];
-                if (!rows.length) return null;
-                return (
-                  <StageGroup key={s} title={STAGE_LABEL[s]} count={rows.length} hint={s === "found" ? "New from Claude — open one, then ask for a pitch or mark it not a fit." : undefined}>
-                    {rows.map((l) => <LeadRow key={l.id} lead={l} today={today} back={back} now={now} />)}
-                  </StageGroup>
-                );
-              })}
-            </div>
+            ACTIVE_STAGES.map((s) => {
+              const rows = byStage.get(s) ?? [];
+              if (!rows.length) return null;
+              return (
+                <StageGroup key={s} title={STAGE_LABEL[s]} count={rows.length} hint={s === "found" ? "New from Claude. Open one, then ask for a pitch or mark it not a fit." : undefined}>
+                  {rows.map((l) => <LeadRow key={l.id} lead={l} today={today} back={back} now={now} />)}
+                </StageGroup>
+              );
+            })
           )}
 
           {(won.length > 0 || lost.length > 0) && (
-            <div className="mt-6 space-y-3">
+            <>
               {won.length > 0 && (
                 <Collapsed title="Won" count={won.length}>
                   {won.map((l) => <LeadRow key={l.id} lead={l} today={today} back={back} now={now} />)}
@@ -148,10 +153,10 @@ export default async function LeadsPage({ searchParams }: { searchParams: Promis
                   {lost.map((l) => <LeadRow key={l.id} lead={l} today={today} back={back} now={now} />)}
                 </Collapsed>
               )}
-            </div>
+            </>
           )}
 
-          <p className="mt-6 text-xs text-muted">
+          <p className="meta mt-10 max-w-2xl">
             We only use public business contact info. If a place says they’re not interested, set it to Lost and nobody can pitch them again. Emails go out with an opt-out line.
           </p>
         </>
@@ -162,41 +167,29 @@ export default async function LeadsPage({ searchParams }: { searchParams: Promis
 
 function Chip({ href, on, children }: { href: string; on: boolean; children: React.ReactNode }) {
   return (
-    <Link
-      href={href}
-      aria-current={on ? "true" : undefined}
-      className={cx(
-        "inline-flex min-h-11 items-center rounded-full border px-3 text-sm md:min-h-8",
-        on ? "border-accent bg-accent-soft font-medium text-accent" : "border-border text-muted hover:text-text",
-      )}
-    >
-      {children}
+    <Link href={href} aria-current={on ? "true" : undefined} className="chip">
+      <span>{children}</span>
     </Link>
   );
 }
 
 function StageGroup({ title, count, hint, children }: { title: string; count: number; hint?: string; children: React.ReactNode }) {
   return (
-    <section className="rounded-xl border border-border bg-surface">
-      <header className="flex flex-wrap items-baseline gap-x-2 border-b border-border px-4 py-2.5">
-        <h2 className="text-sm font-semibold">{title}</h2>
-        <span className="text-xs tabular-nums text-muted">{count}</span>
-        {hint && <p className="w-full text-xs text-muted sm:ml-auto sm:w-auto">{hint}</p>}
-      </header>
-      <ul className="divide-y divide-border">{children}</ul>
-    </section>
+    <Card title={<>{title}<span className="meta num">{count}</span></>} padded={false}>
+      {hint && <p className="sec-note">{hint}</p>}
+      <ul className="list">{children}</ul>
+    </Card>
   );
 }
 
 function Collapsed({ title, count, children }: { title: string; count: number; children: React.ReactNode }) {
   return (
-    <details className="group rounded-xl border border-border bg-surface">
-      <summary className="no-marker flex min-h-11 cursor-pointer items-center gap-2 px-4 text-sm font-semibold">
-        {title}
-        <span className="text-xs font-normal tabular-nums text-muted">{count}</span>
-        <svg viewBox="0 0 16 16" aria-hidden className="ml-auto size-3.5 transition group-open:rotate-180" fill="none" stroke="currentColor" strokeWidth={1.8}><path d="m4 6 4 4 4-4" strokeLinecap="round" strokeLinejoin="round" /></svg>
+    <details className="sec g-fold">
+      <summary className="sec-head">
+        <span className="title">{title}<span className="meta num">{count}</span></span>
+        <svg viewBox="0 0 16 16" aria-hidden fill="none" stroke="currentColor" strokeWidth={1.8}><path d="M6 3.5 10.5 8 6 12.5" strokeLinecap="round" strokeLinejoin="round" /></svg>
       </summary>
-      <ul className="divide-y divide-border border-t border-border">{children}</ul>
+      <ul className="list">{children}</ul>
     </details>
   );
 }

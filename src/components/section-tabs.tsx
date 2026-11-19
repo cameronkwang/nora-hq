@@ -3,7 +3,6 @@
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
 import { Suspense } from "react";
-import { cx } from "./ui";
 
 /**
  * Sections group several existing pages under one sidebar entry. Every page keeps its own URL;
@@ -92,27 +91,16 @@ function Tabs({ tab, counts, hideReview }: { tab: string; counts?: Partial<Recor
   const tabs = section.tabs.filter((t) => !(hideReview && !NORA_TABS.has(t.key)));
   if (tabs.length < 2) return null;
   return (
-    <nav aria-label={section.label} className="-mx-4 mb-5 overflow-x-auto px-4 md:mx-0 md:px-0">
-      <div className="flex min-w-max gap-1 border-b border-border">
+    <nav aria-label={section.label} className="-mx-4 mb-6 overflow-x-auto px-4 md:mx-0 md:px-0">
+      {/* Text tabs on a hairline; the current one is ink with a 2px ink underline. Counts are plain cinnabar numerals. */}
+      <div className="tabs min-w-max">
         {tabs.map((t) => {
           const on = t.key === at.key;
           const n = t.count ? (counts?.[t.count] ?? 0) : 0;
           return (
-            <Link
-              key={t.key}
-              href={t.href}
-              aria-current={on ? "page" : undefined}
-              className={cx(
-                "-mb-px inline-flex min-h-11 items-center gap-1.5 border-b-2 px-3 text-[15px] font-medium md:min-h-10 md:text-sm",
-                on ? "border-accent text-accent" : "border-transparent text-muted hover:text-text",
-              )}
-            >
+            <Link key={t.key} href={t.href} aria-current={on ? "page" : undefined}>
               {t.label}
-              {n > 0 && (
-                <span className={cx("rounded-full px-1.5 text-xs font-semibold tabular-nums", on ? "bg-accent text-accent-fg" : "bg-surface-2 text-muted")}>
-                  {n > 99 ? "99+" : n}
-                </span>
-              )}
+              {n > 0 && <span className="count">{n > 99 ? "99+" : n}</span>}
             </Link>
           );
         })}

@@ -5,7 +5,7 @@ import { collabFormToken } from "@/lib/ops-collab";
 import { getPublicRateInfo } from "@/lib/ops-kit";
 
 /**
- * PUBLIC — no sign-in, no app chrome (lives outside the (app) group; middleware lets "/collab" through).
+ * PUBLIC: no sign-in, no app chrome (lives outside the (app) group; middleware lets "/collab" through).
  * Link-in-bio page where businesses ask to work with Nora. Copy lives in src/lib/collab-copy.ts.
  */
 
@@ -32,42 +32,34 @@ export default async function CollabPage() {
   const rate = await getPublicRateInfo().catch(() => ({ rateLine: null, kitLive: false }));
   return (
     <main
-      className="min-h-dvh px-[max(1rem,env(safe-area-inset-left))] pb-[max(2rem,env(safe-area-inset-bottom))] pt-[max(2rem,env(safe-area-inset-top))] sm:pt-14"
-      // No tab bar here: sticky actions sit on the bottom edge (above the home indicator).
-      style={{ ["--tabbar-h" as string]: "env(safe-area-inset-bottom)" }}
+      className="ps-page"
+      // No tab bar here: the sticky action bar sits on the bottom edge and covers the home indicator itself.
+      style={{ ["--tabbar-h" as string]: "0px" }}
     >
       <noscript>
         <style>{NO_JS_CSS}</style>
       </noscript>
-      <div className="mx-auto w-full max-w-xl">
-        <header className="mb-8 text-center sm:mb-10">
-          <span
-            aria-hidden
-            className="mx-auto mb-4 flex size-16 items-center justify-center rounded-full bg-accent text-2xl font-semibold text-accent-fg shadow-sm"
-          >
-            N
-          </span>
-          <h1 className="text-3xl font-semibold tracking-tight sm:text-4xl">{C.title}</h1>
-          <p className="mt-1.5 text-[15px] font-medium text-accent">{C.handle}</p>
-          <p className="mx-auto mt-4 max-w-md text-[16px] leading-relaxed text-muted">{C.intro}</p>
+      <div className="ps-col">
+        <header className="ps-hero mb-10">
+          <p className="ps-lead">{C.handle}</p>
+          <h1 className="display">{C.title}</h1>
+          <p className="sub">{C.intro}</p>
           {(rate.rateLine || rate.kitLive) && (
-            <div className="mx-auto mt-4 max-w-md rounded-2xl bg-accent-soft px-4 py-2.5 text-[15px] leading-relaxed">
-              {rate.rateLine && <p className="py-1 font-medium">{rate.rateLine}</p>}
+            <div className="notice mt-6">
+              {rate.rateLine && <p className="min-w-0 font-medium">{rate.rateLine}</p>}
               {rate.kitLive && (
-                <a href="/kit" className="flex min-h-11 items-center justify-center font-semibold text-accent underline-offset-2 hover:underline">
+                <a href="/kit" className="link inline-flex min-h-11 items-center md:pointer-fine:min-h-0">
                   {C.mediaKitLink} →
                 </a>
               )}
             </div>
           )}
-          <p className="mt-3 text-sm text-muted">{C.timeNote}</p>
+          <p className="meta mt-3">{C.timeNote}</p>
         </header>
 
-        <div className="rounded-3xl border border-border bg-surface p-4 shadow-sm sm:p-8">
-          <CollabForm token={collabFormToken()} />
-        </div>
+        <CollabForm token={collabFormToken()} />
 
-        <p className="mx-auto mt-6 max-w-sm text-center text-xs leading-relaxed text-muted">{C.footer}</p>
+        <p className="meta mt-8">{C.footer}</p>
       </div>
     </main>
   );

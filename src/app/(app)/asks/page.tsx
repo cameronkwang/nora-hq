@@ -7,7 +7,7 @@ import { askThreadState, listAskMessagesFor } from "@/lib/ops";
 import { AskAttachments } from "@/components/ask-attachments";
 import { AskRouteBadges, personKey } from "@/components/ask-route";
 import { AskStatusButtons } from "@/components/ask-status-buttons";
-import { Badge, EmptyState, LinkButton, PageHeader, clientLabel, cx } from "@/components/ui";
+import { EmptyState, LinkButton, PageHeader, Status, clientLabel } from "@/components/ui";
 import { actorName } from "../activity/actor";
 
 export const dynamic = "force-dynamic";
@@ -24,6 +24,8 @@ const TABS: Array<{ key: TabKey; label: string; empty: string }> = [
   { key: "ideas", label: "Ideas", empty: "No ideas yet. When you send an idea, Claude files it here." },
   { key: "done", label: "Done", empty: "No finished asks yet." },
 ];
+/** The lists the chips switch between. Ideas and Done are the section tabs above the title, so no chip repeats them. */
+const PERSON_TABS: TabKey[] = ["inbox", "nora", "cameron"];
 const ARCHIVED = { key: "archived" as const, label: "Archived", empty: "Nothing archived." };
 
 /** Old links used ?status=…; map them onto the new tabs. */
@@ -84,48 +86,46 @@ export default async function AsksPage({ searchParams }: { searchParams: Promise
 
   return (
     <div>
+      {/* No "+ New ask" here: the sidebar's New ask (N) and the phone's "+" are the one way in. */}
       <PageHeader
         title={simple ? "Inbox" : "Asks"}
-        subtitle={simple ? "What you sent, and anything for you. Tap the + to send something new." : "Anything you drop in — requests, ideas, FYIs. Claude sorts them and gets to work."}
-        actions={simple ? undefined : <LinkButton href="/asks/new" variant="primary">+ New ask</LinkButton>}
+        subtitle={simple ? "What you sent, and anything for you. Tap the + to send something new." : "Anything you drop in: requests, ideas, FYIs. Claude sorts them and gets to work."}
       />
 
       {sent && (
-        <p role="status" className="mb-4 rounded-lg bg-ok-soft px-3 py-2 text-sm text-ok">
-          Sent. Claude picks up what it can; the rest goes to Cameron.
+        <p role="status" className="notice mb-4">
+          <Status tone="ok" className="whitespace-normal">Sent. Claude picks up what it can; the rest goes to Cameron.</Status>
         </p>
       )}
 
-      <nav aria-label="Ask lists" className="relative -mx-4 mb-4 overflow-x-auto px-4">
-        <div className="flex min-w-max gap-1 rounded-lg bg-surface-2 p-1 text-sm">
-          {/* Ideas and Done are already tabs right above this (Inbox section), so this row is just "who's it for". */}
-          {TABS.filter((t) => t.key !== "ideas" && t.key !== "done").map((t) => (
-            <Link
-              key={t.key}
-              href={t.key === "inbox" ? "/asks" : `/asks?tab=${t.key}`}
-              aria-current={t.key === tab.key ? "page" : undefined}
-              className={cx(
-                "inline-flex items-center rounded-md px-3 py-1.5 font-medium pointer-coarse:min-h-11",
-                t.key === tab.key ? "bg-surface text-text shadow-sm" : "text-muted hover:text-text",
-              )}
-            >
-              {simple && t.key === "nora" ? "For you" : simple && t.key === "cameron" ? "Sent to Cameron" : t.label}
-              {(counts[t.key] ?? 0) > 0 && <span className="ml-1.5 text-xs tabular-nums text-muted">{counts[t.key]}</span>}
-            </Link>
-          ))}
-        </div>
-      </nav>
+      {/* Whose list, under "To do": filter chips (the selected one is ink). One line; it scrolls sideways on a small phone. */}
+      {PERSON_TABS.includes(tab.key) && (
+        <nav aria-label="Ask lists" className="-mx-4 mb-3 overflow-x-auto px-4 md:mx-0 md:px-0">
+          <div className="chips min-w-max flex-nowrap">
+            {TABS.filter((t) => PERSON_TABS.includes(t.key)).map((t) => (
+              <Link key={t.key} href={t.key === "inbox" ? "/asks" : `/asks?tab=${t.key}`} aria-current={t.key === tab.key ? "page" : undefined} className="chip">
+                <span>
+                  {simple && t.key === "nora" ? "For you" : simple && t.key === "cameron" ? "Sent to Cameron" : t.label}
+                  {(counts[t.key] ?? 0) > 0 && <i>{counts[t.key]}</i>}
+                </span>
+              </Link>
+            ))}
+          </div>
+        </nav>
+      )}
 
       {rows.length === 0 ? (
-        <EmptyState title={tab.empty}>
-          {tab.key === "inbox" && (
-            <LinkButton href="/asks/new" variant="primary" size="sm" className="mt-3">
-              Drop an ask
-            </LinkButton>
-          )}
-        </EmptyState>
+        <div className="border-t border-border pt-1">
+          <EmptyState title={tab.empty}>
+            {tab.key === "inbox" && (
+              <LinkButton href="/asks/new" size="sm" className="mt-3">
+                Drop an ask
+              </LinkButton>
+            )}
+          </EmptyState>
+        </div>
       ) : (
-        <ul className="flex flex-col gap-3">
+        <ul className="list is-ruled">
           {rows.map(({ ask, client }) => {
             const nTasks = tasksFor(ask.id);
             const nDrafts = draftsFor(ask.id);
@@ -135,26 +135,26 @@ export default async function AsksPage({ searchParams }: { searchParams: Promise
             // Preview the latest word in the conversation (a message, or Claude's note if there are none).
             const latest = last ? { claude: last.author === "claude", who: actorName(last.author), body: last.body } : ask.claudeNote ? { claude: true, who: "Claude", body: ask.claudeNote } : null;
             return (
-              <li key={ask.id} className="rounded-xl border border-border bg-surface p-4">
-                <div className="mb-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted">
+              <li key={ask.id} className="ask-item">
+                <p className="meta mb-1">
                   {client ? (
                     simple ? (
                       <span className="font-medium text-text">{clientLabel(client)}</span>
                     ) : (
-                      <Link href={`/clients/${client.id}`} className="font-medium text-text hover:underline">
+                      <Link href={`/clients/${client.id}`} className="tap-target font-medium text-text hover:underline">
                         {clientLabel(client)}
                       </Link>
                     )
                   ) : (
                     !simple && <span>No business set</span>
                   )}
-                  {(client || !simple) && <span aria-hidden>·</span>}
+                  {(client || !simple) && <span aria-hidden> · </span>}
                   <span>
                     {actorName(ask.createdBy)}, {relativeTime(ask.createdAt)}
                   </span>
-                </div>
+                </p>
 
-                <Link href={`/asks/${ask.id}`} className="block whitespace-pre-wrap break-words text-sm hover:underline">
+                <Link href={`/asks/${ask.id}`} className="ask-body">
                   {ask.body.length > 600 ? `${ask.body.slice(0, 600)}…` : ask.body}
                 </Link>
 
@@ -165,30 +165,24 @@ export default async function AsksPage({ searchParams }: { searchParams: Promise
                 )}
 
                 {latest && (
-                  <Link
-                    href={`/asks/${ask.id}`}
-                    className={cx(
-                      "mt-3 block rounded-lg px-3 py-2 text-sm hover:opacity-90",
-                      latest.claude ? "border-l-4 border-accent bg-accent-soft" : "bg-surface-2",
-                    )}
-                  >
-                    <span className={cx("mb-0.5 block text-xs font-semibold", latest.claude ? "text-accent" : "text-muted")}>
-                      {latest.who}
-                      {thread.length > 1 && <span className="font-normal text-muted"> · {thread.length + (ask.claudeNote ? 1 : 0)} messages</span>}
+                  <Link href={`/asks/${ask.id}`} className="ask-quote mt-3">
+                    <span className="meta mb-0.5 block">
+                      <b className="font-semibold text-text">{latest.who}</b>
+                      {thread.length > 1 && <span> · {thread.length + (ask.claudeNote ? 1 : 0)} messages</span>}
                     </span>
                     <span className="line-clamp-3 whitespace-pre-wrap break-words">{latest.body}</span>
                   </Link>
                 )}
 
-                <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
-                  <div className="flex flex-wrap items-center gap-1.5">
+                <div className="ask-foot">
+                  <div className="ask-facts">
                     {!simple && <AskRouteBadges ask={ask} />}
-                    {convo === "claude_asked" && <Badge tone="warn">Claude asked a question</Badge>}
-                    {convo === "replied" && <Badge tone="info">Replied</Badge>}
-                    {nTasks > 0 && <Badge>{nTasks} task{nTasks === 1 ? "" : "s"}</Badge>}
-                    {simple ? null : nTasks > 0 && <Badge>{nTasks} task{nTasks === 1 ? "" : "s"}</Badge>}
-                    {simple ? null : nDrafts > 0 && <Badge tone="warn">{nDrafts} draft{nDrafts === 1 ? "" : "s"}</Badge>}
-                    <Link href={`/asks/${ask.id}`} className="inline-flex min-h-11 items-center text-sm font-medium text-accent hover:underline md:min-h-0 md:text-xs">
+                    {convo === "claude_asked" && <Status tone="warn" small>Claude asked a question</Status>}
+                    {convo === "replied" && <Status tone="info" small>Replied</Status>}
+                    {nTasks > 0 && <span className="meta">{nTasks} task{nTasks === 1 ? "" : "s"}</span>}
+                    {!simple && nDrafts > 0 && <span className="meta">{nDrafts} draft{nDrafts === 1 ? "" : "s"}</span>}
+                    {/* 44px to tap on a phone, without making the line taller. */}
+                    <Link href={`/asks/${ask.id}`} className="link -my-2.5 inline-flex min-h-11 min-w-11 items-center justify-center text-sm md:pointer-fine:my-0 md:pointer-fine:min-h-0 md:pointer-fine:min-w-0">
                       Open
                     </Link>
                   </div>
@@ -202,15 +196,15 @@ export default async function AsksPage({ searchParams }: { searchParams: Promise
       )}
 
       {tab.key === "done" && (
-        <p className="mt-4 text-center text-sm">
-          <Link href="/asks?tab=archived" className="inline-flex min-h-11 items-center text-muted hover:text-text hover:underline">
+        <p className="mt-2">
+          <Link href="/asks?tab=archived" className="link-quiet inline-flex min-h-11 items-center">
             See archived asks
           </Link>
         </p>
       )}
       {tab.key === "archived" && (
-        <p className="mb-2 mt-4 text-center text-sm">
-          <Link href="/asks?tab=done" className="inline-flex min-h-11 items-center text-muted hover:text-text hover:underline">
+        <p className="mt-2">
+          <Link href="/asks?tab=done" className="link-quiet inline-flex min-h-11 items-center">
             ← Back to Done
           </Link>
         </p>

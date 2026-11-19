@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
-import { cx, formatNumber } from "./ui";
+import { formatNumber } from "./ui";
 
 export type ViewsPoint = { month: string; label: string; longLabel: string; instagram: number | null; tiktok: number | null };
 
@@ -9,12 +9,14 @@ export type ViewsPoint = { month: string; label: string; longLabel: string; inst
  * 12-month views trend, Instagram vs TikTok. Dependency-free inline SVG.
  * Two-series line chart (change over time); one shared y-axis; crosshair + tooltip on hover/focus;
  * arrow keys step through months; a table view carries every value without hovering.
- * Series colors are chart-local and validated for CVD separation in light and dark
- * (TikTok's brand black/white reads as axis ink, so the TikTok line uses blue).
+ * Drawn in ink on paper: each line takes its platform's own dot colour (--ig, --tt; TikTok's is ink), the same
+ * dots the legend and the rest of the app use. The grid is hairlines, so an ink line still reads as data.
+ * The pair stays apart for colour-blind readers in light and dark, and the end labels, the tooltip and the table
+ * name every value in words.
  */
 const SERIES = [
-  { key: "instagram" as const, name: "Instagram", color: "var(--viz-ig)" },
-  { key: "tiktok" as const, name: "TikTok", color: "var(--viz-tt)" },
+  { key: "instagram" as const, name: "Instagram", color: "var(--ig)", dot: "is-ig" },
+  { key: "tiktok" as const, name: "TikTok", color: "var(--tt)", dot: "is-tt" },
 ];
 
 const HEIGHT = 220;
@@ -57,16 +59,17 @@ export function ViewsChart({ points, title }: { points: ViewsPoint[]; title: str
   const { top, step } = scaleFor(Math.max(0, ...values));
   const ticks = Array.from({ length: Math.round(top / step) + 1 }, (_, i) => i * step);
 
-  const tickW = Math.max(...ticks.map((t) => tickText(t, top).length)) * 6.5 + 8;
+  const tickW = Math.max(...ticks.map((t) => tickText(t, top).length)) * 7 + 8; // 12px labels
   const wide = width >= 520;
   const left = M.left + tickW;
-  const right = wide ? 76 : 12;
+  const right = wide ? 84 : 12; // room for the end labels ("31K TikTok") at 12px
   const plotW = Math.max(40, width - left - right);
   const plotH = HEIGHT - M.top - M.bottom;
   const x = (i: number) => left + (n <= 1 ? plotW / 2 : (i * plotW) / (n - 1));
   const y = (v: number) => M.top + plotH - (v / top) * plotH;
 
-  const labelEvery = Math.max(1, Math.ceil(n / Math.max(1, Math.floor(plotW / 44))));
+  // A month label ("Nov 26") needs about 56px, so the first and last (set flush to the ends) never touch their neighbours.
+  const labelEvery = Math.max(1, Math.ceil(n / Math.max(1, Math.floor(plotW / 56))));
 
   const paths = useMemo(
     () =>
@@ -125,19 +128,16 @@ export function ViewsChart({ points, title }: { points: ViewsPoint[]; title: str
   }).join("; ");
 
   return (
-    <div className="[--viz-ig:#d0458f] [--viz-tt:#2a78d6] dark:[--viz-ig:#e0559f] dark:[--viz-tt:#3987e5]">
-      <div className="mb-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted" aria-hidden>
+    <div>
+      <div className="viz-legend" aria-hidden>
         {SERIES.map((s) => (
-          <span key={s.key} className="inline-flex items-center gap-1.5">
-            <svg width="16" height="8" aria-hidden><line x1="1" y1="4" x2="15" y2="4" stroke={s.color} strokeWidth="2" strokeLinecap="round" /></svg>
-            {s.name}
-          </span>
+          <span key={s.key} className={`status ${s.dot}`}>{s.name}</span>
         ))}
       </div>
 
       <div
         ref={wrapRef}
-        className="relative w-full touch-pan-y select-none outline-none focus-visible:ring-2 focus-visible:ring-accent rounded-md"
+        className="relative w-full touch-pan-y select-none rounded-md"
         tabIndex={hasData ? 0 : -1}
         role="group"
         aria-label={`${title}. ${summary}. Use left and right arrow keys to read each month.`}
@@ -154,7 +154,7 @@ export function ViewsChart({ points, title }: { points: ViewsPoint[]; title: str
           {ticks.map((t) => (
             <g key={t}>
               <line x1={left} x2={left + plotW} y1={y(t)} y2={y(t)} stroke="var(--border)" strokeWidth={1} shapeRendering="crispEdges" />
-              <text x={left - 8} y={y(t)} dy="0.32em" textAnchor="end" fontSize={11} fill="var(--muted)" style={{ fontVariantNumeric: "tabular-nums" }}>
+              <text x={left - 8} y={y(t)} dy="0.32em" textAnchor="end" fontSize={12} fill="var(--muted)" style={{ fontVariantNumeric: "tabular-nums" }}>
                 {tickText(t, top)}
               </text>
             </g>
@@ -162,7 +162,7 @@ export function ViewsChart({ points, title }: { points: ViewsPoint[]; title: str
 
           {points.map((p, i) =>
             i % labelEvery === (n - 1) % labelEvery ? (
-              <text key={p.month} x={x(i)} y={HEIGHT - 8} textAnchor={i === n - 1 ? "end" : i === 0 ? "start" : "middle"} fontSize={11} fill={i === active ? "var(--text)" : "var(--muted)"}>
+              <text key={p.month} x={x(i)} y={HEIGHT - 8} textAnchor={i === n - 1 ? "end" : i === 0 ? "start" : "middle"} fontSize={12} fill={i === active ? "var(--text)" : "var(--muted)"}>
                 {p.label}
               </text>
             ) : null,
@@ -176,20 +176,20 @@ export function ViewsChart({ points, title }: { points: ViewsPoint[]; title: str
             <g key={s.key}>
               <path d={s.d} fill="none" stroke={s.color} strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" />
               {s.isolated.map((i) => (
-                <circle key={i} cx={x(i)} cy={y(points[i][s.key] as number)} r={4} fill={s.color} stroke="var(--surface)" strokeWidth={2} />
+                <circle key={i} cx={x(i)} cy={y(points[i][s.key] as number)} r={4} fill={s.color} stroke="var(--bg)" strokeWidth={2} />
               ))}
               {s.last >= 0 && !s.isolated.includes(s.last) && (
-                <circle cx={x(s.last)} cy={y(points[s.last][s.key] as number)} r={4} fill={s.color} stroke="var(--surface)" strokeWidth={2} />
+                <circle cx={x(s.last)} cy={y(points[s.last][s.key] as number)} r={4} fill={s.color} stroke="var(--bg)" strokeWidth={2} />
               )}
               {active != null && points[active][s.key] != null && (
-                <circle cx={x(active)} cy={y(points[active][s.key] as number)} r={5} fill={s.color} stroke="var(--surface)" strokeWidth={2} />
+                <circle cx={x(active)} cy={y(points[active][s.key] as number)} r={5} fill={s.color} stroke="var(--bg)" strokeWidth={2} />
               )}
             </g>
           ))}
 
           {showDirect &&
             ends.map((e) => (
-              <text key={e.key} x={e.ex + 10} y={e.ey} dy="0.32em" fontSize={11} fill="var(--text)">
+              <text key={e.key} x={e.ex + 10} y={e.ey} dy="0.32em" fontSize={12} fill="var(--text)">
                 <tspan fontWeight={600}>{formatNumber(points[e.last][e.key])}</tspan>
                 <tspan fill="var(--muted)"> {e.name === "Instagram" ? "IG" : "TikTok"}</tspan>
               </text>
@@ -197,22 +197,17 @@ export function ViewsChart({ points, title }: { points: ViewsPoint[]; title: str
         </svg>
 
         {!hasData && (
-          <div className="absolute inset-0 flex items-center justify-center px-6 text-center text-sm text-muted">
+          <div className="meta absolute inset-0 flex items-center justify-center px-6 text-center">
             No views recorded for these 12 months yet. Enter this month&apos;s numbers below.
           </div>
         )}
 
         {activePoint && (
-          <div
-            className="pointer-events-none absolute top-0 z-10 w-40 -translate-x-1/2 rounded-lg border border-border bg-surface px-3 py-2 text-xs shadow-lg"
-            style={{ left: tipLeft }}
-            aria-hidden
-          >
-            <p className="mb-1 font-medium text-muted">{activePoint.longLabel}</p>
+          <div className="pop viz-tip" style={{ left: tipLeft }} aria-hidden>
+            <p className="text-muted">{activePoint.longLabel}</p>
             {SERIES.map((s) => (
-              <p key={s.key} className="flex items-center gap-2">
-                <svg width="12" height="8" aria-hidden><line x1="1" y1="4" x2="11" y2="4" stroke={s.color} strokeWidth="2" strokeLinecap="round" /></svg>
-                <span className="font-semibold tabular-nums text-text">{activePoint[s.key] == null ? "—" : activePoint[s.key]!.toLocaleString("en-US")}</span>
+              <p key={s.key} className={`status ${s.dot} flex`}>
+                <span className="font-semibold tabular-nums">{activePoint[s.key] == null ? "—" : activePoint[s.key]!.toLocaleString("en-US")}</span>
                 <span className="text-muted">{s.name}</span>
               </p>
             ))}
@@ -220,23 +215,28 @@ export function ViewsChart({ points, title }: { points: ViewsPoint[]; title: str
         )}
       </div>
 
-      <details className="mt-2 text-xs">
-        <summary className="cursor-pointer text-muted hover:text-text pointer-coarse:py-3">Show as table</summary>
-        <div className="relative mt-2 overflow-x-auto">
-          <table className="w-full min-w-72 text-left tabular-nums">
+      <details className="biz-disc is-quiet">
+        <summary>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+            <path d="m9 6 6 6-6 6" />
+          </svg>
+          Show as table
+        </summary>
+        <div className="relative overflow-x-auto pb-3">
+          <table className="viz-table">
             <caption className="sr-only">{title}</caption>
-            <thead className="text-muted">
+            <thead>
               <tr>
-                <th scope="col" className="py-1 pr-3 font-medium">Month</th>
-                {SERIES.map((s) => <th key={s.key} scope="col" className="py-1 pr-3 text-right font-medium">{s.name}</th>)}
+                <th scope="col">Month</th>
+                {SERIES.map((s) => <th key={s.key} scope="col">{s.name}</th>)}
               </tr>
             </thead>
             <tbody>
               {[...points].reverse().map((p) => (
-                <tr key={p.month} className={cx("border-t border-border")}>
-                  <th scope="row" className="py-1 pr-3 font-normal">{p.longLabel}</th>
+                <tr key={p.month}>
+                  <th scope="row">{p.longLabel}</th>
                   {SERIES.map((s) => (
-                    <td key={s.key} className="py-1 pr-3 text-right">{p[s.key] == null ? "—" : p[s.key]!.toLocaleString("en-US")}</td>
+                    <td key={s.key}>{p[s.key] == null ? "—" : p[s.key]!.toLocaleString("en-US")}</td>
                   ))}
                 </tr>
               ))}

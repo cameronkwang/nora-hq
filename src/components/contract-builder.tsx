@@ -13,7 +13,7 @@ import {
   type ContractKind,
 } from "@/lib/contract";
 import { deleteContractAction, saveContractAction } from "@/app/(app)/contracts/actions";
-import { Button, Card, cx } from "./ui";
+import { Button, Card, Status, cx } from "./ui";
 
 /** A past contract as the page hands it over (dates as strings so it crosses the server/client line). */
 export type PastContract = {
@@ -118,9 +118,10 @@ export function ContractBuilder({
   const collab = f.kind === "collab";
 
   return (
-    <div className="grid gap-6 lg:grid-cols-[minmax(0,26rem)_minmax(0,1fr)]">
-      <div className="grid content-start gap-4">
+    <div className="grid gap-10 max-md:gap-8 min-[1200px]:grid-cols-[minmax(0,26rem)_minmax(0,1fr)] min-[1200px]:gap-x-16">
+      <div className="grid content-start gap-10 max-md:gap-8">
         <Card title="Type">
+          {/* Two options side by side; the chosen one has an ink edge. */}
           <div role="radiogroup" aria-label="Contract type" className="grid grid-cols-2 gap-2">
             {(
               [
@@ -128,19 +129,9 @@ export function ContractBuilder({
                 ["monthly", "Monthly services", "Ongoing social media"],
               ] as const
             ).map(([k, label, hint]) => (
-              <button
-                key={k}
-                type="button"
-                role="radio"
-                aria-checked={f.kind === k}
-                onClick={() => setKind(k)}
-                className={cx(
-                  "rounded-lg border px-3 py-2 text-left text-sm",
-                  f.kind === k ? "border-accent bg-accent-soft text-accent" : "border-border hover:bg-surface-2",
-                )}
-              >
-                <span className="block font-semibold">{label}</span>
-                <span className="block text-xs text-muted">{hint}</span>
+              <button key={k} type="button" role="radio" aria-checked={f.kind === k} onClick={() => setKind(k)} className="g-kind">
+                <b>{label}</b>
+                <small>{hint}</small>
               </button>
             ))}
           </div>
@@ -210,12 +201,14 @@ export function ContractBuilder({
           </div>
         </Card>
 
-        <details className="rounded-xl border border-border bg-surface">
-          <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between px-4 py-3 text-sm font-semibold">
-            More terms
-            <span aria-hidden className="text-muted">▾</span>
+        <details className="sec g-fold">
+          <summary className="sec-head">
+            <h2 className="title">More terms</h2>
+            <svg viewBox="0 0 16 16" aria-hidden fill="none" stroke="currentColor" strokeWidth={1.8}>
+              <path d="M6 3.5 10.5 8 6 12.5" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
           </summary>
-          <div className="grid gap-3 border-t border-border p-4">
+          <div className="sec-body grid gap-3">
             <div className="grid grid-cols-2 gap-3">
               {collab && (
                 <Field label="Client can repost for (months)">
@@ -261,15 +254,15 @@ export function ContractBuilder({
         <div className="grid gap-2">
           {/* Desktop: the button sits under the form. Phones use the sticky bar below. */}
           {/* Wrapped: Button's own inline-flex would beat a "hidden" class on it. */}
-          <div className="hidden lg:grid">
+          <div className="hidden min-[1200px]:block">
             <Button variant="primary" onClick={download} disabled={busy}>
               {busy ? "Making PDF…" : "Download PDF"}
             </Button>
           </div>
-          {missing.length > 0 && <p className="text-xs text-warn">Still blank: {missing.join(", ")}. The PDF shows [brackets] there.</p>}
-          {error && <p role="alert" className="text-xs text-danger">{error}</p>}
-          {note && <p role="status" className="text-xs text-ok">{note}</p>}
-          <p className="text-xs text-muted">This is a plain-English starting template, not legal advice. Have a lawyer look it over once before you use it widely.</p>
+          {missing.length > 0 && <p><Status tone="warn" small className="whitespace-normal">Still blank: {missing.join(", ")}. The PDF shows [brackets] there.</Status></p>}
+          {error && <p role="alert"><Status tone="danger" small className="whitespace-normal">{error}</Status></p>}
+          {note && <p role="status"><Status tone="ok" small className="whitespace-normal">{note}</Status></p>}
+          <p className="meta">This is a plain-English starting template, not legal advice. Have a lawyer look it over once before you use it widely.</p>
         </div>
       </div>
 
@@ -278,12 +271,13 @@ export function ContractBuilder({
         id="contract-preview"
         aria-label="Preview"
         className={cx(
-          "scroll-mt-4 rounded-xl border border-border bg-surface p-5 md:p-8 lg:sticky lg:top-6 lg:block lg:max-h-[calc(100dvh-3rem)] lg:overflow-y-auto",
+          "g-frame scroll-mt-4 min-[1200px]:sticky min-[1200px]:top-6 min-[1200px]:block",
           !showPreview && "hidden",
         )}
       >
-        <p className="mb-4 text-xs font-semibold uppercase tracking-wide text-muted">Preview</p>
-        <h2 className="text-xl font-semibold">{doc.title}</h2>
+        {/* A picture of the PDF: a hairline frame, the same words, in the page's own type. */}
+        <p className="eyebrow mb-4">Preview</p>
+        <h2 className="title">{doc.title}</h2>
         <p className="mt-2 text-sm">{doc.intro}</p>
         <ol className="mt-5 grid gap-4">
           {doc.sections.map((s, i) => (
@@ -295,8 +289,10 @@ export function ContractBuilder({
                 {s.paragraphs.map((p, j) =>
                   p.startsWith("•  ") ? (
                     <p key={j} className="pl-4 -indent-3">• {p.slice(3)}</p>
+                  ) : p.startsWith("[") && p.endsWith("]") ? (
+                    <p key={j}><span className="status is-warn whitespace-normal">{p}</span></p>
                   ) : (
-                    <p key={j} className={p.startsWith("[") && p.endsWith("]") ? "text-warn" : undefined}>{p}</p>
+                    <p key={j}>{p}</p>
                   ),
                 )}
               </div>
@@ -306,8 +302,8 @@ export function ContractBuilder({
         <div className="mt-8 grid gap-6 sm:grid-cols-2">
           {doc.signers.map((s) => (
             <div key={s.role}>
-              <div className="h-8 border-b border-text/60" />
-              <p className="mt-1 text-xs text-muted">{[s.role, s.name, s.business].filter(Boolean).join(" · ")} · Date</p>
+              <div className="h-8 border-b border-border-strong" />
+              <p className="meta mt-1">{[s.role, s.name, s.business].filter(Boolean).join(" · ")} · Date</p>
             </div>
           ))}
         </div>
@@ -316,7 +312,7 @@ export function ContractBuilder({
       <PastContracts history={history} onStartFrom={startFrom} />
 
       {/* Phones: Preview + Download stay in reach above the bottom tab bar while she scrolls the form. */}
-      <div className="fixed inset-x-0 bottom-[var(--tabbar-h)] z-20 border-t border-border bg-surface/95 px-4 py-2 backdrop-blur lg:hidden">
+      <div className="action-bar fixed inset-x-0 bottom-[var(--tabbar-h)] z-20 px-4 md:left-[17.5rem] min-[1200px]:hidden">
         <div className="mx-auto flex max-w-md gap-2">
           <Button
             type="button"
@@ -337,20 +333,20 @@ export function ContractBuilder({
         </div>
       </div>
       {/* Room so the sticky bar never covers the last field or the preview. */}
-      <div aria-hidden className="h-16 lg:hidden" />
+      <div aria-hidden className="h-16 min-[1200px]:hidden" />
     </div>
   );
 }
 
 function Field({ label, hint, optional, children }: { label: string; hint?: string; optional?: boolean; children: ReactNode }) {
   return (
-    <label className="grid content-start gap-1 text-sm">
-      <span className="font-medium">
+    <label className="grid min-w-0 content-start">
+      <span className="label">
         {label}
         {optional && <span className="font-normal text-muted"> (optional)</span>}
       </span>
       {children}
-      {hint && <span className="text-xs text-muted">{hint}</span>}
+      {hint && <span className="hint">{hint}</span>}
     </label>
   );
 }
@@ -358,17 +354,17 @@ function Field({ label, hint, optional, children }: { label: string; hint?: stri
 function PastContracts({ history, onStartFrom }: { history: PastContract[]; onStartFrom: (c: PastContract) => void }) {
   const [busyId, setBusyId] = useState("");
   return (
-    <section id="past-contracts" aria-label="Past contracts" className="scroll-mt-4 lg:col-span-2">
-      <Card title={<>Past contracts{history.length > 0 && <span className="font-normal text-muted"> · {history.length}</span>}</>} padded={false}>
+    <section id="past-contracts" aria-label="Past contracts" className="scroll-mt-4 min-[1200px]:col-span-2">
+      <Card title={<>Past contracts{history.length > 0 && <span className="text-muted"> · {history.length}</span>}</>} padded={false}>
         {history.length === 0 ? (
-          <p className="p-4 text-sm text-muted">Contracts you download show up here, so you can see who got what and download them again.</p>
+          <p className="meta py-3">Contracts you download show up here, so you can see who got what and download them again.</p>
         ) : (
-          <ul className="divide-y divide-border">
+          <ul className="list">
             {history.map((c) => (
-              <li key={c.id} className="flex flex-col gap-2 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+              <li key={c.id} className="flex flex-col gap-x-6 gap-y-2 py-3 sm:flex-row sm:items-center sm:justify-between">
                 <div className="min-w-0">
-                  <p className="truncate font-medium">{c.clientBusiness}</p>
-                  <p className="text-xs text-muted">
+                  <p className="font-medium [overflow-wrap:anywhere]">{c.clientBusiness}</p>
+                  <p className="meta">
                     {[
                       c.kind === "monthly" ? "Monthly" : "Collab",
                       c.feeCents ? `${money(c.feeCents / 100)}${c.kind === "monthly" ? "/mo" : ""}` : "No fee",
@@ -379,7 +375,7 @@ function PastContracts({ history, onStartFrom }: { history: PastContract[]; onSt
                       .join(" · ")}
                   </p>
                 </div>
-                <div className="flex shrink-0 gap-2">
+                <div className="flex shrink-0 flex-wrap gap-1">
                   <Button
                     size="sm"
                     disabled={busyId === c.id}
@@ -394,7 +390,7 @@ function PastContracts({ history, onStartFrom }: { history: PastContract[]; onSt
                   >
                     Download
                   </Button>
-                  <Button size="sm" onClick={() => onStartFrom(c)}>
+                  <Button size="sm" variant="ghost" onClick={() => onStartFrom(c)}>
                     Start from this
                   </Button>
                   <Button

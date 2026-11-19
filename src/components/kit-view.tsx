@@ -1,5 +1,5 @@
-import type { ReactNode } from "react";
 import { DEFAULT_RATE_LINE } from "@/lib/collab-copy";
+import { EmptyState, Figure, Section, buttonClass, cx } from "./ui";
 
 /**
  * Nora's media kit, as one presentational component. Used by the public page (/kit) and the live preview on
@@ -66,29 +66,6 @@ export function formatAsOf(date: string): string {
   return new Date(`${date}T12:00:00Z`).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric", timeZone: "UTC" });
 }
 
-function StatTile({ label, value, sub }: { label: string; value: string; sub?: string }) {
-  return (
-    <div className="min-w-0 rounded-2xl border border-border bg-surface p-4">
-      <p className="text-[28px] font-semibold leading-none tracking-tight tabular-nums sm:text-3xl">{value}</p>
-      <p className="mt-2 text-sm font-medium">{label}</p>
-      {sub && <p className="mt-0.5 text-xs text-muted">{sub}</p>}
-    </div>
-  );
-}
-
-function Section({ title, children }: { title: string; children: ReactNode }) {
-  return (
-    <section className="mt-8">
-      <h2 className="mb-3 text-xs font-semibold uppercase tracking-[0.12em] text-muted">{title}</h2>
-      {children}
-    </section>
-  );
-}
-
-function Chip({ children }: { children: ReactNode }) {
-  return <li className="rounded-full border border-border bg-surface px-3 py-1.5 text-sm">{children}</li>;
-}
-
 export function KitView({
   settings: s,
   stats,
@@ -104,11 +81,11 @@ export function KitView({
   preview?: boolean;
 }) {
   const handle = identity.igHandle ?? identity.ttHandle ?? "noraeatsgood";
-  const tiles: Array<{ label: string; value: string; sub?: string }> = [];
-  if (stats.igFollowers != null) tiles.push({ label: "Instagram followers", value: compactNumber(stats.igFollowers) });
-  if (stats.ttFollowers != null) tiles.push({ label: "TikTok followers", value: compactNumber(stats.ttFollowers) });
-  if (stats.igAvgViews != null) tiles.push({ label: "Avg views per reel", value: compactNumber(stats.igAvgViews), sub: "Last 10 reels" });
-  if (stats.ttAvgViews != null) tiles.push({ label: "Avg views per TikTok", value: compactNumber(stats.ttAvgViews), sub: "Last 10 videos" });
+  const figures: Array<{ label: string; value: string; sub?: string }> = [];
+  if (stats.igFollowers != null) figures.push({ label: "Instagram followers", value: compactNumber(stats.igFollowers) });
+  if (stats.ttFollowers != null) figures.push({ label: "TikTok followers", value: compactNumber(stats.ttFollowers) });
+  if (stats.igAvgViews != null) figures.push({ label: "Avg views per reel", value: compactNumber(stats.igAvgViews), sub: "Last 10 reels" });
+  if (stats.ttAvgViews != null) figures.push({ label: "Avg views per TikTok", value: compactNumber(stats.ttAvgViews), sub: "Last 10 videos" });
   const eng = [
     stats.igEngagement != null ? { p: "Instagram", r: stats.igEngagement } : null,
     stats.ttEngagement != null ? { p: "TikTok", r: stats.ttEngagement } : null,
@@ -116,7 +93,7 @@ export function KitView({
   if (eng.length) {
     const best = eng.reduce((a, b) => (b.r > a.r ? b : a));
     const other = eng.find((e) => e !== best);
-    tiles.push({ label: "Engagement rate", value: percent(best.r), sub: other ? `${best.p} · ${other.p} ${percent(other.r)}` : `${best.p}, recent posts` });
+    figures.push({ label: "Engagement rate", value: percent(best.r), sub: other ? `${best.p} · ${other.p} ${percent(other.r)}` : `${best.p}, recent posts` });
   }
   const cities = s.showCities ? stats.cities.slice(0, 3) : [];
   const past = s.showPastCollabs ? s.pastCollabs.filter(Boolean) : [];
@@ -126,86 +103,82 @@ export function KitView({
 
   return (
     <div className="mx-auto w-full max-w-2xl">
-      <header className="text-center">
-        <span aria-hidden className="mx-auto mb-4 flex size-20 items-center justify-center rounded-full bg-accent text-3xl font-semibold text-accent-fg shadow-sm">
-          {identity.name.trim().charAt(0).toUpperCase() || "N"}
-        </span>
-        <p className="text-xs font-semibold uppercase tracking-[0.14em] text-muted">Media kit</p>
-        <h1 className="mt-1 text-3xl font-semibold tracking-tight sm:text-4xl">{identity.name}</h1>
-        <p className="mt-1 flex flex-wrap items-center justify-center gap-x-3 text-[15px] font-medium">
+      <header>
+        <p className="eyebrow">Media kit</p>
+        <h1 className="display mt-2 [overflow-wrap:anywhere]">{identity.name}</h1>
+        <p className="mt-2 flex flex-wrap gap-x-6">
           {identity.igHandle && (
-            <a href={`https://www.instagram.com/${identity.igHandle}/`} target="_blank" rel="noopener noreferrer" className="inline-flex min-h-11 items-center text-ig hover:underline" {...noNav}>
+            <a href={`https://www.instagram.com/${identity.igHandle}/`} target="_blank" rel="noopener noreferrer" className="status is-ig min-h-11 items-center hover:underline md:min-h-0" {...noNav}>
               @{identity.igHandle} · Instagram
             </a>
           )}
           {identity.ttHandle && (
-            <a href={`https://www.tiktok.com/@${identity.ttHandle}`} target="_blank" rel="noopener noreferrer" className="inline-flex min-h-11 items-center text-tt hover:underline" {...noNav}>
+            <a href={`https://www.tiktok.com/@${identity.ttHandle}`} target="_blank" rel="noopener noreferrer" className="status is-tt min-h-11 items-center hover:underline md:min-h-0" {...noNav}>
               @{identity.ttHandle} · TikTok
             </a>
           )}
-          {!identity.igHandle && !identity.ttHandle && <span className="text-accent">@{handle}</span>}
+          {!identity.igHandle && !identity.ttHandle && <span>@{handle}</span>}
         </p>
-        {s.headline.trim() && <p className="mx-auto mt-4 max-w-md text-lg font-medium leading-snug">{s.headline}</p>}
-        {s.bio.trim() && <p className="mx-auto mt-3 max-w-lg whitespace-pre-line text-[16px] leading-relaxed text-muted">{s.bio}</p>}
+        {s.headline.trim() && <p className="title mt-6">{s.headline}</p>}
+        {s.bio.trim() && <p className="mt-2 whitespace-pre-line text-muted">{s.bio}</p>}
       </header>
 
-      {tiles.length > 0 ? (
+      {figures.length > 0 ? (
         <Section title="The numbers">
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-            {tiles.map((t) => <StatTile key={t.label} {...t} />)}
+          <div className="figures">
+            {figures.map((t) => <Figure key={t.label} label={t.label} value={t.value} hint={t.sub} />)}
           </div>
-          {stats.asOf && <p className="mt-2 text-xs text-muted">As of {formatAsOf(stats.asOf)}</p>}
+          {stats.asOf && <p className="meta mt-4">As of {formatAsOf(stats.asOf)}</p>}
         </Section>
       ) : preview ? (
         <Section title="The numbers">
-          <p className="rounded-2xl border border-dashed border-border p-4 text-sm text-muted">No numbers yet — connect or log them on My stats and they show up here.</p>
+          <EmptyState title="No numbers yet">Connect or log them on My stats and they show up here.</EmptyState>
         </Section>
       ) : null}
 
       {cities.length > 0 && (
         <Section title="Top audience cities">
-          <ol className="flex flex-wrap gap-2">
+          <ol className="g-words">
             {cities.map((c, i) => (
-              <li key={c} className="flex items-center gap-2 rounded-full bg-surface-2 px-3 py-1.5 text-sm">
-                <span className="text-xs font-semibold tabular-nums text-muted">{i + 1}</span>
+              <li key={c}>
+                <span className="n">{i + 1}</span>
                 {c}
               </li>
             ))}
           </ol>
-          <p className="mt-2 text-xs text-muted">From Instagram audience insights.</p>
+          <p className="meta mt-2">From Instagram audience insights.</p>
         </Section>
       )}
 
       {styles.length > 0 && (
         <Section title="Content style">
-          <ul className="flex flex-wrap gap-2">{styles.map((x) => <Chip key={x}>{x}</Chip>)}</ul>
+          <ul className="g-words">{styles.map((x) => <li key={x}>{x}</li>)}</ul>
         </Section>
       )}
 
       {past.length > 0 && (
         <Section title="Past collabs">
-          <ul className="flex flex-wrap gap-2">{past.map((x) => <Chip key={x}>{x}</Chip>)}</ul>
+          <ul className="g-words">{past.map((x) => <li key={x}>{x}</li>)}</ul>
         </Section>
       )}
 
-      <section className="mt-10 rounded-3xl border border-border bg-surface p-5 text-center shadow-sm sm:p-8">
-        <h2 className="text-xl font-semibold tracking-tight">Let’s work together</h2>
-        {s.showRate && s.rateLine.trim() && <p className="mx-auto mt-2 max-w-md text-[16px] leading-relaxed">{s.rateLine}</p>}
-        <div className="mt-5 flex flex-col items-stretch justify-center gap-3 sm:flex-row sm:items-center">
-          <a href={collabHref} className="inline-flex min-h-12 items-center justify-center rounded-xl bg-accent px-6 text-base font-semibold text-accent-fg hover:opacity-90" {...noNav}>
+      <Section title="Let’s work together">
+        {s.showRate && s.rateLine.trim() && <p className="font-medium">{s.rateLine}</p>}
+        <div className="mt-5 flex flex-wrap gap-3">
+          <a href={collabHref} className={cx(buttonClass("primary"), "max-sm:flex-1")} {...noNav}>
             Start a collab
           </a>
           {email && (
-            <a href={`mailto:${email}`} className="inline-flex min-h-12 items-center justify-center rounded-xl border border-border px-6 text-base font-medium hover:bg-surface-2" {...noNav}>
+            <a href={`mailto:${email}`} className={cx(buttonClass("secondary"), "max-sm:flex-1")} {...noNav}>
               Email {identity.name.split(" ")[0]}
             </a>
           )}
         </div>
-        {email && <p className="mt-3 break-all text-sm text-muted">{email}</p>}
-        <p className="mx-auto mt-4 max-w-sm text-xs leading-relaxed text-muted">
-          Sponsored and gifted content is always clearly disclosed. Reviews are honest — a collab doesn’t guarantee positive coverage.
+        {email && <p className="meta mt-3 break-all">{email}</p>}
+        <p className="meta mt-6">
+          Sponsored and gifted content is always clearly disclosed. Reviews are honest: a collab doesn’t guarantee positive coverage.
         </p>
-      </section>
+      </Section>
     </div>
   );
 }

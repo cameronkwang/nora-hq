@@ -5,10 +5,10 @@ import { getLaunchStatus } from "@/lib/ops-launch";
 import { markOpenAction } from "@/app/(app)/clients/[id]/settings/launch-actions";
 import { SubmitButton } from "./client-form";
 import { TaskRow } from "./task-row";
-import { Badge, Card, ProgressBar } from "./ui";
+import { Card, ProgressBar, Status } from "./ui";
 
 /**
- * "Launch checklist" card on a business page, for a business that isn't open yet (Settings → Pre-launch).
+ * "Launch checklist" section on a business page, for a business that isn't open yet (Settings → Pre-launch).
  * Shows how long until opening day and the short launch checklist (tasks tagged "launch"); the monthly plan waits
  * until then. Once opening day is here it offers "They're open", which takes the business out of pre-launch and
  * creates the month's plan tasks.
@@ -25,34 +25,35 @@ export async function LaunchCard({ client, className }: { client: Client; classN
     <Card
       title="Launch checklist"
       className={className}
-      actions={<Badge tone={info.opened || soon ? "warn" : "info"}>{openingLine(info)}</Badge>}
+      padded={false}
+      actions={<Status tone={info.opened || soon ? "warn" : "info"} small className="whitespace-normal">{openingLine(info)}</Status>}
     >
-      <p className="-mt-1 mb-3 text-sm text-muted">
+      <p className="sec-note">
         {info.opened
           ? `${client.name}'s opening day is here.`
           : `${client.name} isn't open yet. Until they open, this is the work.`}
         {!info.openingDate && (
           <>
             {" "}
-            <Link href={`/clients/${client.id}/settings#launch`} className="text-accent hover:underline">Add the opening day</Link>
+            <Link href={`/clients/${client.id}/settings#launch`} className="link">Add the opening day</Link>
           </>
         )}
       </p>
 
       {info.opened && (
-        <form action={markOpenAction.bind(null, client.id, info.openingDate)} className="mb-3 flex flex-wrap items-center gap-3 rounded-lg bg-warn-soft px-3 py-2">
-          <p className="min-w-0 flex-1 text-sm text-warn">Are they open? This takes them out of pre-launch and creates the month&apos;s checklist.</p>
+        <form action={markOpenAction.bind(null, client.id, info.openingDate)} className="notice mb-3 items-center">
+          <p className="status is-warn min-w-0 flex-1 basis-56 whitespace-normal">Are they open? This takes them out of pre-launch and creates the month&apos;s checklist.</p>
           <SubmitButton size="sm" pendingLabel="Saving…">They&apos;re open</SubmitButton>
         </form>
       )}
 
       {launch.total > 0 ? (
         <>
-          <div className="mb-1 flex items-center justify-between gap-3 text-xs text-muted">
-            <span className="tabular-nums">{launch.done} of {launch.total} done</span>
+          <div className="biz-progress">
+            <ProgressBar value={launch.done} max={launch.total} />
+            <span className="meta num"><b>{launch.done}</b> of {launch.total} done</span>
           </div>
-          <ProgressBar value={launch.done} max={launch.total} />
-          <ul className="mt-2 divide-y divide-border">
+          <ul className="list is-ruled border-b-0">
             {launch.tasks.map((t) => (
               <li key={t.id}>
                 <TaskRow task={t} clientName={client.name} showClient={false} />
@@ -61,7 +62,7 @@ export async function LaunchCard({ client, className }: { client: Client; classN
           </ul>
         </>
       ) : (
-        <p className="text-sm text-muted">No launch steps left on the list.</p>
+        <p className="meta pb-2">No launch steps left on the list.</p>
       )}
     </Card>
   );

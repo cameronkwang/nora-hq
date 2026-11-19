@@ -44,9 +44,9 @@ export default async function DealPage({ params, searchParams }: { params: Promi
   const t = today();
   const error = one(sp.error);
   const flash = one(sp.new)
-    ? "Deal created. Claude has been asked for a shot list — it shows up below once it’s written."
+    ? "Deal created. Claude has been asked for a shot list. It shows up below once it’s written."
     : one(sp.from) === "schedule"
-      ? `Deal made from Nora’s schedule. Add the fee here — the schedule only ever shows Paid or Not paid.${deal.visitAt ? " The visit is set to noon on that day; change the time below if you know it." : ""}`
+      ? `Deal made from Nora’s schedule. Add the fee here; the schedule only ever shows Paid or Not paid.${deal.visitAt ? " The visit is set to noon on that day; change the time below if you know it." : ""}`
     : one(sp.asked) ? "Asked Claude for a shot list." : "";
   const paidComp = deal.compType !== "gifted";
   const posted = deal.deliverables.filter((d) => d.postedAt).length;
@@ -67,25 +67,29 @@ export default async function DealPage({ params, searchParams }: { params: Promi
 
   return (
     <>
-      <p className="mb-2 text-sm">
-        <Link href="/deals" className="text-muted hover:underline">← Collab deals</Link>
-      </p>
       <PageHeader
-        title={<span className="flex flex-wrap items-center gap-2">{deal.businessName}<DealStatusBadge status={deal.status} /></span>}
-        subtitle={[deal.visitAt ? formatVisit(deal.visitAt) : "No visit date yet", compText(deal)].filter(Boolean).join(" · ")}
+        crumb={<Link href="/deals">Collab deals</Link>}
+        title={deal.businessName}
+        subtitle={
+          <span className="g-meta">
+            <DealStatusBadge status={deal.status} small={false} />
+            <span>{deal.visitAt ? formatVisit(deal.visitAt) : "No visit date yet"}</span>
+            {compText(deal) && <span>{compText(deal)}</span>}
+          </span>
+        }
         actions={
           <>
-            <LinkButton href={`/contracts?deal=${deal.id}`}>Make contract</LinkButton>
-            <LinkButton href={`/deals/${deal.id}/visit`} variant="primary">Visit mode</LinkButton>
+            <LinkButton href={`/contracts?deal=${deal.id}`} size="sm">Make contract</LinkButton>
+            <LinkButton href={`/deals/${deal.id}/visit`} size="sm">Visit mode</LinkButton>
           </>
         }
       />
 
-      {flash && <p role="status" className="mb-4 rounded-lg bg-ok-soft px-3 py-2 text-sm text-ok">{flash}</p>}
-      {error && <p role="alert" className="mb-4 rounded-lg bg-danger-soft px-3 py-2 text-sm text-danger">{error}</p>}
+      {flash && <p role="status" className="notice mb-2"><span className="status is-ok">{flash}</span></p>}
+      {error && <p role="alert" className="notice mb-2"><span className="status is-danger">{error}</span></p>}
 
-      <div className="grid gap-5 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
-        <div className="space-y-5">
+      <div className="cols mt-0">
+        <div>
           {/* Terms & visit */}
           <Card title="Terms & visit">
             <ActionForm action={saveDealAction} className="grid gap-4">
@@ -99,7 +103,7 @@ export default async function DealPage({ params, searchParams }: { params: Promi
                     {schema.DEAL_COMP.map((c) => <option key={c} value={c}>{COMP_LABEL[c]}</option>)}
                   </select>
                 </Field>
-                <Field label="Agreed fee ($)" htmlFor="amount" hint="Media kit rates start at $600 — custom rates are fine.">
+                <Field label="Agreed fee ($)" htmlFor="amount" hint="Media kit rates start at $600. Custom rates are fine.">
                   <input id="amount" name="amount" inputMode="decimal" defaultValue={centsToDollarsInput(deal.amountCents)} placeholder="600" className="input" autoComplete="off" />
                 </Field>
               </div>
@@ -113,8 +117,8 @@ export default async function DealPage({ params, searchParams }: { params: Promi
                 <textarea id="terms" name="terms" rows={3} maxLength={4000} defaultValue={deal.terms ?? ""} className="input" placeholder="What was agreed: deliverables, timing, exclusivity, payment terms…" />
               </Field>
 
-              <fieldset className="grid gap-4 sm:grid-cols-3">
-                <legend className="label mb-2">Contact</legend>
+              <fieldset className="grid gap-3 sm:grid-cols-3">
+                <legend className="label">Contact</legend>
                 <input aria-label="Contact name" name="contactName" maxLength={120} defaultValue={deal.contactName ?? ""} placeholder="Name" className="input" autoComplete="off" />
                 <input aria-label="Contact email" name="contactEmail" type="email" maxLength={200} defaultValue={deal.contactEmail ?? ""} placeholder="Email" className="input" autoComplete="off" />
                 <input aria-label="Contact phone" name="contactPhone" type="tel" maxLength={40} defaultValue={deal.contactPhone ?? ""} placeholder="Phone" className="input" autoComplete="off" />
@@ -127,40 +131,40 @@ export default async function DealPage({ params, searchParams }: { params: Promi
               </Field>
               <div className="grid gap-4 sm:grid-cols-2">
                 <Field label="Dietary notes" htmlFor="dietaryNotes">
-                  <textarea id="dietaryNotes" name="dietaryNotes" rows={2} maxLength={2000} defaultValue={deal.dietaryNotes ?? ""} className="input !min-h-0" />
+                  <textarea id="dietaryNotes" name="dietaryNotes" rows={2} maxLength={2000} defaultValue={deal.dietaryNotes ?? ""} className="input min-h-0!" />
                 </Field>
                 <Field label="Filming notes" htmlFor="filmingNotes">
-                  <textarea id="filmingNotes" name="filmingNotes" rows={2} maxLength={2000} defaultValue={deal.filmingNotes ?? ""} className="input !min-h-0" placeholder="Best times, restrictions, lighting…" />
+                  <textarea id="filmingNotes" name="filmingNotes" rows={2} maxLength={2000} defaultValue={deal.filmingNotes ?? ""} className="input min-h-0!" placeholder="Best times, restrictions, lighting…" />
                 </Field>
               </div>
               <Field label="Notes" htmlFor="notes">
-                <textarea id="notes" name="notes" rows={2} maxLength={5000} defaultValue={deal.notes ?? ""} className="input !min-h-0" />
+                <textarea id="notes" name="notes" rows={2} maxLength={5000} defaultValue={deal.notes ?? ""} className="input min-h-0!" />
               </Field>
-              <div className="sticky-actions -mx-1 flex justify-end rounded-lg bg-surface/90 p-1 backdrop-blur">
-                <SubmitButton className="w-full sm:w-auto">Save</SubmitButton>
+              <div className="sticky-actions action-bar flex flex-wrap items-center gap-x-3 gap-y-2">
+                <SubmitButton className="max-sm:w-full">Save</SubmitButton>
               </div>
             </ActionForm>
           </Card>
 
           {/* Deliverables */}
-          <Card title={<>Deliverables{deal.deliverables.length > 0 && <span className="font-normal text-muted"> · {posted}/{deal.deliverables.length} posted</span>}</>} padded={false}>
+          <Card title={<>Deliverables{deal.deliverables.length > 0 && <span className="meta">{posted}/{deal.deliverables.length} posted</span>}</>} padded={false}>
             {deal.deliverables.length > 0 && (
-              <ul className="divide-y divide-border">
+              <ul className="list">
                 {deal.deliverables.map((d) => {
                   const late = !d.postedAt && !!d.dueDate && d.dueDate < t;
                   return (
-                    <li key={d.id} className="p-4">
+                    <li key={d.id} className="py-4">
                       <form action={saveDeliverableAction} className="grid gap-3">
                         <input type="hidden" name="id" value={d.id} />
                         <input type="hidden" name="dealId" value={deal.id} />
-                        <div className="flex flex-wrap items-center gap-2">
+                        <div className="flex flex-wrap items-baseline gap-x-4 gap-y-2">
                           <select name="kind" defaultValue={d.kind} aria-label="Type" className="input w-auto font-medium">
                             {schema.DELIVERABLE_KINDS.map((k) => <option key={k} value={k}>{DELIVERABLE_LABEL[k]}</option>)}
                           </select>
                           {d.postedAt ? (
-                            <span className="text-xs font-medium text-ok">Posted {formatDate(d.postedAt)}</span>
+                            <span className="status is-ok is-small">Posted {formatDate(d.postedAt)}</span>
                           ) : late ? (
-                            <span className="text-xs font-semibold text-danger">Late — was due {formatDate(d.dueDate)}</span>
+                            <span className="status is-danger is-small">Late, was due {formatDate(d.dueDate)}</span>
                           ) : null}
                         </div>
                         <div className="grid gap-3 sm:grid-cols-[10rem_minmax(0,1fr)]">
@@ -173,12 +177,12 @@ export default async function DealPage({ params, searchParams }: { params: Promi
                             <input id={`url-${d.id}`} name="postUrl" type="url" inputMode="url" maxLength={500} defaultValue={d.postUrl ?? ""} placeholder="https://www.instagram.com/reel/…" className="input" />
                           </div>
                         </div>
-                        <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
-                          <label className="flex min-h-11 items-center gap-2 text-sm md:min-h-0">
-                            <input type="checkbox" name="posted" defaultChecked={!!d.postedAt} /> Posted
+                        <div className="flex flex-wrap items-center gap-x-1 gap-y-1">
+                          <label className="g-inline">
+                            <input type="checkbox" name="posted" defaultChecked={!!d.postedAt} className="check" /> Posted
                           </label>
-                          <label className="flex min-h-11 items-center gap-2 text-sm md:min-h-0">
-                            <input type="checkbox" name="disclosureOk" defaultChecked={!!d.disclosureOk} /> Disclosed (#ad / Paid partnership / gifted)
+                          <label className="g-inline">
+                            <input type="checkbox" name="disclosureOk" defaultChecked={!!d.disclosureOk} className="check" /> Disclosed (#ad / Paid partnership / gifted)
                           </label>
                           <span className="ml-auto flex gap-2">
                             <ConfirmButton variant="ghost" size="sm" confirm="Remove this deliverable?" formAction={deleteDeliverableAction}>Remove</ConfirmButton>
@@ -191,7 +195,7 @@ export default async function DealPage({ params, searchParams }: { params: Promi
                 })}
               </ul>
             )}
-            <form action={addDeliverableAction} className={cx("flex flex-wrap items-end gap-2 p-4", deal.deliverables.length > 0 && "border-t border-border")}>
+            <form action={addDeliverableAction} className={cx("flex flex-wrap items-end gap-3 pb-1 pt-4", deal.deliverables.length > 0 ? "border-t border-border" : "mt-2")}>
               <input type="hidden" name="dealId" value={deal.id} />
               <div>
                 <label className="label" htmlFor="new-kind">Add</label>
@@ -210,7 +214,7 @@ export default async function DealPage({ params, searchParams }: { params: Promi
           {/* Shot list */}
           <Card title="Shot list">
             <DealShotList dealId={deal.id} shots={deal.shotList} editable />
-            <form action={askShotListAction} className="mt-4 flex flex-col gap-2 border-t border-border pt-4 sm:flex-row sm:items-end">
+            <form action={askShotListAction} className="mt-6 flex flex-col gap-3 border-t border-border pt-4 sm:flex-row sm:items-end">
               <input type="hidden" name="id" value={deal.id} />
               <div className="min-w-0 flex-1">
                 <label className="label" htmlFor="shot-note">{deal.shotList.length ? "Ask Claude to rewrite it (keeps your ticks)" : "Ask Claude for a shot list"}</label>
@@ -221,15 +225,14 @@ export default async function DealPage({ params, searchParams }: { params: Promi
           </Card>
         </div>
 
-        <aside className="space-y-5">
+        <aside>
           <Card title="Status">
-            <form action={setDealStatusAction} className="flex flex-wrap gap-2">
+            <form action={setDealStatusAction} className="chips">
               <input type="hidden" name="id" value={deal.id} />
               <input type="hidden" name="back" value={back} />
               {STATUS_FLOW.map((s) => (
-                <button key={s} formAction={setDealStatusToAction.bind(null, s)} aria-pressed={deal.status === s}
-                  className={cx(buttonClass(deal.status === s ? "primary" : "secondary", "sm"))}>
-                  {DEAL_STATUS_LABEL[s]}
+                <button key={s} formAction={setDealStatusToAction.bind(null, s)} aria-pressed={deal.status === s} className="chip">
+                  <span>{DEAL_STATUS_LABEL[s]}</span>
                 </button>
               ))}
             </form>
@@ -237,21 +240,21 @@ export default async function DealPage({ params, searchParams }: { params: Promi
               <input type="hidden" name="id" value={deal.id} />
               <input type="hidden" name="back" value={back} />
               <input type="hidden" name="status" value={deal.status === "cancelled" ? "planning" : "cancelled"} />
-              <SubmitButton variant="ghost" size="sm">{deal.status === "cancelled" ? "Reopen deal" : "Cancel deal"}</SubmitButton>
+              <SubmitButton variant="ghost" size="sm" className="-ml-1.5">{deal.status === "cancelled" ? "Reopen deal" : "Cancel deal"}</SubmitButton>
             </form>
-            <p className="mt-2 text-xs text-muted">Moves to Posted by itself once every deliverable is posted.</p>
+            <p className="hint">Moves to Posted by itself once every deliverable is posted.</p>
           </Card>
 
           <Card title="Payment" actions={<PaymentChip deal={deal} today={t} />}>
             {!paidComp && deal.paymentStatus !== "paid" ? (
-              <p className="text-sm text-muted">Gifted — nothing to invoice. Change the compensation in Terms if that changes.</p>
+              <p className="meta">Gifted, so nothing to invoice. Change the compensation in Terms if that changes.</p>
             ) : (
               <>
-                <p className="text-sm">
-                  {deal.amountCents != null ? <span className="text-lg font-semibold tabular-nums">{formatMoney(deal.amountCents)}</span> : <span className="text-muted">No fee set yet.</span>}
-                  {deal.paymentStatus === "paid" && deal.paidAt && <span className="ml-2 text-muted">paid {formatDate(deal.paidAt)}</span>}
+                <p className="flex flex-wrap items-baseline gap-x-3">
+                  {deal.amountCents != null ? <span className="g-money">{formatMoney(deal.amountCents)}</span> : <span className="text-muted">No fee set yet.</span>}
+                  {deal.paymentStatus === "paid" && deal.paidAt && <span className="meta">paid {formatDate(deal.paidAt)}</span>}
                   {deal.paymentStatus === "requested" && deal.paymentDueDate && (
-                    <span className={cx("ml-2", isOverdue(deal, t) ? "font-semibold text-danger" : "text-muted")}>due {formatDate(deal.paymentDueDate)}</span>
+                    <span className={cx("text-sm", isOverdue(deal, t) ? "font-medium text-danger" : "text-muted")}>due {formatDate(deal.paymentDueDate)}</span>
                   )}
                 </p>
                 <form action={setPaymentAction} className="mt-3 grid gap-3">
@@ -272,16 +275,16 @@ export default async function DealPage({ params, searchParams }: { params: Promi
                       <button formAction={setPaymentToAction.bind(null, "requested")} className={buttonClass("secondary")}>Update due date</button>
                     )}
                     {deal.paymentStatus !== "paid" ? (
-                      <button formAction={setPaymentToAction.bind(null, "paid")} className={buttonClass("primary")}>Mark paid</button>
+                      <button formAction={setPaymentToAction.bind(null, "paid")} className={buttonClass("secondary")}>Mark paid</button>
                     ) : (
-                      <button formAction={setPaymentToAction.bind(null, "requested")} className={buttonClass("ghost", "sm")}>Not paid after all</button>
+                      <button formAction={setPaymentToAction.bind(null, "requested")} className={cx(buttonClass("ghost", "sm"), "-ml-1.5")}>Not paid after all</button>
                     )}
                     {deal.paymentStatus === "requested" && (
                       <button formAction={setPaymentToAction.bind(null, "not_requested")} className={buttonClass("ghost", "sm")}>Not invoiced yet</button>
                     )}
                   </div>
                 </form>
-                <p className="mt-2 text-xs text-muted">Only you can change this — Claude never marks anything paid.</p>
+                <p className="hint">Only you can change this. Claude never marks anything paid.</p>
                 {deal.paymentStatus !== "paid" && deal.status !== "cancelled" && (
                   <PaymentRequest
                     invoice={request.invoice}
@@ -297,17 +300,17 @@ export default async function DealPage({ params, searchParams }: { params: Promi
           </Card>
 
           <Card title="Linked">
-            <ul className="space-y-2 text-sm">
+            <dl className="g-kv">
               <LinkedRow label="Collab request" href={deal.collabRequestId ? `/collabs/${deal.collabRequestId}` : null} text="Open request" />
               <LinkedRow label="Lead" href={lead ? `/leads/${lead.id}` : null} text={lead?.name ?? ""} />
               <LinkedRow label="Business" href={client ? `/clients/${client.id}` : null} text={client?.name ?? ""} />
               {scheduleItem && (
                 <LinkedRow label="Nora’s schedule" href={`/calendar?month=${scheduleItem.month}`} text={scheduleItem.date ? formatDate(scheduleItem.date) : monthLabel(scheduleItem.month)} />
               )}
-            </ul>
+            </dl>
           </Card>
 
-          <form action={deleteDealAction}>
+          <form action={deleteDealAction} className="mt-10">
             <input type="hidden" name="id" value={deal.id} />
             <ConfirmButton confirm={`Delete the ${deal.businessName} deal? Its deliverables and shot list go too. This can’t be undone.`}>Delete deal</ConfirmButton>
           </form>
@@ -322,16 +325,16 @@ function Field({ label, htmlFor, hint, children }: { label: string; htmlFor: str
     <div>
       <label className="label" htmlFor={htmlFor}>{label}</label>
       {children}
-      {hint && <p className="mt-1 text-xs text-muted">{hint}</p>}
+      {hint && <p className="hint">{hint}</p>}
     </div>
   );
 }
 
 function LinkedRow({ label, href, text }: { label: string; href: string | null; text: string }) {
   return (
-    <li className="flex min-h-11 items-center justify-between gap-2 md:min-h-0">
-      <span className="text-muted">{label}</span>
-      {href ? <Link href={href} className="truncate font-medium text-accent hover:underline">{text}</Link> : <span className="text-muted">None</span>}
-    </li>
+    <div>
+      <dt>{label}</dt>
+      <dd>{href ? <Link href={href} className="link tap-target">{text}</Link> : <span className="text-muted">None</span>}</dd>
+    </div>
   );
 }

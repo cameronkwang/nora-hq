@@ -1,63 +1,101 @@
 import Link from "next/link";
-import type { ComponentProps, ReactNode } from "react";
+import type { ComponentProps, CSSProperties, ReactNode } from "react";
 
-/** Shared presentational primitives. Server-component safe (no hooks). */
+/**
+ * Shared presentational primitives. Server-component safe (no hooks).
+ * They draw the "Ink" system (docs/design.md) with the shared classes in globals.css: sections on an ink rule
+ * instead of cards, a dot and plain words instead of coloured pills, one accent (cinnabar) action per screen.
+ * Every name and prop the app used before Ink still works; Section, Status, Tag, Count, Figure and Meter are new.
+ */
 
 export function cx(...c: Array<string | false | null | undefined>) {
   return c.filter(Boolean).join(" ");
 }
 
-export function PageHeader({ title, subtitle, actions }: { title: ReactNode; subtitle?: ReactNode; actions?: ReactNode }) {
+/** Page title (serif), actions on its baseline, one muted line under it. `crumb` is the optional way back above the title. */
+export function PageHeader({ title, subtitle, actions, crumb }: { title: ReactNode; subtitle?: ReactNode; actions?: ReactNode; crumb?: ReactNode }) {
   return (
-    <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-      <div className="min-w-0">
-        <h1 className="text-2xl font-semibold tracking-tight">{title}</h1>
-        {subtitle && <p className="mt-1 text-sm text-muted">{subtitle}</p>}
+    <header className="page-head">
+      {crumb && <p className="crumb">{crumb}</p>}
+      <div className="head-row">
+        <h1 className="display">{title}</h1>
+        {actions && <div className="head-actions">{actions}</div>}
       </div>
-      {actions && <div className="flex flex-wrap gap-2">{actions}</div>}
-    </div>
+      {subtitle && <p className="sub">{subtitle}</p>}
+    </header>
   );
 }
 
+/**
+ * A section: an ink rule, a serif title with one quiet action on the right, then the content. No box.
+ * (Still called Card at ~100 call sites; `Section` is the same component.) `padded` only decides whether the
+ * content gets a little air under the title: pass `padded={false}` for a list, whose rows bring their own.
+ */
 export function Card({ title, actions, children, className, padded = true }: { title?: ReactNode; actions?: ReactNode; children: ReactNode; className?: string; padded?: boolean }) {
+  const head = Boolean(title || actions);
   return (
-    <section className={cx("rounded-xl border border-border bg-surface", className)}>
-      {(title || actions) && (
-        <header className="card-head flex items-center justify-between gap-2 border-b border-border px-4 py-3">
-          <h2 className="text-sm font-semibold">{title}</h2>
+    <section className={cx("sec", !head && "is-untitled", className)}>
+      {head && (
+        <header className="sec-head">
+          <h2 className="title">{title}</h2>
           {actions}
         </header>
       )}
-      <div className={padded ? "p-4" : ""}>{children}</div>
+      <div className={head && padded ? "sec-body" : undefined}>{children}</div>
     </section>
   );
 }
+export const Section = Card;
 
-type Tone = "neutral" | "accent" | "ok" | "warn" | "danger" | "info";
+export type Tone = "neutral" | "accent" | "ok" | "warn" | "danger" | "info" | "ink";
 const toneCls: Record<Tone, string> = {
-  neutral: "bg-surface-2 text-muted",
-  accent: "bg-accent-soft text-accent",
-  ok: "bg-ok-soft text-ok",
-  warn: "bg-warn-soft text-warn",
-  danger: "bg-danger-soft text-danger",
-  info: "bg-info-soft text-info",
+  neutral: "is-idle",
+  accent: "is-accent",
+  ok: "is-ok",
+  warn: "is-warn",
+  danger: "is-danger",
+  info: "is-info",
+  ink: "is-ink",
 };
 
-export function Badge({ tone = "neutral", children, className }: { tone?: Tone; children: ReactNode; className?: string }) {
+/**
+ * A state: a 7px dot in the tone's colour and plain words. `tone="neutral"` is the hollow dot ("nothing to do");
+ * `tone="ink"` is a solid ink dot, for a settled state that is neither good news nor a warning (a post that is ready).
+ */
+export function Status({ tone = "neutral", small, children, className }: { tone?: Tone; small?: boolean; children: ReactNode; className?: string }) {
+  return <span className={cx("status", toneCls[tone], small && "is-small", className)}>{children}</span>;
+}
+
+/** A fact about a row (Free, Creator, Inactive, From Oct): outlined, tiny caps, never coloured. `bare` drops the gap it keeps after a name. */
+export function Tag({ children, className, bare }: { children: ReactNode; className?: string; bare?: boolean }) {
+  return <span className={cx("tag", bare && "is-bare", className)}>{children}</span>;
+}
+
+/** A number that needs you: a cinnabar numeral, no pill. */
+export function Count({ n, className, label }: { n: number; className?: string; label?: string }) {
   return (
-    <span className={cx("inline-flex items-center gap-1 whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium", toneCls[tone], className)}>
-      {children}
+    <span className={cx("count", className)} aria-label={label}>
+      {n > 99 ? "99+" : n}
     </span>
   );
 }
 
+/**
+ * The old soft pill. With a tone it is a Status (dot + words); without one it is a Tag (a fact).
+ * New code should use <Status> or <Tag> directly.
+ */
+export function Badge({ tone = "neutral", children, className }: { tone?: Tone; children: ReactNode; className?: string }) {
+  if (tone === "neutral") return <Tag bare className={className}>{children}</Tag>;
+  return <Status tone={tone} small className={className}>{children}</Status>;
+}
+
 const STATUS_TONE: Record<string, Tone> = {
   todo: "neutral", in_progress: "info", needs_review: "warn", blocked: "danger", done: "ok",
-  new: "accent", archived: "neutral",
+  new: "info", archived: "neutral",
   approved: "ok", rejected: "neutral", sent: "ok", failed: "danger",
   idea: "neutral", drafted: "info", scheduled: "info", published: "ok",
-  sourced: "neutral", shortlisted: "neutral", contacted: "info", followed_up: "info", replied: "accent",
-  negotiating: "accent", agreed: "ok", visit_scheduled: "ok", posted: "ok", declined: "neutral", no_response: "neutral",
+  sourced: "neutral", shortlisted: "neutral", contacted: "info", followed_up: "info", replied: "info",
+  negotiating: "warn", agreed: "ok", visit_scheduled: "ok", posted: "ok", declined: "neutral", no_response: "neutral",
   ok: "ok", error: "danger", expired: "warn",
 };
 
@@ -66,45 +104,40 @@ export function humanize(s: string) {
 }
 
 export function StatusBadge({ status }: { status: string }) {
-  return <Badge tone={STATUS_TONE[status] ?? "neutral"}>{humanize(status)}</Badge>;
+  return <Status tone={STATUS_TONE[status] ?? "neutral"} small>{humanize(status)}</Status>;
 }
 
 const PLATFORM_META: Record<string, { label: string; cls: string }> = {
-  instagram: { label: "Instagram", cls: "text-ig" },
-  facebook: { label: "Facebook", cls: "text-facebook" },
-  tiktok: { label: "TikTok", cls: "text-tt" },
-  google: { label: "Google", cls: "text-google" },
-  email: { label: "Email", cls: "text-info" },
-  instagram_dm: { label: "IG DM", cls: "text-ig" },
-  tiktok_dm: { label: "TikTok DM", cls: "text-tt" },
-  other: { label: "Other", cls: "text-muted" },
+  instagram: { label: "Instagram", cls: "is-ig" },
+  facebook: { label: "Facebook", cls: "is-facebook" },
+  tiktok: { label: "TikTok", cls: "is-tt" },
+  google: { label: "Google", cls: "is-google" },
+  email: { label: "Email", cls: "is-info" },
+  instagram_dm: { label: "IG DM", cls: "is-ig" },
+  tiktok_dm: { label: "TikTok DM", cls: "is-tt" },
+  other: { label: "Other", cls: "" },
 };
 
-export function PlatformTag({ platform }: { platform: string | null | undefined }) {
+/**
+ * A platform: its colour is a dot before the name; the name is plain text in the colour of the line it sits in.
+ * Meta size by default (it mostly sits in a meta line); `inherit` takes the size of the text around it.
+ */
+export function PlatformTag({ platform, inherit, className }: { platform: string | null | undefined; inherit?: boolean; className?: string }) {
   if (!platform) return null;
-  const m = PLATFORM_META[platform] ?? { label: humanize(platform), cls: "text-muted" };
-  return (
-    <span className={cx("inline-flex items-center gap-1 text-xs font-medium", m.cls)}>
-      <span aria-hidden className="inline-block size-1.5 rounded-full bg-current" />
-      {m.label}
-    </span>
-  );
+  const m = PLATFORM_META[platform] ?? { label: humanize(platform), cls: "" };
+  return <span className={cx("status", m.cls, !inherit && "is-small", className)}>{m.label}</span>;
 }
 
-type BtnVariant = "primary" | "secondary" | "ghost" | "danger";
-const btnCls: Record<BtnVariant, string> = {
-  primary: "bg-accent text-accent-fg hover:opacity-90",
-  secondary: "border border-border bg-surface hover:bg-surface-2",
-  ghost: "hover:bg-surface-2",
-  danger: "border border-border bg-surface text-danger hover:bg-danger-soft",
-};
+export type BtnVariant = "primary" | "secondary" | "ghost" | "danger" | "ink";
+/**
+ * - primary: the screen's one focal action. Cinnabar on the pages without the app shell (login, the owner form,
+ *   /collab, /drop, /kit) and in a dialog; inside the app it is drawn in ink, because the app's one cinnabar action is
+ *   "New ask" (the "+" on a phone). So use it at most once per screen, and only for the thing the screen is for.
+ * - ink: the same ink fill, anywhere. - secondary: the outlined default. - ghost: a quiet text button.
+ * - danger: outlined, danger label.
+ */
 export function buttonClass(variant: BtnVariant = "secondary", size: "sm" | "md" = "md") {
-  return cx(
-    "inline-flex items-center justify-center gap-1.5 rounded-lg font-medium transition disabled:opacity-50 disabled:pointer-events-none",
-    // .btn / .btn-sm (globals.css) raise the height to a 44px / 40px tap target on touch screens.
-    size === "sm" ? "btn-sm px-2.5 py-1 text-xs" : "btn px-3.5 py-2 text-sm",
-    btnCls[variant],
-  );
+  return cx("btn", `btn-${variant}`, size === "sm" && "btn-sm");
 }
 
 export function Button({ variant = "secondary", size = "md", className, ...props }: ComponentProps<"button"> & { variant?: BtnVariant; size?: "sm" | "md" }) {
@@ -115,33 +148,52 @@ export function LinkButton({ variant = "secondary", size = "md", className, ...p
   return <Link {...props} className={cx(buttonClass(variant, size), className)} />;
 }
 
+/** Two plain lines where the rows would be. No box. */
 export function EmptyState({ title, children }: { title: string; children?: ReactNode }) {
   return (
-    <div className="rounded-lg border border-dashed border-border px-4 py-8 text-center">
-      <p className="text-sm font-medium">{title}</p>
-      {children && <div className="mt-1 text-sm text-muted">{children}</div>}
+    <div className="empty">
+      <p>{title}</p>
+      {children && <div>{children}</div>}
     </div>
   );
 }
 
-export function Stat({ label, value, hint }: { label: string; value: ReactNode; hint?: ReactNode }) {
+/** A figure: caps label, the number in the serif, one meta line. No box; put several in a `figures` row. */
+export function Stat({ label, value, hint }: { label: ReactNode; value: ReactNode; hint?: ReactNode }) {
   return (
-    <div className="rounded-xl border border-border bg-surface p-4">
-      <p className="text-xs font-medium text-muted">{label}</p>
-      <p className="mt-1 text-2xl font-semibold tabular-nums">{value}</p>
-      {hint && <p className="mt-1 text-xs text-muted">{hint}</p>}
+    <div className="figure">
+      <span className="eyebrow">{label}</span>
+      <span className="value">{value}</span>
+      {hint && <span className="meta">{hint}</span>}
     </div>
   );
 }
+export const Figure = Stat;
 
-export function ProgressBar({ value, max }: { value: number; max: number }) {
+/**
+ * Progress in ink: one segment per planned item up to 12, a single thin bar above that (or when there is no target).
+ * Always put the words next to it ("3 of 8").
+ */
+export function ProgressBar({ value, max, className }: { value: number; max: number; className?: string }) {
+  const a11y = { role: "progressbar", "aria-valuenow": value, "aria-valuemin": 0, "aria-valuemax": max } as const;
+  if (max > 0 && max <= 12) {
+    const done = Math.max(0, Math.min(max, Math.round(value)));
+    return (
+      <div className={cx("meter", className)} style={{ "--n": max } as CSSProperties} {...a11y}>
+        {Array.from({ length: max }, (_, i) => (
+          <i key={i} className={i < done ? "on" : undefined} />
+        ))}
+      </div>
+    );
+  }
   const pct = max > 0 ? Math.min(100, Math.round((value / max) * 100)) : value > 0 ? 100 : 0;
   return (
-    <div className="h-2 w-full overflow-hidden rounded-full bg-surface-2" role="progressbar" aria-valuenow={value} aria-valuemax={max}>
-      <div className={cx("h-full rounded-full", pct >= 100 ? "bg-ok" : "bg-accent")} style={{ width: `${pct}%` }} />
+    <div className={cx("bar", className)} {...a11y}>
+      <i style={{ width: `${pct}%` }} />
     </div>
   );
 }
+export const Meter = ProgressBar;
 
 export function formatNumber(n: number | null | undefined): string {
   if (n == null) return "—";

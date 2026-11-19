@@ -11,7 +11,7 @@ import { Markdown } from "./draft-markdown";
 import { useDraftQueue } from "./draft-queue";
 import { ReplyPicker } from "./reply-picker";
 import type { ReplyCategory, ReplyContext } from "./reply-fill";
-import { Badge, buttonClass, cx } from "./ui";
+import { Status, buttonClass, cx } from "./ui";
 
 type Mode = "review" | "failed" | "approved" | "readonly";
 
@@ -52,6 +52,9 @@ function ActionButton({
  *  readonly → text only (+ Copy)
  * Inside a <DraftQueue> (Needs review list) approving and sending back happen without a page reload, and on phones
  * the current card gets a fixed bottom bar: Send back / Edit / Approve.
+ * One focal button per screen: the main action is filled (ink, inside the app; the cinnabar stays with "New ask") only
+ * on the card you are on (the queue's current card, or a draft opened on its own with `solo`); in any other list it is
+ * outlined like the rest.
  */
 export function DraftEditor({
   id,
@@ -59,6 +62,7 @@ export function DraftEditor({
   meta,
   body: initial,
   mode,
+  solo,
   returnTo,
   mailto,
   links,
@@ -72,6 +76,8 @@ export function DraftEditor({
   meta: Record<string, unknown>;
   body: string;
   mode: Mode;
+  /** This draft has the page to itself (opened from a link), so its main button is the screen's one filled button. */
+  solo?: boolean;
   returnTo: string;
   /** For approved outreach emails without Gmail: builds a mailto: link from the current text. */
   mailto?: { to: string; subject: string };
@@ -105,6 +111,7 @@ export function DraftEditor({
   const inQueue = !!queue && mode === "review";
   const busy = !!queue && queue.busyId === id;
   const phoneBar = inQueue && queue.focusMode && queue.isCurrent(id);
+  const main = solo || (inQueue && queue.isCurrent(id)) ? "primary" : "secondary";
 
   // Latest values for the queue's keyboard / bulk handlers.
   const latest = useRef({ body, hardBlock, postKey });
@@ -168,7 +175,7 @@ export function DraftEditor({
 
   const textarea = (
     <div>
-      <div className="mb-1 flex flex-wrap items-end justify-between gap-2">
+      <div className="mb-1.5 flex flex-wrap items-end justify-between gap-2">
         <label htmlFor={taId} className="label !mb-0">
           {readOnly ? "Text" : isReport ? "Report text (markdown)" : "Text (edit before approving if needed)"}
         </label>
@@ -186,19 +193,19 @@ export function DraftEditor({
         }}
         readOnly={readOnly}
         rows={Math.min(16, Math.max(5, body.split("\n").length + 1))}
-        className={cx("input font-[inherit] leading-relaxed", readOnly && "bg-surface-2")}
+        className={cx("input text-base", readOnly && "bg-surface-2")}
       />
-      <div className="mt-1 flex flex-wrap items-center justify-between gap-x-3 gap-y-1 text-xs text-muted">
+      <div className="meta mt-1.5 flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
         <span>
-          {dirty && !readOnly ? <span className="font-medium text-warn">Unsaved changes · </span> : null}
+          {dirty && !readOnly ? <span className="font-medium text-text">Unsaved changes · </span> : null}
           {tags !== null && <span className={cx(tags > 30 && "font-semibold text-danger")}>{tags} hashtag{tags === 1 ? "" : "s"} (30 max) · </span>}
         </span>
         {lim ? (
-          <span className={cx("tabular-nums", body.length > lim.max ? "font-semibold text-danger" : body.length > lim.max * 0.9 ? "text-warn" : "")}>
+          <span className={cx("num", body.length > lim.max ? "font-semibold text-danger" : body.length > lim.max * 0.9 ? "font-medium text-text" : "")}>
             {body.length.toLocaleString("en-US")} / {lim.max.toLocaleString("en-US")}
           </span>
         ) : (
-          <span className="tabular-nums">{body.length.toLocaleString("en-US")} characters</span>
+          <span className="num">{body.length.toLocaleString("en-US")} characters</span>
         )}
       </div>
     </div>
@@ -214,32 +221,31 @@ export function DraftEditor({
 
         {isReport ? (
           <>
-            <div className="flex flex-wrap items-center gap-2 text-sm">
-              {report?.audience === "internal" ? <Badge tone="neutral">Internal — Cameron &amp; Nora only</Badge> : <Badge tone="info">Owner-facing</Badge>}
+            <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+              {report?.audience === "internal" ? <Status small>Internal: Cameron &amp; Nora only</Status> : <Status tone="info" small>Owner-facing</Status>}
               {report?.audience !== "internal" &&
                 (report?.ownerEmail ? (
-                  <span className="text-muted">Goes to {report.ownerEmail} only when you click Send.</span>
+                  <span className="meta">Goes to {report.ownerEmail} only when you click Send.</span>
                 ) : (
-                  <span className="text-muted">
+                  <span className="meta">
                     No owner email saved
                     {report?.clientId && (
                       <>
-                        {" — "}
-                        <Link href={`/clients/${report.clientId}`} className="text-accent hover:underline">add it on the business page</Link>
+                        {". "}
+                        <Link href={`/clients/${report.clientId}`} className="link">Add it on the business page</Link>
                       </>
                     )}
                     .
                   </span>
                 ))}
             </div>
-            <div className="rounded-lg border border-border bg-bg px-4 py-3" aria-label="Report preview">
-              {body.trim() ? <Markdown source={body} /> : <p className="text-sm text-muted">(empty)</p>}
+            {/* The report as the owner will read it: a page between two hairlines, no box. */}
+            <div className="border-y border-border py-4" aria-label="Report preview">
+              {body.trim() ? <Markdown source={body} /> : <p className="meta">(empty)</p>}
             </div>
-            <details open={editOpen} onToggle={(e) => setEditOpen(e.currentTarget.open)} className="rounded-lg border border-border">
-              <summary className="cursor-pointer select-none px-3 py-2 text-sm font-medium text-muted hover:text-text pointer-coarse:min-h-11 pointer-coarse:py-3">
-                {readOnly ? "Show text" : "Edit text"}
-              </summary>
-              <div className="border-t border-border p-3">{textarea}</div>
+            <details open={editOpen} onToggle={(e) => setEditOpen(e.currentTarget.open)}>
+              <summary className="inbox-disclose">{readOnly ? "Show text" : "Edit text"}</summary>
+              <div className="pb-1 pt-2">{textarea}</div>
             </details>
           </>
         ) : (
@@ -247,11 +253,13 @@ export function DraftEditor({
         )}
 
         {warnings.length > 0 && (
-          <ul className="flex flex-col gap-1.5">
+          <ul className="flex flex-col gap-1">
             {warnings.map((w) => (
-              <li key={w.text} role={w.tone === "danger" ? "alert" : undefined} className={cx("rounded-lg px-3 py-2 text-sm", w.tone === "danger" ? "bg-danger-soft text-danger" : "bg-warn-soft text-warn")}>
-                {w.tone === "danger" ? "Stop: " : "Check: "}
-                {w.text}
+              <li key={w.text} role={w.tone === "danger" ? "alert" : undefined} className={cx("status flex whitespace-normal", w.tone === "danger" ? "is-danger" : "is-warn")}>
+                <span>
+                  {w.tone === "danger" ? "Stop: " : "Check: "}
+                  {w.text}
+                </span>
               </li>
             ))}
           </ul>
@@ -261,7 +269,7 @@ export function DraftEditor({
           {mode === "review" &&
             (inQueue ? (
               <>
-                <button type="button" onClick={() => queue.approve(id)} disabled={hardBlock || busy} className={cx(buttonClass("primary"), "grow sm:grow-0")}>
+                <button type="button" onClick={() => queue.approve(id)} disabled={hardBlock || busy} className={cx(buttonClass(main), "grow sm:grow-0")}>
                   {busy ? "Approving…" : dirty ? "Approve with edits" : "Approve"}
                 </button>
                 <ActionButton action={saveDraftAction} pendingText="Saving…" disabled={!dirty}>
@@ -270,7 +278,7 @@ export function DraftEditor({
               </>
             ) : (
               <>
-                <ActionButton action={approveDraftAction} variant="primary" pendingText="Approving…" disabled={hardBlock} className="grow sm:grow-0">
+                <ActionButton action={approveDraftAction} variant={main} pendingText="Approving…" disabled={hardBlock} className="grow sm:grow-0">
                   {dirty ? "Approve with edits" : "Approve"}
                 </ActionButton>
                 <ActionButton action={saveDraftAction} pendingText="Saving…" disabled={!dirty}>
@@ -280,7 +288,7 @@ export function DraftEditor({
             ))}
           {mode === "failed" && (
             <>
-              <ActionButton action={approveDraftAction} variant="primary" pendingText="Retrying…" disabled={hardBlock} className="grow sm:grow-0">
+              <ActionButton action={approveDraftAction} variant={main} pendingText="Retrying…" disabled={hardBlock} className="grow sm:grow-0">
                 Retry
               </ActionButton>
               <ActionButton action={saveDraftAction} pendingText="Saving…" disabled={!dirty}>
@@ -292,13 +300,13 @@ export function DraftEditor({
             <>
               {canSendReport &&
                 (dirty ? (
-                  <button type="button" disabled className={buttonClass("primary")}>Send to owner</button>
+                  <button type="button" disabled className={buttonClass(main)}>Send to owner</button>
                 ) : (
-                  <ConfirmButton formAction={sendReportAction} confirm={`Email this report to ${report!.ownerEmail}?`} variant="primary" size="md">
+                  <ConfirmButton formAction={sendReportAction} confirm={`Email this report to ${report!.ownerEmail}?`} variant={main} size="md">
                     Send to owner
                   </ConfirmButton>
                 ))}
-              <CopyButton targetId={taId} label="Copy text" variant={canSendReport ? "secondary" : "primary"} />
+              <CopyButton targetId={taId} label="Copy text" variant={canSendReport ? "secondary" : main} />
               {mailto && (
                 <a
                   href={`mailto:${encodeURIComponent(mailto.to)}?subject=${encodeURIComponent(mailto.subject)}&body=${encodeURIComponent(body)}`}
@@ -320,13 +328,13 @@ export function DraftEditor({
           )}
           {mode === "readonly" && <CopyButton targetId={taId} label="Copy text" size="sm" />}
         </div>
-        {canSendReport && dirty && <p className="text-xs text-warn">Save your edit before sending — the owner gets the saved version.</p>}
-        {hardBlock && mode !== "readonly" && <p className="text-xs text-danger">Fix the problem above to approve.</p>}
+        {canSendReport && dirty && <p className="status is-warn is-small whitespace-normal">Save your edit before sending: the owner gets the saved version.</p>}
+        {hardBlock && mode !== "readonly" && <p className="status is-danger is-small whitespace-normal">Fix the problem above to approve.</p>}
       </form>
 
       {mode === "review" && (
-        <details ref={sendBack} className="group rounded-lg border border-border">
-          <summary className="cursor-pointer select-none px-3 py-2 text-sm font-medium text-muted hover:text-text pointer-coarse:min-h-11 pointer-coarse:py-3">Send back to Claude…</summary>
+        <details ref={sendBack}>
+          <summary className="inbox-disclose">Send back to Claude…</summary>
           <form
             action={inQueue ? undefined : rejectDraftAction}
             onSubmit={(e) => {
@@ -334,7 +342,7 @@ export function DraftEditor({
               e.preventDefault();
               void queue.reject(id, note.current?.value ?? "");
             }}
-            className="flex flex-col gap-2 border-t border-border p-3"
+            className="flex flex-col pb-1 pt-2"
           >
             <input type="hidden" name="id" value={id} />
             <input type="hidden" name="returnTo" value={returnTo} />
@@ -342,8 +350,8 @@ export function DraftEditor({
               What should change?
             </label>
             <textarea ref={note} id={`note-${id}`} name="note" rows={3} className="input" placeholder="e.g. Too formal. Mention the new mango bowl and keep it under 3 lines." />
-            <p className="text-xs text-muted">Claude reads your note and sends a new version the next time it checks the queue.</p>
-            <div>
+            <p className="hint">Claude reads your note and sends a new version the next time it checks the queue.</p>
+            <div className="mt-3">
               {inQueue ? (
                 <button type="submit" disabled={busy} className={buttonClass("danger")}>
                   {busy ? "Sending back…" : "Send back"}
@@ -358,8 +366,9 @@ export function DraftEditor({
         </details>
       )}
 
+      {/* Phones, one card at a time: the three actions sit in a solid bar just above the tab bar. */}
       {phoneBar && (
-        <div className="fixed inset-x-0 bottom-[var(--tabbar-h)] z-20 border-t border-border bg-surface/95 px-4 py-2 backdrop-blur md:hidden">
+        <div className="queue-bar fixed inset-x-0 bottom-[var(--tabbar-h)] z-20 px-4 py-2 md:hidden">
           <div className="mx-auto flex max-w-xl items-center gap-2">
             <button type="button" onClick={openSendBack} disabled={busy} className={cx(buttonClass("secondary"), "px-3")}>
               Send back

@@ -19,15 +19,18 @@ export default async function NewPostPage({ searchParams }: { searchParams: Prom
   const date = /^\d{4}-\d{2}-\d{2}$/.test(one(sp.date)) ? one(sp.date) : undefined;
 
   return (
-    <div className="mx-auto max-w-2xl">
-      <Link href="/calendar?tab=posts" className="mb-3 inline-block text-sm text-accent hover:underline">← Calendar</Link>
-      <PageHeader title="New post" subtitle="Plan a post for the calendar. Claude can write the caption if you leave it blank — just drop an ask." />
+    <div className="max-w-2xl">
+      <PageHeader
+        crumb={<Link href="/calendar?tab=posts">Calendar</Link>}
+        title="New post"
+        subtitle="Plan a post for the calendar. Claude can write the caption if you leave it blank: just drop an ask."
+      />
       {clients.length === 0 ? (
-        <p className="text-sm text-muted">
-          Add a business first on the <Link href="/clients" className="text-accent hover:underline">businesses page</Link>.
+        <p className="meta">
+          Add a business first on the <Link href="/clients" className="link">businesses page</Link>.
         </p>
       ) : (
-        <div className="rounded-xl border border-border bg-surface p-4 sm:p-6">
+        <div className="border-t border-border pt-6">
           <CalendarPostForm
             clients={clients.map((c) => ({ id: c.id, label: clientLabel(c) }))}
             defaults={{ clientId: client, platform, date }}

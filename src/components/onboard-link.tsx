@@ -6,9 +6,9 @@ export const NEW_CLIENT_HREF = "/clients/new";
 
 /**
  * "+ New client" — the quick way in to onboarding, wherever businesses are listed.
- *  - variant "button" (default): small primary button for page headers (/clients, Home business grid).
- *  - variant "plus": a compact "+" for the desktop sidebar's Businesses heading (44px hit area on touch).
- *  - variant "row": a full-width row for the phone More sheet (pass `onClick` to close the sheet).
+ *  - variant "button" (default): small outlined button for page headers (/clients, a lead page).
+ *  - variant "plus": a compact "+" for the desktop sidebar's Businesses heading (.side-add: 44px on touch).
+ *  - variant "row": a full-width row for the phone More sheet (.more-row; pass `onClick` to close the sheet).
  * No hooks, so it works in server and client components alike.
  */
 export function NewClientLink({
@@ -30,31 +30,21 @@ export function NewClientLink({
   const href = leadId ? `${NEW_CLIENT_HREF}?lead=${encodeURIComponent(leadId)}` : NEW_CLIENT_HREF;
   if (variant === "plus") {
     return (
-      <Link
-        href={href}
-        onClick={onClick}
-        aria-label="New client"
-        title="New client"
-        className={cx("tap-target inline-flex size-6 items-center justify-center rounded-md text-muted hover:bg-surface-2 hover:text-accent", className)}
-      >
-        <PlusIcon className="size-4" />
+      <Link href={href} onClick={onClick} aria-label="New client" title="New client" className={cx("side-add", className)}>
+        <PlusIcon className="size-3.5" />
       </Link>
     );
   }
   if (variant === "row") {
     return (
-      <Link
-        href={href}
-        onClick={onClick}
-        className={cx("flex min-h-12 items-center gap-3 rounded-lg px-3 py-2 text-[15px] font-medium text-accent active:bg-surface-2", className)}
-      >
-        <PlusIcon className="size-5 shrink-0" />
-        <span className="min-w-0 flex-1">New client</span>
+      <Link href={href} onClick={onClick} className={cx("more-row", className)}>
+        <PlusIcon className="size-4" />
+        <span className="t font-medium">New client</span>
       </Link>
     );
   }
   return (
-    <Link href={href} onClick={onClick} className={cx(buttonClass("primary", size), className)}>
+    <Link href={href} onClick={onClick} className={cx(buttonClass("secondary", size), className)}>
       {!leadId && <PlusIcon className={size === "sm" ? "size-3.5" : "size-4"} />}
       {children}
     </Link>

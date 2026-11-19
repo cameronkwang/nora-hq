@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { and, asc, desc, eq, inArray, isNotNull, lt, lte, ne, notInArray, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNotNull, lte, ne, notInArray, or, sql } from "drizzle-orm";
 import { assigneeFor, requireUser } from "@/lib/auth";
 import { getDb, schema } from "@/lib/db";
 import { countNewCollabRequests, isCreatorClient, listClients } from "@/lib/data";
@@ -11,14 +11,16 @@ import { TaskList, TaskRow, isOverdue } from "@/components/task-row";
 import { blobEnabled } from "@/lib/uploads";
 import { QuickAsk } from "@/components/quick-ask";
 import { NotifyHomeCard } from "@/components/notify-home-card";
-import { NewClientLink } from "@/components/onboard-link";
-import { ClientHealth } from "@/components/client-health-strip";
-import { NoraHome } from "@/components/nora-home";
-import { Badge, Card, EmptyState, PageHeader, ProgressBar, clientLabel, cx, formatNumber, humanize } from "@/components/ui";
+import { NEW_CLIENT_HREF } from "@/components/onboard-link";
+import { HealthLine, loadClientHealth } from "@/components/client-health-strip";
+import type { ClientHealthRow } from "@/lib/data";
+import { HomeRow, NoraHome } from "@/components/nora-home";
+import { KIND_LABELS } from "@/components/draft-checks";
+import { Card, Count, EmptyState, PageHeader, ProgressBar, Status, Tag, clientLabel, formatNumber, humanize } from "@/components/ui";
 
 export const dynamic = "force-dynamic";
 
-/** At most this many rows in "Needs you"; the rest are one tap away. */
+/** At most this many rows waiting on you (To approve and Tasks together); the rest are one tap away. */
 const NEEDS_YOU_MAX = 8;
 
 function greeting() {
@@ -66,8 +68,8 @@ function addDays(date: string, n: number): string {
 const SENT: Record<AskRoute, string> = {
   auto: "Sent. Claude picks up what it can; the rest goes to Cameron.",
   claude: "Sent to Claude.",
-  cameron: "Sent to Cameron — it’s on his task list.",
-  nora: "Sent to Nora — it’s on her task list.",
+  cameron: "Sent to Cameron. It’s on his task list.",
+  nora: "Sent to Nora. It’s on her task list.",
   idea: "Saved to Ideas.",
   fyi: "Noted. Claude will take it from here.",
 };
@@ -88,50 +90,53 @@ export default async function Home({ searchParams }: { searchParams: Promise<Rec
   const now = today();
   const me = personKey(assigneeFor(user));
 
+  // After "New ask" → Send: one line between hairlines, and the way to add another.
+  const sentNote = sent && (
+    <p role="status" className="notice">
+      <Status tone="ok" className="whitespace-normal">{SENT[sent]}</Status>
+      <Link href="/asks/new" className="link inline-flex min-h-11 items-center md:pointer-fine:min-h-0">
+        Add another
+      </Link>
+    </p>
+  );
+
   // Nora's Home is her day (shoots, reels, payments, her asks), not the agency dashboard.
   if (me === "nora") {
     const [forYou, clients] = await Promise.all([getForYou(user.email, me, now), listClients()]);
     const names = new Map(clients.map((c) => [c.id, clientLabel(c)]));
     return (
-      <div className="flex flex-col gap-6">
-        <QuickAsk me={me} directUpload={blobEnabled()} />
-        <NotifyHomeCard />
+      <div>
         <PageHeader title={`${greeting()}, ${user.name.split(" ")[0]}`} subtitle={todayLabel()} />
-        {sent && (
-          <p role="status" className="-mt-2 flex flex-wrap items-center justify-between gap-x-3 rounded-lg bg-ok-soft px-3 py-1 text-sm text-ok">
-            <span className="py-1.5">{SENT[sent]}</span>
-            <Link href="/asks/new" className="inline-flex min-h-11 items-center font-semibold hover:underline md:min-h-8">
-              Add another
-            </Link>
-          </p>
-        )}
+        <QuickAsk me={me} directUpload={blobEnabled()} />
+        <div className="home-notes">
+          <NotifyHomeCard />
+          {sentNote}
+        </div>
         {(forYou.asks.length > 0 || forYou.tasks.length > 0) && (
-          <Card title="For you">
-            {forYou.asks.length > 0 && (
-              <ul className="divide-y divide-border">
-                {forYou.asks.map((a) => (
-                  <li key={a.id}>
-                    <Link href={`/asks/${a.id}`} className="-mx-2 flex min-h-11 items-center gap-3 rounded-lg px-2 py-2.5 hover:bg-surface-2">
-                      <span className="min-w-0 flex-1">
-                        <span className="block truncate text-sm font-medium">{a.title}</span>
-                        <span className="mt-0.5 flex flex-wrap items-center gap-x-1.5 gap-y-1 text-xs text-muted">
-                          {a.claudeAsked ? <Badge tone="warn">Claude asked a question</Badge> : <Badge tone="info">Ask for you</Badge>}
-                          <span className="truncate">{relativeTime(a.at)}</span>
-                        </span>
-                      </span>
-                      <span aria-hidden className="shrink-0 text-muted">›</span>
-                    </Link>
-                  </li>
-                ))}
-              </ul>
-            )}
-            {forYou.tasks.length > 0 && (
-              <TaskList>
-                {forYou.tasks.map((t) => (
-                  <TaskRow key={t.id} task={t} clientName={t.clientId ? names.get(t.clientId) : null} />
-                ))}
-              </TaskList>
-            )}
+          <Card title="For you" padded={false}>
+            <div className="approve-stack">
+              {forYou.asks.length > 0 && (
+                <ul className="list">
+                  {forYou.asks.map((a) => (
+                    <HomeRow
+                      key={a.id}
+                      href={`/asks/${a.id}`}
+                      title={a.title}
+                      clamp
+                      note={a.claudeAsked ? <Status tone="warn" small>Claude asked a question</Status> : <Status tone="info" small>Ask for you</Status>}
+                      when={relativeTime(a.at)}
+                    />
+                  ))}
+                </ul>
+              )}
+              {forYou.tasks.length > 0 && (
+                <TaskList>
+                  {forYou.tasks.map((t) => (
+                    <TaskRow key={t.id} task={t} clientName={t.clientId ? names.get(t.clientId) : null} />
+                  ))}
+                </TaskList>
+              )}
+            </div>
           </Card>
         )}
         <NoraHome email={user.email} name={user.name} now={now} skipAskIds={forYou.asks.map((a) => a.id)} />
@@ -141,168 +146,172 @@ export default async function Home({ searchParams }: { searchParams: Promise<Rec
 
   const openDue = and(ne(schema.tasks.status, "done"), isNotNull(schema.tasks.dueDate), lte(schema.tasks.dueDate, now));
   const clients = await listClients();
-  const [newCollabs, cms, [asksWaiting], [draftCount], [dueCount], [overdueCount], pendingDrafts, dueTasks] = await Promise.all([
+  const [newCollabs, cms, [asksWaiting], [draftCount], [dueCount], pendingDrafts, dueTasks, health] = await Promise.all([
     countNewCollabRequests(),
     Promise.all(clients.map((c) => getClientMonth(c.id, month))),
     db.select({ n: sql<number>`count(*)::int` }).from(schema.asks).where(and(eq(schema.asks.status, "new"), ne(schema.asks.kind, "idea"))),
     db.select({ n: sql<number>`count(*)::int` }).from(schema.drafts).where(eq(schema.drafts.status, "needs_review")),
     db.select({ n: sql<number>`count(*)::int` }).from(schema.tasks).where(openDue),
-    db.select({ n: sql<number>`count(*)::int` }).from(schema.tasks)
-      .where(and(ne(schema.tasks.status, "done"), isNotNull(schema.tasks.dueDate), lt(schema.tasks.dueDate, now))),
     db.select().from(schema.drafts).where(eq(schema.drafts.status, "needs_review")).orderBy(asc(schema.drafts.createdAt)).limit(NEEDS_YOU_MAX),
     db.select().from(schema.tasks).where(openDue).orderBy(asc(schema.tasks.dueDate), asc(schema.tasks.createdAt)).limit(NEEDS_YOU_MAX),
+    loadClientHealth(),
   ]);
 
   const forYou = await getForYou(user.email, me, now);
   const forYouTaskIds = new Set(forYou.tasks.map((t) => t.id));
 
-  // Nora's own workspace always leads the grid.
+  // Nora's own workspace always leads the Businesses ledger.
   const months = cms.filter((x): x is ClientMonth => !!x).sort((a, b) => Number(isCreatorClient(b.client)) - Number(isCreatorClient(a.client)));
   const names = new Map(clients.map((c) => [c.id, clientLabel(c)]));
   const first = user.name.split(" ")[0];
   // Tasks already shown under "For you" aren't repeated below.
   const otherDue = dueTasks.filter((t) => !forYouTaskIds.has(t.id));
+  // The Tasks title counts what that section lists: every task due today or overdue, less the ones under For you.
+  const dueElsewhere = forYou.tasks.filter((t) => t.status !== "done" && !!t.dueDate && t.dueDate <= now).length;
+  const dueHere = Math.max(0, dueCount.n - dueElsewhere);
   const slots = splitSlots(pendingDrafts.length, otherDue.length);
   const drafts = pendingDrafts.slice(0, slots.d);
   const tasks = otherDue.slice(0, slots.t);
   const hasForYou = forYou.asks.length > 0 || forYou.tasks.length > 0;
   const caughtUp = drafts.length === 0 && tasks.length === 0 && !hasForYou;
 
+  // The count of new asks in the Inbox (it was a tile) is the quiet action of the first section. It counts every new
+  // ask, not only the ones for you, so it says where the number comes from.
+  const asksLink = asksWaiting.n > 0 ? (
+    <Link href="/asks" className="link-quiet">
+      {asksWaiting.n} new in Inbox →
+    </Link>
+  ) : undefined;
+
   return (
-    <div className="flex flex-col gap-6">
-      {/* Drop anything in — first thing on screen. */}
-      <QuickAsk me={me} directUpload={blobEnabled()} />
-
-      {/* One-time "turn on phone alerts" prompt; hides itself once handled. */}
-      <NotifyHomeCard />
-
+    <div>
       <PageHeader title={`${greeting()}, ${first}`} subtitle={todayLabel()} />
 
-      {sent && (
-        <p role="status" className="-mt-2 flex flex-wrap items-center justify-between gap-x-3 rounded-lg bg-ok-soft px-3 py-1 text-sm text-ok">
-          <span className="py-1.5">{SENT[sent]}</span>
-          <Link href="/asks/new" className="inline-flex min-h-11 items-center font-semibold hover:underline md:min-h-8">
-            Add another
-          </Link>
-        </p>
-      )}
+      {/* Drop anything in: the first thing under the greeting. */}
+      <QuickAsk me={me} directUpload={blobEnabled()} />
 
-      {/* One compact row: the three things that can be waiting on you. */}
-      <div className="-mt-2 grid grid-cols-3 gap-2 sm:gap-3">
-        <Tile
-          href="/review"
-          value={draftCount.n}
-          label="Drafts to review"
-          primary
-        />
-        <Tile href="/asks" value={asksWaiting.n} label="Asks waiting" />
-        <Tile
-          href="/tasks?scope=all"
-          value={dueCount.n}
-          label="Tasks due"
-          hint={overdueCount.n > 0 ? <span className="font-semibold text-danger">{overdueCount.n} overdue</span> : null}
-        />
+      <div className="home-notes">
+        {/* One-time "turn on phone alerts" prompt; hides itself once handled. */}
+        <NotifyHomeCard />
+        {sentNote}
       </div>
 
-      <Card title="Needs you">
+      {/* What is waiting, by kind. Each count sits in its section title (and in the sidebar), not in a tile. */}
+      <div className="mt-10 flex flex-col gap-10 max-md:mt-8 max-md:gap-8">
         {caughtUp ? (
-          <EmptyState title="You’re all caught up.">No drafts waiting and nothing due today.</EmptyState>
+          <Card title="Needs you" actions={asksLink}>
+            <EmptyState title="You’re all caught up.">No drafts waiting and nothing due today.</EmptyState>
+          </Card>
         ) : (
-          <div className="flex flex-col gap-5">
-            {hasForYou && (
-              <section>
-                <SectionHead title="For you" href={me ? "/asks?tab=me" : "/asks"} total={forYou.askTotal} shown={forYou.asks.length} />
-                {forYou.asks.length > 0 && (
-                  <ul className="divide-y divide-border">
-                    {forYou.asks.map((a) => (
-                      <li key={a.id}>
-                        <Link href={`/asks/${a.id}`} className="-mx-2 flex min-h-11 items-center gap-3 rounded-lg px-2 py-2.5 hover:bg-surface-2">
-                          <span className="min-w-0 flex-1">
-                            <span className="block truncate text-sm font-medium">{a.title}</span>
-                            <span className="mt-0.5 flex flex-wrap items-center gap-x-1.5 gap-y-1 text-xs text-muted">
-                              {a.claudeAsked ? <Badge tone="warn">Claude asked a question</Badge> : <Badge tone="info">Ask for you</Badge>}
-                              <span className="truncate">
-                                {a.clientId && names.get(a.clientId) ? `${names.get(a.clientId)} · ` : ""}
-                                {relativeTime(a.at)}
-                              </span>
-                            </span>
-                          </span>
-                          <span aria-hidden className="shrink-0 text-muted">›</span>
-                        </Link>
-                      </li>
-                    ))}
-                  </ul>
+          <>
+            {(hasForYou || asksWaiting.n > 0) && (
+              <Card title="For you" actions={asksLink} padded={false}>
+                {hasForYou ? (
+                  <div className="approve-stack">
+                    {forYou.asks.length > 0 && (
+                      <ul className="list">
+                        {forYou.asks.map((a) => (
+                          <HomeRow
+                            key={a.id}
+                            href={`/asks/${a.id}`}
+                            title={a.title}
+                            clamp
+                            note={a.claudeAsked ? <Status tone="warn" small>Claude asked a question</Status> : <Status tone="info" small>Ask for you</Status>}
+                            where={a.clientId ? names.get(a.clientId) : null}
+                            when={relativeTime(a.at)}
+                          />
+                        ))}
+                        {forYou.askTotal > forYou.asks.length && (
+                          <li>
+                            <Link href={me ? "/asks?tab=me" : "/asks"} className="row link-quiet">
+                              See all {forYou.askTotal} asks for you →
+                            </Link>
+                          </li>
+                        )}
+                      </ul>
+                    )}
+                    {forYou.tasks.length > 0 && (
+                      <TaskList>
+                        {forYou.tasks.map((t) => (
+                          <TaskRow key={t.id} task={t} clientName={t.clientId ? names.get(t.clientId) : null} />
+                        ))}
+                      </TaskList>
+                    )}
+                  </div>
+                ) : (
+                  <EmptyState title="Nothing routed to you">Asks for you and your own tasks due soon show up here.</EmptyState>
                 )}
-                {forYou.tasks.length > 0 && (
-                  <TaskList>
-                    {forYou.tasks.map((t) => (
-                      <TaskRow key={t.id} task={t} clientName={t.clientId ? names.get(t.clientId) : null} />
-                    ))}
-                  </TaskList>
-                )}
-              </section>
+              </Card>
             )}
             {drafts.length > 0 && (
-              <section>
-                <SectionHead title="To review" href="/review" total={draftCount.n} shown={drafts.length} />
-                <ul className="divide-y divide-border">
+              <Card
+                title={<>To approve <Count n={draftCount.n} /></>}
+                actions={draftCount.n > drafts.length ? <Link href="/review" className="link-quiet">See all {draftCount.n} →</Link> : undefined}
+                padded={false}
+              >
+                <ul className="list">
                   {drafts.map((d) => (
-                    <li key={d.id}>
-                      <Link
-                        href={`/review?draft=${d.id}`}
-                        className="-mx-2 flex min-h-11 items-center gap-3 rounded-lg px-2 py-2.5 hover:bg-surface-2"
-                      >
-                        <span className="min-w-0 flex-1">
-                          <span className="block break-words text-sm font-medium">{d.title}</span>
-                          <span className="mt-0.5 block truncate text-xs text-muted">
-                            {humanize(d.kind)}
-                            {d.clientId && names.get(d.clientId) ? ` · ${names.get(d.clientId)}` : ""} · {relativeTime(d.createdAt)}
-                          </span>
-                        </span>
-                        <span aria-hidden className="shrink-0 text-muted">›</span>
-                      </Link>
-                    </li>
+                    <HomeRow
+                      key={d.id}
+                      href={`/review?draft=${d.id}`}
+                      title={d.title}
+                      clamp
+                      note={<span className="meta">{KIND_LABELS[d.kind] ?? humanize(d.kind)}</span>}
+                      where={d.clientId ? names.get(d.clientId) : null}
+                      when={relativeTime(d.createdAt)}
+                    />
                   ))}
                 </ul>
-              </section>
+              </Card>
             )}
             {tasks.length > 0 && (
-              <section>
-                <SectionHead title="Due today or overdue" href="/tasks?scope=all" total={dueCount.n} shown={tasks.length} />
+              <Card
+                title={<>Tasks <Count n={dueHere} /></>}
+                actions={<Link href="/tasks?scope=all" className="link-quiet">{dueHere > tasks.length ? `See all ${dueHere} →` : "All tasks →"}</Link>}
+                padded={false}
+              >
+                <p className="sec-note">Due today or overdue</p>
                 <TaskList>
                   {tasks.map((t) => (
                     <TaskRow key={t.id} task={t} clientName={t.clientId ? names.get(t.clientId) : null} />
                   ))}
                 </TaskList>
-              </section>
+              </Card>
             )}
-          </div>
+          </>
         )}
-      </Card>
 
-      {/* One row per business: a colored dot and its single worst issue (or "All good"). */}
-      <ClientHealth />
-
-      <section>
-        <div className="mb-3 flex items-end justify-between gap-2">
-          <h2 className="text-lg font-semibold">Businesses</h2>
-          <div className="flex items-center gap-3">
-            <span className="text-sm text-muted">{monthLabel(month)}</span>
-            <NewClientLink />
-          </div>
-        </div>
-        {months.length === 0 ? (
-          <EmptyState title="No businesses yet.">
-            <Link href="/clients/new" className="text-accent hover:underline">Add your first business</Link> to start tracking its monthly plan.
-          </EmptyState>
-        ) : (
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
-            {months.map((cm) => (
-              <BusinessCard key={cm.client.id} cm={cm} now={now} newCollabs={isCreatorClient(cm.client) ? newCollabs : 0} />
-            ))}
-          </div>
-        )}
-      </section>
+        {/* The month, one row per business: its health (a dot and its single worst issue, or "All good"), what is
+            waiting there, the plan, open tasks and views. The one list of businesses on Home. */}
+        <Card
+          title="Businesses"
+          className="[&>.sec-head]:flex-wrap"
+          actions={
+            <span className="flex items-baseline gap-4">
+              <span className="meta whitespace-nowrap">{monthLabel(month)}</span>
+              <Link href={NEW_CLIENT_HREF} className="link-quiet inline-flex items-baseline gap-1">
+                <svg viewBox="0 0 16 16" aria-hidden className="size-3 self-center" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round">
+                  <path d="M8 3v10M3 8h10" />
+                </svg>
+                New client
+              </Link>
+            </span>
+          }
+          padded={false}
+        >
+          {months.length === 0 ? (
+            <EmptyState title="No businesses yet.">
+              <Link href="/clients/new" className="link">Add your first business</Link> to start tracking its monthly plan.
+            </EmptyState>
+          ) : (
+            <ul className="list">
+              {months.map((cm) => (
+                <BusinessRow key={cm.client.id} cm={cm} now={now} health={health.get(cm.client.id)} newCollabs={isCreatorClient(cm.client) ? newCollabs : 0} />
+              ))}
+            </ul>
+          )}
+        </Card>
+      </div>
     </div>
   );
 }
@@ -342,114 +351,80 @@ async function getForYou(email: string, me: "cameron" | "nora" | null, now: stri
   return { asks: asks.slice(0, FOR_YOU_MAX), askTotal: asks.length, tasks };
 }
 
-function Tile({ href, value, label, hint, primary }: { href: string; value: number; label: string; hint?: React.ReactNode; primary?: boolean }) {
-  const hot = primary && value > 0;
-  return (
-    <Link
-      href={href}
-      className={cx(
-        "flex min-h-11 flex-col justify-between rounded-xl border p-3 transition sm:p-4",
-        hot ? "border-accent bg-accent text-accent-fg hover:opacity-90" : "border-border bg-surface hover:bg-surface-2",
-      )}
-    >
-      <span className={cx("text-xs font-medium leading-tight", hot ? "opacity-90" : "text-muted")}>{label}</span>
-      {/* hint sits beside the number so every tile's number lines up */}
-      <span className="mt-1 flex flex-wrap items-baseline gap-x-2">
-        <span className="text-2xl font-semibold tabular-nums">{value}</span>
-        {hint ? <span className="text-xs leading-tight">{hint}</span> : null}
-      </span>
-    </Link>
-  );
-}
-
-function SectionHead({ title, href, total, shown }: { title: string; href: string; total: number; shown: number }) {
-  return (
-    <div className="mb-1 flex items-center justify-between gap-2">
-      <h3 className="text-xs font-semibold uppercase tracking-wide text-muted">{title}</h3>
-      {total > shown && (
-        <Link href={href} className="-my-2 flex min-h-11 items-center text-xs font-medium text-accent hover:underline">
-          See all {total} →
-        </Link>
-      )}
-    </div>
-  );
-}
-
-function BusinessCard({ cm, now, newCollabs = 0 }: { cm: ClientMonth; now: string; newCollabs?: number }) {
+/**
+ * One business in the ledger: its name, its health (the single worst issue, or "All good") and the drafts waiting
+ * there, then this month's plan, open tasks and latest views. Unanswered reviews and overdue tasks are health issues,
+ * so they are said once, in the health line. Nora's own workspace has no health line; it shows new collab requests.
+ */
+function BusinessRow({ cm, now, health, newCollabs = 0 }: { cm: ClientMonth; now: string; health?: ClientHealthRow; newCollabs?: number }) {
   const creator = isCreatorClient(cm.client);
   const { done, target } = planProgress(cm);
   const views = latestViews(cm);
   const id = cm.client.id;
-  const overdue = cm.openTasks.filter((t) => isOverdue(t, now)).length;
   const open = cm.openTasks.length;
+  // Without a health line (Nora's workspace, or health failed to load) the review and overdue counts stay as links.
+  const overdue = health ? 0 : cm.openTasks.filter((t) => isOverdue(t, now)).length;
+  const reviews = health ? 0 : cm.unrepliedReviews;
+  // What is waiting there, as ink links joined by middle dots (no coloured words).
   const chips = [
-    { n: newCollabs, label: newCollabs === 1 ? "new collab request" : "new collab requests", href: "/collabs", cls: "text-accent" },
-    { n: cm.pendingDrafts, label: cm.pendingDrafts === 1 ? "draft" : "drafts", href: `/review?client=${id}`, cls: "text-accent" },
-    { n: cm.unrepliedReviews, label: cm.unrepliedReviews === 1 ? "review" : "reviews", href: `/reviews?client=${id}`, cls: "text-google" },
-    { n: overdue, label: "overdue", href: `/tasks?client=${id}&scope=all`, cls: "text-danger" },
+    { n: newCollabs, label: newCollabs === 1 ? "new collab request" : "new collab requests", href: "/collabs" },
+    { n: cm.pendingDrafts, label: cm.pendingDrafts === 1 ? "draft" : "drafts", href: `/review?client=${id}` },
+    { n: reviews, label: reviews === 1 ? "review" : "reviews", href: `/reviews?client=${id}` },
+    { n: overdue, label: "overdue", href: `/tasks?client=${id}&scope=all` },
   ].filter((c) => c.n > 0);
 
   return (
-    <article
-      className={cx(
-        "relative flex flex-col rounded-xl border p-4 transition",
-        creator ? "border-accent/40 bg-accent-soft hover:border-accent" : "border-border bg-surface hover:border-muted/50",
-      )}
-    >
-      <div className="flex items-baseline justify-between gap-3">
-        <h3 className="flex min-w-0 items-baseline gap-2 font-semibold">
-          {/* The whole card opens the business; the chips below stay their own links. */}
-          <Link href={`/clients/${id}`} className="truncate after:absolute after:inset-0 after:rounded-xl">
+    <li className="ledger-row">
+      <div className="ledger-main">
+        <span className="ledger-name">
+          <Link href={`/clients/${id}`} className="row-title tap-target">
             {cm.client.name}
           </Link>
-          {creator && <span className="shrink-0 rounded-full bg-surface px-2 py-0.5 text-xs font-medium text-accent">Creator</span>}
-        </h3>
-        {cm.client.location && <span className="shrink-0 truncate text-xs text-muted">{cm.client.location}</span>}
-      </div>
-
-      <div className="mt-3">
-        {target > 0 ? (
-          <>
-            <div className="mb-1 flex items-baseline justify-between text-xs">
-              <span className="text-muted">Monthly plan</span>
-              <span className="font-semibold tabular-nums">
-                {done}/{target}
+          {creator && <Tag>Creator</Tag>}
+          {cm.client.location && <span className="meta">{cm.client.location}</span>}
+        </span>
+        {(health || chips.length > 0) && (
+          <span className="ledger-wait">
+            {health && (
+              <span>
+                <HealthLine row={health} />
               </span>
-            </div>
-            <ProgressBar value={done} max={target} />
-          </>
-        ) : (
-          <p className="text-xs text-muted">No monthly plan yet.</p>
+            )}
+            {chips.map((c) => (
+              <span key={c.label}>
+                <Link href={c.href} className="link">
+                  {c.n} {c.label}
+                </Link>
+              </span>
+            ))}
+          </span>
         )}
       </div>
-
-      <div className="mt-3 flex flex-wrap items-center justify-between gap-x-3 gap-y-1 text-xs text-muted">
-        <span>
-          <span className="font-semibold tabular-nums text-text">{open}</span> open {open === 1 ? "task" : "tasks"}
+      <div className="ledger-stats">
+        {target > 0 ? (
+          <div className="ledger-plan meta">
+            <span>Plan</span>{" "}
+            <ProgressBar value={done} max={target} />
+            <span className="num">
+              <b>{done}</b> of {target}
+            </span>
+          </div>
+        ) : (
+          <span className="meta">No monthly plan yet.</span>
+        )}
+        <span className="meta num">
+          <b>{open}</b> open {open === 1 ? "task" : "tasks"}
         </span>
-        <span>
+        <span className="meta ledger-views">
           {views ? (
             <>
-              <span className="font-semibold tabular-nums text-text">{formatNumber(views.views)}</span> views · {monthLabel(views.month, "short")}
+              <b>{formatNumber(views.views)}</b> views · {monthLabel(views.month, "short")}
             </>
           ) : (
             "No views logged"
           )}
         </span>
       </div>
-
-      {chips.length > 0 && (
-        <p className="relative z-10 mt-3 flex flex-wrap items-center gap-x-1.5 border-t border-border pt-2 text-xs">
-          {chips.map((c, i) => (
-            <span key={c.label} className="inline-flex items-center gap-1.5">
-              {i > 0 && <span aria-hidden className="text-muted">·</span>}
-              <Link href={c.href} className={cx("inline-flex min-h-11 items-center font-semibold md:min-h-7 hover:underline", c.cls)}>
-                {c.n} {c.label}
-              </Link>
-            </span>
-          ))}
-        </p>
-      )}
-    </article>
+    </li>
   );
 }

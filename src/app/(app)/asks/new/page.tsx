@@ -13,7 +13,7 @@ export default async function NewAskPage({ searchParams }: { searchParams: Promi
   const clients = await listClients();
   const pre = typeof sp.client === "string" && clients.some((c) => c.id === sp.client) ? sp.client : undefined;
   return (
-    <div className="mx-auto max-w-2xl">
+    <div className="max-w-2xl">
       <PageHeader title="New ask" subtitle="Anything at all. Type it like a text and pick who it’s for; Claude helps in the background." />
       <AskForm
         clients={clients.map((c) => ({ id: c.id, label: clientLabel(c) }))}

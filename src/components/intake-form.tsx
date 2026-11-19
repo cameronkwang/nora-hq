@@ -9,7 +9,7 @@ import {
 import { IntakeAlready, IntakeExpired, IntakeThanks } from "./intake-screens";
 import { IntakeUpload, type IntakeUploadedFile } from "./intake-upload";
 import { copyText } from "./copy-button";
-import { buttonClass, cx } from "./ui";
+import { Status, Tag, buttonClass, cx } from "./ui";
 
 /**
  * The client onboarding form (/start/<token>): 3 short pages on one route, in the language picked at the top.
@@ -251,16 +251,34 @@ export function IntakeForm({
   const p = { C, v, errors, clearLocal };
   const firstStep = hasFacts ? { title: C.steps[0].title, blurb: C.facts.intro } : C.aboutYou;
 
+  // Page 1's contact questions: under their own title when the "Is this right?" card comes first.
+  const contact = (
+    <>
+      <Fields {...p} names={["contactName"]} />
+      <p className="notice my-6">{C.needContact}</p>
+      <Fields {...p} names={["contactPhone", "contactEmail", "reachBy"]} />
+      <div className="mt-6">
+        <TalkLang C={C} v={v} onPick={(val) => setOtherLang(val === "other")} />
+      </div>
+      <div className="if-other-lang mt-6" data-on={otherLang}>
+        <Fields {...p} names={["talkLangOther"]} />
+      </div>
+      <p className="intake-js notice mt-8">
+        <Status tone="ok">{C.common.thatsAll}</Status>
+      </p>
+    </>
+  );
+
   return (
     <div ref={topRef} className="scroll-mt-4">
       <Progress C={C} step={step} />
 
       {restored && (
-        <div className="intake-js mb-5 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-xl bg-info-soft px-4 py-3 text-[15px] text-info">
-          <span className="min-w-0 flex-1">{C.common.restored}</span>
+        <div className="intake-js notice mb-8">
+          <Status tone="info" className="min-w-0 flex-1">{C.common.restored}</Status>
           <button
             type="button"
-            className="min-h-10 rounded-lg px-2 font-medium underline underline-offset-2"
+            className="link tap-target font-medium"
             onClick={() => {
               try {
                 localStorage.removeItem(storageKey(intakeId));
@@ -281,7 +299,9 @@ export function IntakeForm({
       )}
 
       {state.error && (
-        <p role="alert" className="mb-5 rounded-xl bg-danger-soft px-4 py-3 text-[16px] text-danger">{state.error}</p>
+        <p role="alert" className="notice mb-8">
+          <Status tone="danger">{state.error}</Status>
+        </p>
       )}
 
       <form
@@ -335,42 +355,32 @@ export function IntakeForm({
           title={firstStep.title}
           blurb={firstStep.blurb}
           before={
-            <div className="mb-7 space-y-2 rounded-2xl bg-surface-2 p-4">
-              <p className="text-2xl font-semibold tracking-tight">{C.welcome.hi(businessName)}</p>
-              <p className="text-[16px] leading-relaxed text-muted">{C.welcome.line}</p>
+            <div className="ps-hero">
+              <p className="display emoji">{C.welcome.hi(businessName)}</p>
+              <p className="sub">{C.welcome.line}</p>
             </div>
           }
         >
-          {hasFacts && (
+          {hasFacts ? (
             <>
               <FactsCard C={C} name={businessName} facts={facts} />
               <FactsCheck {...p} />
-              <h3 className="mb-5 mt-9 border-t border-border pt-7 text-xl font-semibold tracking-tight">{C.contactTitle}</h3>
+              <Sub title={C.contactTitle}>{contact}</Sub>
             </>
+          ) : (
+            <div className="pt-2">{contact}</div>
           )}
-          <Fields {...p} names={["contactName"]} />
-          <p className="mb-4 mt-6 rounded-xl bg-accent-soft px-4 py-3 text-[15px] leading-relaxed">{C.needContact}</p>
-          <Fields {...p} names={["contactPhone", "contactEmail", "reachBy"]} />
-          <div className="mt-6">
-            <TalkLang C={C} v={v} onPick={(val) => setOtherLang(val === "other")} />
-          </div>
-          <div className="if-other-lang mt-6" data-on={otherLang}>
-            <Fields {...p} names={["talkLangOther"]} />
-          </div>
-          <p className="intake-js mt-8 rounded-xl bg-info-soft px-4 py-3 text-[15px] leading-relaxed text-info">{C.common.thatsAll}</p>
         </Step>
 
         {/* ── 2 · Accounts & photos (optional) ── */}
         <Step C={C} index={1} current={step} refs={stepRefs} title={C.steps[1].title} blurb={C.steps[1].blurb} extra>
           {askHandles.length > 0 && (
-            <div className="mb-10">
-              <h3 className="text-xl font-semibold tracking-tight">{C.handles.title}</h3>
-              <p className="mb-5 mt-1 text-[16px] leading-relaxed text-muted">{C.handles.intro}</p>
+            <Sub title={C.handles.title} note={C.handles.intro}>
               <Fields {...p} names={askHandles} />
-            </div>
+            </Sub>
           )}
-          <Access C={C} v={v} accessEmail={accessEmail} first={askHandles.length === 0} />
-          <div className="mt-10 border-t border-border pt-8">
+          <Access C={C} v={v} accessEmail={accessEmail} />
+          <div className="sec is-untitled">
             <Fields {...p} names={["mediaLink"]} />
             {uploadsEnabled && !preview && (
               <div className="mt-6">
@@ -391,29 +401,32 @@ export function IntakeForm({
 
         {/* ── 3 · How we'll work together (optional) ── */}
         <Step C={C} index={2} current={step} refs={stepRefs} title={C.steps[2].title} blurb={C.steps[2].blurb} extra>
-          <Fields {...p} names={["promote", "postLangs", "creatorsOk"]} />
-          <div className="if-creators mt-6">
-            <Fields {...p} names={["creatorOffer"]} />
-          </div>
-          <div className="mt-6">
-            <Fields {...p} names={["complaints", "anythingElse"]} />
+          <div className="sec is-untitled">
+            <Fields {...p} names={["promote", "postLangs", "creatorsOk"]} />
+            <div className="if-creators mt-6">
+              <Fields {...p} names={["creatorOffer"]} />
+            </div>
+            <div className="mt-6">
+              <Fields {...p} names={["complaints", "anythingElse"]} />
+            </div>
           </div>
         </Step>
 
         {previewSent && (
-          <p role="status" className="mt-6 rounded-xl bg-ok-soft px-4 py-3 text-[15px] text-ok">Preview only: nothing was sent. The owner would see the thank-you screen here.</p>
+          <p role="status" className="notice mt-8">
+            <Status tone="ok">Preview only: nothing was sent. The owner would see the thank-you screen here.</Status>
+          </p>
         )}
 
-        <div className="sticky-actions mt-8">
+        <div className="sticky-actions action-bar ps-bar mt-10">
           {/* Page 2 shows three buttons. Below 420px Back is the arrow alone and the paddings tighten (again below
-              360px), so they fit a 320px phone on one line in all three languages. On anything narrower Send now /
-              Next shrink and wrap instead of poking out of the bar. */}
-          <div className="flex items-center gap-2 rounded-2xl border border-border bg-surface/95 p-2 shadow-sm backdrop-blur supports-[backdrop-filter]:bg-surface/80 max-[420px]:gap-1.5">
+              360px), so they fit a 320px phone on one line in all three languages. */}
+          <div className="flex items-center gap-2 max-[420px]:gap-1.5">
             <button
               type="button"
               onClick={() => go(step - 1)}
               data-off={step === 0}
-              className={cx(buttonClass("ghost"), "intake-js min-h-12 shrink-0 whitespace-nowrap px-3 text-[16px] data-[off=true]:hidden max-[360px]:px-2.5")}
+              className={cx(buttonClass("ghost"), "intake-js min-w-11 shrink-0 data-[off=true]:hidden max-[360px]:px-2")}
             >
               <span aria-hidden>←</span> <span className="max-[420px]:sr-only">{C.common.back}</span>
             </button>
@@ -424,7 +437,7 @@ export function IntakeForm({
               data-off={step === LAST}
               data-send-now=""
               onClick={sendNow}
-              className={cx(buttonClass("secondary"), "intake-js ml-auto min-h-12 min-w-0 px-4 text-[16px] leading-tight data-[off=true]:hidden max-[420px]:px-3 max-[360px]:px-2.5")}
+              className={cx(buttonClass("secondary"), "intake-js ml-auto min-w-0 data-[off=true]:hidden max-[420px]:px-3 max-[360px]:px-2.5")}
             >
               {pending ? C.common.sending : C.common.sendNow}
             </button>
@@ -432,7 +445,7 @@ export function IntakeForm({
               type="button"
               data-off={step === LAST}
               onClick={() => checkStep(step) && go(step + 1)}
-              className={cx(buttonClass("primary"), "intake-js min-h-12 min-w-0 px-5 text-[16px] leading-tight data-[off=true]:hidden max-[420px]:px-3.5 max-[360px]:px-2.5")}
+              className={cx(buttonClass("primary"), "intake-js min-w-0 data-[off=true]:hidden max-[420px]:px-3 max-[360px]:px-2.5")}
             >
               {C.common.next} →
             </button>
@@ -441,7 +454,7 @@ export function IntakeForm({
               type="submit"
               disabled={pending}
               data-off={step !== LAST}
-              className={cx(buttonClass("primary"), "intake-submit ml-auto min-h-12 shrink-0 whitespace-nowrap px-5 text-[16px] data-[off=true]:hidden")}
+              className={cx(buttonClass("primary"), "intake-submit ml-auto shrink-0 data-[off=true]:hidden")}
             >
               {pending ? C.common.sending : C.common.submit}
             </button>
@@ -454,20 +467,24 @@ export function IntakeForm({
 
 /* ───────────────────────── Pieces ───────────────────────── */
 
-/** "Step 2 of 3" over the bar. The page's title is the h2 inside each step, so it shows once. */
+/** "Step 2 of 3" and one segment per page. The page's title is the h2 inside each step, so it shows once. */
 function Progress({ C, step }: { C: IntakeCopy; step: number }) {
   return (
-    <div className="intake-js mb-6" aria-live="polite">
-      <p className="mb-2 text-sm text-muted">{C.common.stepOf(step + 1, INTAKE_STEP_COUNT)}</p>
-      <div className="grid grid-cols-3 gap-1.5" aria-hidden>
+    <div className="intake-js ps-steps" aria-live="polite">
+      <span className="meta">{C.common.stepOf(step + 1, INTAKE_STEP_COUNT)}</span>
+      <span className="meter" aria-hidden>
         {C.steps.map((s, i) => (
-          <span key={i} className={cx("h-2 rounded-full transition-colors", i <= step ? "bg-accent" : "bg-surface-2")} />
+          <i key={i} className={i <= step ? "on" : undefined} />
         ))}
-      </div>
+      </span>
     </div>
   );
 }
 
+/**
+ * One page of the form. Page 1 opens with the greeting (`before`) and its title is the first section's; the optional
+ * pages open with "Got one more minute?" and their title in the serif.
+ */
 function Step({
   C, index, current, refs, title, blurb, extra, before, children,
 }: {
@@ -475,6 +492,12 @@ function Step({
   /** An optional page: framed as "Got one more minute?". */
   extra?: boolean; before?: ReactNode; children: ReactNode;
 }) {
+  const heading = (cls: string) => (
+    <h2 id={`intake-step-${index}`} tabIndex={-1} className={cx(cls, "outline-none")}>
+      <span className="intake-nojs mr-1 hidden text-muted">{index + 1}.</span>
+      {title}
+    </h2>
+  );
   return (
     <section
       ref={(el) => { refs.current[index] = el; }}
@@ -482,52 +505,69 @@ function Step({
       aria-labelledby={`intake-step-${index}`}
       className="intake-step data-[off=true]:hidden"
     >
-      {before}
-      <header className="mb-6">
-        {extra && <p className="mb-1 text-[15px] font-semibold text-accent">{C.common.oneMoreMinute}</p>}
-        <h2 id={`intake-step-${index}`} tabIndex={-1} className="text-xl font-semibold tracking-tight outline-none">
-          <span className="intake-nojs mr-1 hidden text-muted">{index + 1}.</span>
-          {title}
-        </h2>
-        <p className="mt-1 text-[16px] text-muted">{blurb}</p>
-        {extra && <p className="mt-2 text-[15px] text-muted">💡 {C.common.skip}</p>}
-      </header>
+      {extra ? (
+        <header className="ps-hero">
+          <p className="ps-lead">{C.common.oneMoreMinute}</p>
+          {heading("display")}
+          <p className="sub">{blurb}</p>
+          <p className="sub"><span aria-hidden className="emoji">💡</span> {C.common.skip}</p>
+        </header>
+      ) : (
+        <>
+          {before}
+          <header className="sec-head mt-10 max-md:mt-8">{heading("title")}</header>
+          <p className="sec-note">{blurb}</p>
+        </>
+      )}
       {children}
     </section>
   );
 }
 
-/** What we found about the business, as plain text: the name, then only the facts we have. */
+/** A titled part of a page: the ink rule, the serif title, an optional muted line. */
+function Sub({ title, note, children }: { title: string; note?: string; children: ReactNode }) {
+  return (
+    <div className="sec">
+      <header className="sec-head">
+        <h3 className="title">{title}</h3>
+      </header>
+      {note && <p className="sec-note">{note}</p>}
+      <div className={note ? "pt-1" : "sec-body"}>{children}</div>
+    </div>
+  );
+}
+
+/** What we found about the business, as plain text on hairlines: the name, then only the facts we have. */
 function FactsCard({ C, name, facts }: { C: IntakeCopy; name: string; facts: { key: IntakeFactKey; value: string }[] }) {
   const rows: Array<{ key: string; label: string; value: string }> = [
     { key: "name", label: C.facts.labels.name, value: name },
     ...facts.map((f) => ({ key: f.key, label: C.facts.labels[f.key], value: f.value })),
   ];
   return (
-    <dl data-intake-facts="" className="divide-y divide-border rounded-2xl border border-border">
+    <dl data-intake-facts="" className="ps-facts">
       {rows.map((r) => (
-        <div key={r.key} className="flex gap-3 px-4 py-2.5">
-          <dt className="w-[5.5rem] shrink-0 pt-px text-[15px] leading-snug text-muted">{r.label}</dt>
-          <dd data-fact={r.key} className="min-w-0 flex-1 whitespace-pre-line break-words text-[16px] font-medium leading-snug">{r.value}</dd>
+        <div key={r.key}>
+          <dt>{r.label}</dt>
+          <dd data-fact={r.key}>{r.value}</dd>
         </div>
       ))}
     </dl>
   );
 }
 
-/** One tap: "Yes, that's right" or "Something's off" — which opens the one text box (pure CSS, see the page's style). */
+/** One tap: "Yes, that's right" or "Something's off", which opens the one text box (pure CSS, see the page's style). */
 function FactsCheck({ C, v, errors, clearLocal }: Common) {
   const labels = C.options.factsOk as Record<string, string>;
   const cur = typeof v.factsOk === "string" ? v.factsOk : "";
   return (
-    <div className="mt-4">
+    <div className="mt-2">
       <fieldset>
         <legend className="sr-only">{C.fields.factsOk.label}</legend>
-        <div className="grid gap-2 sm:grid-cols-2">
+        <div className="ps-opts is-2">
           {CHOICE_FIELDS.factsOk.values.map((val) => (
-            <label key={val} className={cx(pill, "rounded-xl font-medium")}>
-              <input type="radio" name="factsOk" value={val} defaultChecked={cur === val} className="shrink-0" />
-              <span>{labels[val]}</span>
+            <label key={val} className="ps-opt">
+              <input type="radio" name="factsOk" value={val} defaultChecked={cur === val} className="check" />
+              <span className="font-medium">{labels[val]}</span>
             </label>
           ))}
         </div>
@@ -545,8 +585,8 @@ function TalkLang({ C, v, onPick }: { C: IntakeCopy; v: Values; onPick: (value: 
   const cur = typeof v.talkLang === "string" ? v.talkLang : "";
   return (
     <div>
-      <label htmlFor="f-talkLang" className="mb-2 block text-[16px] font-medium leading-snug">{C.fields.talkLang.label}</label>
-      <select id="f-talkLang" name="talkLang" defaultValue={cur} onChange={(e) => onPick(e.currentTarget.value)} className="input !min-h-12 !text-[16px]">
+      <label htmlFor="f-talkLang" className="ps-q ps-q-head">{C.fields.talkLang.label}</label>
+      <select id="f-talkLang" name="talkLang" defaultValue={cur} onChange={(e) => onPick(e.currentTarget.value)} className="input">
         {!cur && <option value="" />}
         {CHOICE_FIELDS.talkLang.values.map((val) => (
           <option key={val} value={val}>{labels[val]}</option>
@@ -572,17 +612,17 @@ function Fields({ names, ...p }: Common & { names: IntakeField[] }) {
 
 function FieldHead({ C, name, htmlFor, required }: { C: IntakeCopy; name: IntakeField; htmlFor?: string; required?: boolean }) {
   const f = C.fields[name] as { label: string; hint?: string; placeholder?: string };
-  const Tag = htmlFor ? "label" : "span";
+  const El = htmlFor ? "label" : "span";
   return (
-    <div className="mb-2">
-      <Tag {...(htmlFor ? { htmlFor } : {})} className="block text-[16px] font-medium leading-snug">
+    <div className="ps-q-head">
+      <El {...(htmlFor ? { htmlFor } : {})} className="ps-q">
         {f.label}
-        {required && <span className="ml-2 rounded-full bg-accent-soft px-2 py-0.5 align-middle text-xs font-semibold text-accent">{C.common.required}</span>}
-      </Tag>
-      {f.hint && <p className="mt-0.5 text-[15px] leading-snug text-muted">{f.hint}</p>}
+        {required && <Tag>{C.common.required}</Tag>}
+      </El>
+      {f.hint && <p className="ps-q-help">{f.hint}</p>}
       {f.placeholder && (
-        <p className="mt-0.5 text-[15px] leading-snug text-muted">
-          <span className="font-medium">{C.common.example}</span>{f.placeholder}
+        <p className="ps-q-help">
+          <b>{C.common.example}</b>{f.placeholder}
         </p>
       )}
     </div>
@@ -591,7 +631,7 @@ function FieldHead({ C, name, htmlFor, required }: { C: IntakeCopy; name: Intake
 
 function ErrorText({ id, error }: { id: string; error?: string }) {
   if (!error) return null;
-  return <p id={id} role="alert" className="mt-1.5 text-[15px] text-danger">{error}</p>;
+  return <p id={id} role="alert" className="status is-danger is-small ps-err flex">{error}</p>;
 }
 
 function Text({ C, v, errors, clearLocal, name }: Common & { name: TextField }) {
@@ -614,7 +654,7 @@ function Text({ C, v, errors, clearLocal, name }: Common & { name: TextField }) 
     <div>
       <FieldHead C={C} name={name} htmlFor={id} required={cfg.required} />
       {spec.kind === "block" ? (
-        <textarea {...common} rows={cfg.rows ?? 3} className={cx("input !min-h-0 !text-[16px] leading-relaxed", err && "!border-danger")} />
+        <textarea {...common} rows={cfg.rows ?? 3} className={cx("input !min-h-0", err && "!border-danger")} />
       ) : (
         <input
           {...common}
@@ -624,17 +664,13 @@ function Text({ C, v, errors, clearLocal, name }: Common & { name: TextField }) 
           autoCapitalize={cfg.plain ? "none" : undefined}
           autoCorrect={cfg.plain ? "off" : undefined}
           spellCheck={cfg.plain ? false : undefined}
-          className={cx("input !min-h-12 !text-[16px]", err && "!border-danger")}
+          className={cx("input", err && "!border-danger")}
         />
       )}
       <ErrorText id={`${id}-err`} error={err} />
     </div>
   );
 }
-
-const pill =
-  "inline-flex min-h-12 cursor-pointer select-none items-center gap-2.5 rounded-full border border-border bg-surface px-4 py-2 text-[16px] transition-colors " +
-  "hover:bg-surface-2 has-[:checked]:border-accent has-[:checked]:bg-accent-soft has-[:focus-visible]:outline has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-accent";
 
 function Choice({ C, v, errors, name }: Common & { name: ChoiceField }) {
   const spec = CHOICE_FIELDS[name];
@@ -647,15 +683,15 @@ function Choice({ C, v, errors, name }: Common & { name: ChoiceField }) {
       <legend className="contents">
         <FieldHead C={C} name={name} />
       </legend>
-      <div className={spec.multi ? "flex flex-wrap gap-2" : "grid gap-2 sm:grid-cols-2"}>
+      <div className={cx("ps-opts -mt-2", spec.multi ? "is-wrap" : "is-2")}>
         {spec.values.map((val) => (
-          <label key={val} className={cx(pill, !spec.multi && "rounded-xl")}>
-            <input type={spec.multi ? "checkbox" : "radio"} name={name} value={val} defaultChecked={checked.includes(val)} className="shrink-0" />
+          <label key={val} className="ps-opt">
+            <input type={spec.multi ? "checkbox" : "radio"} name={name} value={val} defaultChecked={checked.includes(val)} className="check" />
             <span>{labels[val]}</span>
           </label>
         ))}
       </div>
-      {err && <p role="alert" className="mt-1.5 text-[15px] text-danger">{err}</p>}
+      {err && <p role="alert" className="status is-danger is-small ps-err flex">{err}</p>}
     </fieldset>
   );
 }
@@ -665,7 +701,7 @@ function CopyEmail({ C, email }: { C: IntakeCopy; email: string }) {
   return (
     <button
       type="button"
-      className={cx(buttonClass("secondary", "sm"), "intake-js min-h-10 shrink-0")}
+      className={cx(buttonClass("secondary", "sm"), "intake-js shrink-0")}
       onClick={async () => {
         const ok = await copyText(email);
         setDone(ok);
@@ -677,12 +713,18 @@ function CopyEmail({ C, email }: { C: IntakeCopy; email: string }) {
   );
 }
 
+const CHEV = (
+  <svg viewBox="0 0 16 16" aria-hidden className="chev size-3.5" fill="none" stroke="currentColor" strokeWidth={1.8}>
+    <path d="M6 3.5 10.5 8 6 12.5" strokeLinecap="round" strokeLinejoin="round" />
+  </svg>
+);
+
 /**
  * "How to give us access": Meta + Google each get Done / I'll need help, with the plain numbered steps folded
  * under "Show me how" (a <details>, so it works without JavaScript). TikTok is one line: we do it on the call.
  * Never asks for passwords.
  */
-function Access({ C, v, accessEmail, first }: { C: IntakeCopy; v: Values; accessEmail: string | null; first?: boolean }) {
+function Access({ C, v, accessEmail }: { C: IntakeCopy; v: Values; accessEmail: string | null }) {
   const A = C.access;
   const email = accessEmail ?? A.emailFallback;
   const fill = (s: string) => {
@@ -700,12 +742,12 @@ function Access({ C, v, accessEmail, first }: { C: IntakeCopy; v: Values; access
     const cur = typeof v[name] === "string" ? (v[name] as string) : "";
     const labels = C.options[name] as Record<string, string>;
     return (
-      <fieldset className="mt-3">
+      <fieldset>
         <legend className="sr-only">{C.fields[name].label}</legend>
-        <div className="grid gap-2 sm:grid-cols-2">
+        <div className="ps-opts is-2">
           {CHOICE_FIELDS[name].values.map((val) => (
-            <label key={val} className={cx(pill, "rounded-xl")}>
-              <input type="radio" name={name} value={val} defaultChecked={cur === val} className="shrink-0" />
+            <label key={val} className="ps-opt">
+              <input type="radio" name={name} value={val} defaultChecked={cur === val} className="check" />
               <span>{labels[val]}</span>
             </label>
           ))}
@@ -714,15 +756,15 @@ function Access({ C, v, accessEmail, first }: { C: IntakeCopy; v: Values; access
     );
   };
   const howTo = (list: readonly string[]) => (
-    <details className="group mt-2">
-      <summary className="flex min-h-11 cursor-pointer list-none items-center gap-2 text-[16px] font-medium text-accent [&::-webkit-details-marker]:hidden">
-        <span aria-hidden className="transition-transform group-open:rotate-90">›</span>
+    <details className="ps-how">
+      <summary className="no-marker">
+        {CHEV}
         {A.showHow}
       </summary>
-      <ol className="mt-2 space-y-2.5">
+      <ol className="ps-steps-list mb-2 mt-1">
         {list.map((s, i) => (
-          <li key={i} className="flex gap-3 text-[16px] leading-relaxed">
-            <span aria-hidden className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-full bg-surface-2 text-sm font-semibold">{i + 1}</span>
+          <li key={i}>
+            <span aria-hidden className="n">{i + 1}</span>
             <span className="min-w-0">{fill(s)}</span>
           </li>
         ))}
@@ -731,36 +773,32 @@ function Access({ C, v, accessEmail, first }: { C: IntakeCopy; v: Values; access
   );
 
   return (
-    <div className={first ? undefined : "border-t border-border pt-8"}>
-      <h3 className="text-xl font-semibold tracking-tight">{A.title}</h3>
-      <p className="mt-1 text-[16px] leading-relaxed text-muted">{A.intro}</p>
-      <div className="mt-4 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl bg-surface-2 px-4 py-3">
-        <span className="text-[15px] text-muted">{A.emailLabel}</span>
-        <span className="min-w-0 break-all text-[17px] font-semibold">{email}</span>
-        {accessEmail && <CopyEmail C={C} email={accessEmail} />}
-      </div>
-
-      <div className="mt-5 space-y-4">
-        <div className="rounded-2xl border border-border p-4">
-          <h4 className="text-[17px] font-semibold">{A.meta.title}</h4>
+    <Sub title={A.title} note={A.intro}>
+      <div className="ps-blocks border-t border-border">
+        <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+          <span className="meta">{A.emailLabel}</span>
+          <span className="min-w-0 break-all font-semibold">{email}</span>
+          {accessEmail && <span className="ml-auto"><CopyEmail C={C} email={accessEmail} /></span>}
+        </div>
+        <div>
+          <h4 className="font-medium">{A.meta.title}</h4>
           {howTo(A.meta.steps)}
           {radios("accessMeta")}
         </div>
-        <div className="rounded-2xl border border-border p-4">
-          <h4 className="text-[17px] font-semibold">{A.google.title}</h4>
+        <div>
+          <h4 className="font-medium">{A.google.title}</h4>
           {howTo(A.google.steps)}
           {radios("accessGoogle")}
         </div>
-        <p className="rounded-2xl border border-border p-4 text-[16px] leading-relaxed">
-          <span className="font-semibold">{A.tiktok.title}: </span>
+        <p>
+          <span className="font-medium">{A.tiktok.title}: </span>
           {A.tiktok.body}
         </p>
       </div>
-      <p className="mt-4 flex gap-2 rounded-xl border border-warn/40 bg-warn-soft px-4 py-3 text-[15px] font-medium text-warn">
-        <span aria-hidden>🔒</span>
-        <span>{C.common.neverPasswords}</span>
+      <p className="notice">
+        <Status tone="warn">{C.common.neverPasswords}</Status>
       </p>
-      <p className="mt-3 text-[15px] text-muted">💡 {A.tip}</p>
-    </div>
+      <p className="meta mt-3"><span aria-hidden className="emoji">💡</span> {A.tip}</p>
+    </Sub>
   );
 }

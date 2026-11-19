@@ -9,7 +9,7 @@ import { saveKitAction } from "./actions";
 
 /**
  * Manage Nora's public media kit. No nav item: reached from Nora's workspace (and My stats).
- * Numbers are read-only here — they come from My stats.
+ * Numbers are read-only here: they come from My stats.
  */
 
 export const dynamic = "force-dynamic";
@@ -26,16 +26,12 @@ export default async function KitSettingsPage() {
   return (
     <>
       <PageHeader
-        title={
-          <>
-            <Link href={`/clients/${CREATOR_CLIENT_ID}`} className="hover:underline">{identity.name}</Link>
-            <span className="text-muted"> · Media kit</span>
-          </>
-        }
+        crumb={<Link href={`/clients/${CREATOR_CLIENT_ID}`}>{identity.name}</Link>}
+        title="Media kit"
         subtitle={
           <>
             A public page for businesses: your numbers, style and rates. Numbers update on their own from{" "}
-            <Link href="/stats" className="text-accent hover:underline">My stats</Link>.
+            <Link href="/stats" className="link">My stats</Link>.
           </>
         }
       />

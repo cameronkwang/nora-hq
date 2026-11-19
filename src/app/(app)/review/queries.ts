@@ -7,7 +7,7 @@ import { outreachProfileOf, type OutreachProfile } from "@/lib/outreach-profile"
 
 export const REVIEW_TABS = [
   { key: "needs_review", label: "Needs review", status: "needs_review" as DraftStatus },
-  { key: "approved", label: "Approved — send manually", status: "approved" as DraftStatus },
+  { key: "approved", label: "Approved: send manually", status: "approved" as DraftStatus },
   { key: "sent", label: "Sent", status: "sent" as DraftStatus },
   { key: "rejected", label: "Sent back", status: "rejected" as DraftStatus },
   { key: "failed", label: "Failed", status: "failed" as DraftStatus },

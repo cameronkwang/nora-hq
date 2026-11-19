@@ -9,12 +9,12 @@ import { buttonClass, cx, humanize } from "./ui";
  */
 export function OutreachStageSelect({ current, label, stages }: { current: string; label: string; stages: readonly string[] }) {
   return (
-    <div className="flex items-center gap-1.5">
+    <div className="g-stage">
       <select
         name="stage"
         aria-label={label}
         defaultValue={current}
-        className="input py-1! text-xs! pointer-coarse:text-base!"
+        className="input"
         onChange={(e) => {
           if (e.currentTarget.value !== current) e.currentTarget.form?.requestSubmit();
         }}
