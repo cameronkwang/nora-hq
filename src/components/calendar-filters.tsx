@@ -8,7 +8,7 @@ type Opt = { id: string; label: string };
 /** GET form for /calendar; selects submit on change (Filter button without JS). */
 export function CalendarFilters({ month, client, platform, clients }: { month: string; client: string; platform: string; clients: Opt[] }) {
   return (
-    <form method="get" action="/calendar" className="flex flex-col gap-2 sm:flex-row sm:items-end">
+    <form method="get" action="/calendar" className="grid w-full grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)] items-end gap-3 sm:flex sm:w-auto">
       <input type="hidden" name="tab" value="posts" />
       {month && <input type="hidden" name="month" value={month} />}
       <div className="sm:w-64">
@@ -32,7 +32,7 @@ export function CalendarFilters({ month, client, platform, clients }: { month: s
         <button type="submit" className={buttonClass("secondary")}>Filter</button>
       </noscript>
       {(client || platform) && (
-        <Link href={month ? `/calendar?tab=posts&month=${month}` : "/calendar?tab=posts"} className={buttonClass("ghost")}>
+        <Link href={month ? `/calendar?tab=posts&month=${month}` : "/calendar?tab=posts"} className={`${buttonClass("ghost")} justify-self-start`}>
           Clear
         </Link>
       )}

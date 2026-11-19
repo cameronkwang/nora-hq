@@ -38,7 +38,7 @@ export function TaskFilters({
   const mine = assignee === "me";
 
   return (
-    <form ref={form} method="get" action="/tasks" className="mb-4">
+    <form ref={form} method="get" action="/tasks" className="task-filters">
       {scope !== "adhoc" && <input type="hidden" name="scope" value={scope} />}
       {view !== "list" && <input type="hidden" name="view" value={view} />}
       {view === "list" && <input type="hidden" name="view" value="list" />}
@@ -46,21 +46,10 @@ export function TaskFilters({
       {view === "table" && dir === "desc" && <input type="hidden" name="dir" value={dir} />}
       {view !== "list" && group === "business" && <input type="hidden" name="group" value={group} />}
 
-      <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:items-center">
-        <Link
-          href={mineHref}
-          aria-pressed={mine}
-          className={cx(
-            buttonClass(mine ? "primary" : "secondary"),
-            "order-1 rounded-full sm:order-none",
-          )}
-        >
-          {mine && (
-            <svg viewBox="0 0 16 16" aria-hidden className="size-3.5" fill="none" stroke="currentColor" strokeWidth={2.2}>
-              <path d="M3.5 8.5l3 3 6-7" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
-          )}
-          Mine
+      <div className="grid grid-cols-2 items-center gap-2 sm:flex sm:flex-wrap">
+        {/* A filter chip: ink when on. */}
+        <Link href={mineHref} aria-pressed={mine} className="chip order-1 justify-self-start sm:order-none">
+          <span>Mine</span>
         </Link>
 
         <div className={cx("order-3 sm:order-none sm:w-60", view === "board" && "col-span-2")}>
@@ -95,23 +84,23 @@ export function TaskFilters({
             aria-expanded={open}
             aria-controls="task-more-filters"
             onClick={() => setOpen((o) => !o)}
-            className={cx(buttonClass("ghost"), "text-muted")}
+            className={buttonClass("ghost")}
           >
             Filters
-            {extra > 0 && <span className="rounded-full bg-accent px-1.5 text-xs font-semibold text-accent-fg">{extra}</span>}
+            {extra > 0 && <span className="num font-semibold text-text">{extra}</span>}
             <svg viewBox="0 0 16 16" aria-hidden className={cx("size-3.5 transition-transform", open && "rotate-180")} fill="none" stroke="currentColor" strokeWidth={1.8}>
               <path d="M4 6l4 4 4-4" strokeLinecap="round" strokeLinejoin="round" />
             </svg>
           </button>
           {filtered && (
-            <Link href={clearHref} className={cx(buttonClass("ghost"), "text-muted")}>
+            <Link href={clearHref} className={buttonClass("ghost")}>
               Clear
             </Link>
           )}
         </div>
       </div>
 
-      <div id="task-more-filters" hidden={!open} className="mt-2 rounded-xl border border-border bg-surface p-3">
+      <div id="task-more-filters" hidden={!open} className="task-more">
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
           {mine ? (
             <input type="hidden" name="assignee" value="me" />

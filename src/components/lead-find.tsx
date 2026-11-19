@@ -55,7 +55,7 @@ export function FindLeads({ defaultArea = "", autoOpen = false }: { defaultArea?
 
   return (
     <>
-      <button type="button" onClick={show} className={buttonClass("primary")} aria-haspopup="dialog">
+      <button type="button" onClick={show} className={buttonClass("secondary", "sm")} aria-haspopup="dialog">
         <svg viewBox="0 0 24 24" aria-hidden className="size-4" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round">
           <circle cx="11" cy="11" r="6.5" />
           <path d="m20 20-4.2-4.2" />
@@ -72,20 +72,20 @@ export function FindLeads({ defaultArea = "", autoOpen = false }: { defaultArea?
         }}
         className="sheet fixed inset-x-0 top-auto bottom-0 w-full md:inset-0 md:m-auto md:h-fit md:max-w-md"
       >
-        <div className="sheet-panel mx-auto max-h-[90dvh] overflow-y-auto overscroll-contain rounded-t-2xl bg-surface px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-3 shadow-xl md:rounded-2xl md:p-5">
-          <div className="mb-3 flex items-start justify-between gap-3">
+        <div className="sheet-panel mx-auto max-h-[90dvh] overflow-y-auto overscroll-contain rounded-t-2xl bg-surface px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-4 shadow-xl md:rounded-2xl md:p-6">
+          <div className="mb-4 flex items-start justify-between gap-3">
             <div>
-              <h2 id="find-leads-title" className="text-base font-semibold">Find leads</h2>
-              <p className="text-sm text-muted">Tell Claude where to look. It researches and adds them here — you just pick who to pitch.</p>
+              <h2 id="find-leads-title" className="title">Find leads</h2>
+              <p className="meta mt-1">Tell Claude where to look. It researches and adds them here; you just pick who to pitch.</p>
             </div>
-            <button type="button" onClick={close} className="-mr-2 -mt-1 flex h-11 shrink-0 items-center rounded-lg px-3 text-sm font-medium text-accent">
+            <button type="button" onClick={close} className={cx(buttonClass("ghost"), "-mr-2 -mt-1 shrink-0")}>
               {done ? "Done" : "Cancel"}
             </button>
           </div>
 
           {done ? (
-            <div role="status" className="space-y-3 py-2">
-              <p className="rounded-lg bg-ok-soft px-3 py-2 text-sm text-ok">{state.message}</p>
+            <div role="status" className="space-y-4 py-2">
+              <p className="status is-ok whitespace-normal">{state.message}</p>
               <div className="flex flex-wrap gap-2">
                 <button type="button" onClick={close} className={buttonClass("primary")}>Got it</button>
                 {state.askId && (
@@ -100,18 +100,18 @@ export function FindLeads({ defaultArea = "", autoOpen = false }: { defaultArea?
                 <input id="fl-area" name="area" required minLength={2} defaultValue={defaultArea} placeholder="City or neighborhood, e.g. Richmond, VA" className="input" autoComplete="off" />
               </div>
               <div>
-                <label className="label" htmlFor="fl-type">Type of place <span className="font-normal">(optional)</span></label>
+                <label className="label" htmlFor="fl-type">Type of place <span className="font-normal text-muted">(optional)</span></label>
                 <input id="fl-type" name="placeType" placeholder="e.g. coffee shops, Korean BBQ, bakeries" className="input" autoComplete="off" />
               </div>
               <fieldset>
                 <legend className="label">What for</legend>
-                <div className="grid gap-2 sm:grid-cols-3">
+                <div className="g-opts">
                   {WHAT_FOR.map((o) => (
-                    <label key={o.value} className="flex min-h-11 cursor-pointer items-start gap-2 rounded-lg border border-border px-3 py-2 has-[:checked]:border-accent has-[:checked]:bg-accent-soft">
-                      <input type="checkbox" name="opportunities" value={o.value} defaultChecked className="mt-0.5 shrink-0" />
-                      <span className="text-sm leading-tight">
-                        <span className="block font-medium">{o.label}</span>
-                        <span className="block text-xs text-muted">{o.hint}</span>
+                    <label key={o.value} className="g-opt">
+                      <input type="checkbox" name="opportunities" value={o.value} defaultChecked className="check" />
+                      <span>
+                        <b>{o.label}</b>
+                        <small>{o.hint}</small>
                       </span>
                     </label>
                   ))}
@@ -125,9 +125,9 @@ export function FindLeads({ defaultArea = "", autoOpen = false }: { defaultArea?
                   ))}
                 </select>
               </div>
-              {fresh && state.error && <p role="alert" className="text-sm text-danger">{state.error}</p>}
+              {fresh && state.error && <p role="alert" className="status is-danger whitespace-normal">{state.error}</p>}
               <Submit />
-              <p className="text-xs text-muted">Claude only uses public info and public business contacts.</p>
+              <p className="hint">Claude only uses public info and public business contacts.</p>
             </form>
           )}
         </div>

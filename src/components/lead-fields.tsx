@@ -33,14 +33,14 @@ export function LeadFields({ lead, idPrefix = "lf", openMore = false }: { lead?:
 
       <OpportunityPicker selected={lead?.opportunities ?? []} />
 
-      <details className="group rounded-lg border border-border" open={openMore || undefined}>
-        <summary className="no-marker flex min-h-11 cursor-pointer items-center justify-between px-3 text-sm font-medium">
+      <details className="g-disc" open={openMore || undefined}>
+        <summary>
           More details
-          <svg viewBox="0 0 16 16" aria-hidden className="size-3.5 transition group-open:rotate-180" fill="none" stroke="currentColor" strokeWidth={1.8}>
-            <path d="m4 6 4 4 4-4" strokeLinecap="round" strokeLinejoin="round" />
+          <svg viewBox="0 0 16 16" aria-hidden fill="none" stroke="currentColor" strokeWidth={1.8}>
+            <path d="M6 3.5 10.5 8 6 12.5" strokeLinecap="round" strokeLinejoin="round" />
           </svg>
         </summary>
-        <div className="grid gap-4 border-t border-border p-3 sm:grid-cols-2">
+        <div className="g-disc-body grid gap-4 sm:grid-cols-2">
           <Field id={id("cat")} name="category" label="Type of place" value={v(lead?.category)} placeholder="e.g. Korean BBQ" />
           <Field id={id("maps")} name="googleMapsUrl" label="Google Maps link" value={v(lead?.googleMapsUrl)} inputMode="url" />
           <Field id={id("rating")} name="googleRating" label="Google rating" value={v(lead?.googleRating)} placeholder="4.3" inputMode="decimal" />
@@ -55,7 +55,7 @@ export function LeadFields({ lead, idPrefix = "lf", openMore = false }: { lead?:
             <label className="label" htmlFor={id("why")}>Why they’re a fit</label>
             <textarea id={id("why")} name="why" defaultValue={v(lead?.why)} rows={3} className="input" placeholder="The gap we’d fix, in a sentence or two." />
           </div>
-          <p className="text-xs text-muted sm:col-span-2">Contact: only public business info (website, Google profile, Instagram bio).</p>
+          <p className="meta border-t border-border pt-4 sm:col-span-2">Contact: only public business info (website, Google profile, Instagram bio).</p>
           <Field id={id("cname")} name="contactName" label="Contact name" value={v(lead?.contactName)} />
           <Field id={id("cemail")} name="contactEmail" label="Public business email" value={v(lead?.contactEmail)} type="email" />
           <Field id={id("cphone")} name="contactPhone" label="Business phone" value={v(lead?.contactPhone)} type="tel" />
@@ -73,10 +73,10 @@ export function OpportunityPicker({ selected, legend = "What could we do for the
   return (
     <fieldset>
       <legend className="label">{legend}</legend>
-      <div className="flex flex-wrap gap-2">
+      <div className="flex flex-wrap">
         {LEAD_OPPORTUNITIES.map((o) => (
-          <label key={o} className="flex min-h-11 cursor-pointer items-center gap-2 rounded-lg border border-border px-3 text-sm has-[:checked]:border-accent has-[:checked]:bg-accent-soft md:min-h-9">
-            <input type="checkbox" name="opportunities" value={o} defaultChecked={selected.includes(o)} />
+          <label key={o} className="g-inline">
+            <input type="checkbox" name="opportunities" value={o} defaultChecked={selected.includes(o)} className="check" />
             {OPP_LABEL[o]}
           </label>
         ))}

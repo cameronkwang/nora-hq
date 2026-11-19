@@ -4,7 +4,8 @@ import { Button, humanize } from "./ui";
 
 type Opt = { id: string; label: string };
 
-/** Quick-add task form. Plain server-action form; the browser resets it after a successful add. */
+/** Quick-add task form. Plain server-action form; the browser resets it after a successful add. The Add button is
+ * secondary: the screen's one primary is "New ask". */
 export function TaskQuickAdd({
   clients,
   defaultClientId,
@@ -23,7 +24,7 @@ export function TaskQuickAdd({
 }) {
   const assignee = defaultAssignee && (ASSIGNEES as readonly string[]).includes(defaultAssignee) ? defaultAssignee : "unassigned";
   return (
-    <form action={quickAddTask} className="grid grid-cols-2 gap-3 xl:grid-cols-[minmax(0,2fr)_minmax(0,1.5fr)_9rem_7rem_7rem_auto] xl:items-end">
+    <form action={quickAddTask} className="grid grid-cols-2 gap-3 md:grid-cols-[repeat(3,minmax(0,1fr))_auto] md:items-end xl:grid-cols-[minmax(0,2fr)_minmax(0,1.5fr)_9rem_7rem_7rem_auto]">
       <input type="hidden" name="returnTo" value={returnTo} />
       {askId && <input type="hidden" name="askId" value={askId} />}
       <div className="col-span-2 xl:col-span-1">
@@ -54,14 +55,14 @@ export function TaskQuickAdd({
       <div className="xl:col-span-1">
         <label htmlFor="qa-platform" className="label">Platform</label>
         <select id="qa-platform" name="platform" defaultValue="" className="input">
-          <option value="">—</option>
+          <option value="">None</option>
           {PLATFORMS.map((p) => (
             <option key={p} value={p}>{p === "tiktok" ? "TikTok" : humanize(p)}</option>
           ))}
         </select>
       </div>
       <div className="self-end xl:col-span-1">
-        <Button type="submit" variant="primary" className="w-full">Add</Button>
+        <Button type="submit" className="w-full">Add</Button>
       </div>
     </form>
   );

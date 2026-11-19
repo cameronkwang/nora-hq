@@ -3,7 +3,7 @@ import Link from "next/link";
 import { requireUser } from "@/lib/auth";
 import { currentMonth, isMonth, monthLabel, today } from "@/lib/dates";
 import { listSchedule, reelsToPost } from "@/lib/ops-schedule";
-import { PageHeader, cx } from "@/components/ui";
+import { PageHeader } from "@/components/ui";
 import { MonthPicker } from "@/components/month-picker";
 import { ScheduleBoard, type ScheduleFilter, type ScheduleEntry } from "@/components/schedule-board";
 import { SchedulePaste } from "@/components/schedule-paste";
@@ -37,18 +37,11 @@ function CalendarTabs({ tab, month }: { tab: "schedule" | "posts"; month: string
     { value: "schedule", label: "Schedule", href: q ? `/calendar?${q}` : "/calendar" },
     { value: "posts", label: "Posts", href: `/calendar?tab=posts${q ? `&${q}` : ""}` },
   ] as const;
+  // Underline tabs: the current one is ink with a 2px ink line.
   return (
-    <nav aria-label="Calendar views" className="mb-5 flex border-b border-border">
+    <nav aria-label="Calendar views" className="tabs">
       {items.map((t) => (
-        <Link
-          key={t.value}
-          href={t.href}
-          aria-current={tab === t.value ? "page" : undefined}
-          className={cx(
-            "-mb-px inline-flex min-h-11 items-center border-b-2 px-4 text-sm font-medium",
-            tab === t.value ? "border-accent text-text" : "border-transparent text-muted hover:text-text",
-          )}
-        >
+        <Link key={t.value} href={t.href} aria-current={tab === t.value ? "page" : undefined}>
           {t.label}
         </Link>
       ))}
@@ -73,7 +66,7 @@ async function ScheduleTab({ sp, month, tabs }: { sp: SP; month: string; tabs: R
     needsReel: r.needsReel,
     reelPostedAt: r.reelPostedAt ? r.reelPostedAt.toISOString() : null,
     dealId: r.dealId,
-    payment: r.payment, // Paid / Not paid from the linked deal — never an amount
+    payment: r.payment, // Paid / Not paid from the linked deal, never an amount
     checklistDone: checklistDone(r.checklist),
   });
   const items = rows.map(toEntry);
@@ -82,21 +75,28 @@ async function ScheduleTab({ sp, month, tabs }: { sp: SP; month: string; tabs: R
 
   return (
     <div>
-      <PageHeader
-        title="Nora's schedule"
-        subtitle={`${monthLabel(month)} · ${items.length} job${items.length === 1 ? "" : "s"} · ${reelsThisMonth} reel${reelsThisMonth === 1 ? "" : "s"} to post`}
-        actions={
-          <>
-            <SchedulePaste />
-            <ScheduleAddButton month={month} />
-          </>
-        }
-      />
-      {tabs}
-      <div className="mb-4">
-        <MonthPicker month={month} current={now} />
+      <div className="sched-head">
+        <PageHeader
+          title="Nora's schedule"
+          subtitle={<span className="num">{`${monthLabel(month)} · ${items.length} job${items.length === 1 ? "" : "s"} · ${reelsThisMonth} reel${reelsThisMonth === 1 ? "" : "s"} to post`}</span>}
+          actions={
+            <>
+              <SchedulePaste />
+              <ScheduleAddButton month={month} />
+            </>
+          }
+        />
       </div>
-      <ScheduleBoard month={month} items={items} otherReels={otherReels} todayStr={today()} initialFilter={filter} />
+      {tabs}
+      <ScheduleBoard
+        month={month}
+        items={items}
+        otherReels={otherReels}
+        todayStr={today()}
+        initialFilter={filter}
+        // A server-made element rendered inside a client list: the key keeps React's list-key check quiet.
+        monthPicker={<MonthPicker key="monthpick" month={month} current={now} />}
+      />
     </div>
   );
 }

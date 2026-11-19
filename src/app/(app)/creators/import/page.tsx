@@ -11,10 +11,11 @@ export default async function ImportCreatorsPage() {
   const clients = await listClients();
   return (
     <>
-      <p className="mb-2 text-sm">
-        <Link href="/creators" className="text-muted hover:underline">← Creators</Link>
-      </p>
-      <PageHeader title="Import creators" subtitle="Bring in a list from Google Sheets or a CSV. You’ll see exactly what changes before anything is saved." />
+      <PageHeader
+        crumb={<Link href="/creators">Creators</Link>}
+        title="Import creators"
+        subtitle="Bring in a list from Google Sheets or a CSV. You’ll see exactly what changes before anything is saved."
+      />
       <CreatorImport clients={clients.map((c) => ({ id: c.id, label: clientLabel(c) }))} />
     </>
   );

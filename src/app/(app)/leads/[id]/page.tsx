@@ -9,7 +9,7 @@ import { LeadFields } from "@/components/lead-fields";
 import { NewClientLink } from "@/components/onboard-link";
 import { NextStep, OppChips, ScoreBar } from "@/components/lead-bits";
 import { OutreachStageSelect } from "@/components/outreach-stage-select";
-import { Badge, Card, LinkButton, PageHeader, StatusBadge, cx } from "@/components/ui";
+import { Card, LinkButton, PageHeader, Status, StatusBadge } from "@/components/ui";
 import { askPitchAction, deleteLeadAction, moveLeadStageAction, saveFollowUpAction, updateLeadAction } from "../actions";
 import { CONVERT_STAGES, NO_CONTACT_STAGES, STAGE_LABEL, googleMapsHref, igHref, leadSignals, ttHref, websiteUrl } from "../shared";
 
@@ -18,8 +18,8 @@ export const dynamic = "force-dynamic";
 type SP = Record<string, string | string[] | undefined>;
 const one = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v) ?? "";
 
-const STAGE_TONE: Record<string, "neutral" | "info" | "accent" | "ok" | "danger"> = {
-  found: "neutral", qualified: "info", contacted: "info", talking: "accent", proposal: "accent", won: "ok", lost: "neutral", not_a_fit: "neutral",
+const STAGE_TONE: Record<string, "neutral" | "info" | "ink" | "ok" | "danger"> = {
+  found: "neutral", qualified: "info", contacted: "info", talking: "ink", proposal: "ink", won: "ok", lost: "neutral", not_a_fit: "neutral",
 };
 
 export default async function LeadPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<SP> }) {
@@ -45,19 +45,19 @@ export default async function LeadPage({ params, searchParams }: { params: Promi
   ].filter((c): c is { value: string; label: string; hint: string } => !!c);
   const pending = drafts.find((d) => ["needs_review", "approved", "rejected"].includes(d.status));
 
+  const facts = [lead.city, lead.category, lead.source ? `Source: ${lead.source}` : null].filter(Boolean).join(" · ");
+
   return (
     <>
-      <p className="mb-2 text-sm">
-        <Link href="/leads" className="text-muted hover:underline">← Leads</Link>
-      </p>
       <PageHeader
-        title={
-          <span className="flex flex-wrap items-center gap-2">
-            {lead.name}
-            <Badge tone={STAGE_TONE[lead.stage]}>{STAGE_LABEL[lead.stage]}</Badge>
+        crumb={<Link href="/leads">Leads</Link>}
+        title={lead.name}
+        subtitle={
+          <span className="g-meta">
+            <Status tone={STAGE_TONE[lead.stage]}>{STAGE_LABEL[lead.stage]}</Status>
+            {facts && <span>{facts}</span>}
           </span>
         }
-        subtitle={[lead.city, lead.category, lead.source ? `Source: ${lead.source}` : null].filter(Boolean).join(" · ") || undefined}
         actions={
           <form action={moveLeadStageAction}>
             <input type="hidden" name="id" value={lead.id} />
@@ -67,34 +67,34 @@ export default async function LeadPage({ params, searchParams }: { params: Promi
         }
       />
 
-      {flash && <p role="status" className="mb-4 rounded-lg bg-ok-soft px-3 py-2 text-sm text-ok">{flash}</p>}
-      {error && <p role="alert" className="mb-4 rounded-lg bg-danger-soft px-3 py-2 text-sm text-danger">{error}</p>}
+      {flash && <p role="status" className="notice mb-2"><span className="status is-ok">{flash}</span></p>}
+      {error && <p role="alert" className="notice mb-2"><span className="status is-danger">{error}</span></p>}
 
-      <div className="grid gap-5 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
-        <div className="space-y-5">
+      <div className="cols mt-0">
+        <div>
           {/* Why + the one next action */}
           <Card title="Why they’re a fit">
-            <div className="mb-3 flex flex-wrap items-center gap-3">
+            <div className="mb-3 flex flex-wrap items-baseline gap-x-4 gap-y-2">
               <OppChips opportunities={lead.opportunities} />
               <ScoreBar score={lead.score} />
             </div>
-            {lead.why ? <p className="whitespace-pre-line text-[15px] leading-relaxed">{lead.why}</p> : <p className="text-sm text-muted">Claude hasn’t written this yet.</p>}
+            {lead.why ? <p className="whitespace-pre-line">{lead.why}</p> : <p className="meta">Claude hasn’t written this yet.</p>}
             {(s.google || s.social) && (
-              <ul className="mt-3 space-y-1 text-sm text-muted">
-                {s.google && <li><span className="font-medium text-google">Google</span> · {s.google}</li>}
-                {s.social && <li><span className="font-medium text-ig">Instagram</span> · {s.social}</li>}
+              <ul className="list is-ruled mt-4">
+                {s.google && <li className="py-2"><span className="status is-google">Google</span><span className="meta"> · {s.google}</span></li>}
+                {s.social && <li className="py-2"><span className="status is-ig">Instagram</span><span className="meta"> · {s.social}</span></li>}
               </ul>
             )}
           </Card>
 
           {lead.convertedClientId ? (
             <Card title="Now a client">
-              <p className="mb-3 text-sm">You’re managing this business.</p>
-              <LinkButton href={`/clients/${lead.convertedClientId}`} variant="primary">Open business page</LinkButton>
+              <p className="mb-4">You’re managing this business.</p>
+              <LinkButton href={`/clients/${lead.convertedClientId}`} variant="secondary">Open business page</LinkButton>
             </Card>
           ) : canConvert ? (
             <Card title="Start managing this business">
-              <p className="mb-3 text-sm text-muted">One screen, prefilled from this lead: sets up the plan and checklist, hands research to Claude, and marks the lead Won.</p>
+              <p className="meta mb-4">One screen, prefilled from this lead: sets up the plan and checklist, hands research to Claude, and marks the lead Won.</p>
               <NewClientLink leadId={lead.id} size="md">Start managing {lead.name}</NewClientLink>
             </Card>
           ) : null}
@@ -102,60 +102,61 @@ export default async function LeadPage({ params, searchParams }: { params: Promi
           {canPitch && showDrafts && (
             <Card title={lead.stage === "contacted" ? "Follow up" : "Pitch them"}>
               {pending ? (
-                <div className="space-y-2 text-sm">
+                <div className="space-y-3">
                   <p>
                     A pitch is {pending.status === "needs_review" ? "waiting for your review" : pending.status === "approved" ? "approved and ready to send" : "sent back to Claude"}.
                   </p>
-                  <LinkButton href="/review" variant="primary">Open Review</LinkButton>
+                  <LinkButton href="/review">Open Review</LinkButton>
                 </div>
               ) : channels.length === 0 ? (
-                <p className="text-sm text-muted">
-                  No public email or Instagram saved yet. <a href="#edit" className="text-accent hover:underline">Add one</a>, or ask Claude to find it from the Asks page.
+                <p className="meta">
+                  No public email or Instagram saved yet. <a href="#edit" className="link">Add one</a>, or ask Claude to find it from the Asks page.
                 </p>
               ) : (
                 <ActionForm action={askPitchAction.bind(null, lead.id)} className="space-y-3" ariaLabel="Ask Claude to draft a pitch">
                   <fieldset>
                     <legend className="label">How to reach them</legend>
-                    <div className="grid gap-2 sm:grid-cols-3">
+                    <div className="g-opts is-3">
                       {channels.map((c, i) => (
-                        <label key={c.value} className="flex min-h-11 cursor-pointer items-start gap-2 rounded-lg border border-border px-3 py-2 has-[:checked]:border-accent has-[:checked]:bg-accent-soft">
-                          <input type="radio" name="channel" value={c.value} defaultChecked={i === 0} className="mt-0.5 shrink-0" />
-                          <span className="min-w-0 text-sm leading-tight">
-                            <span className="block font-medium">{c.label}</span>
-                            <span className="block truncate text-xs text-muted">{c.hint}</span>
+                        <label key={c.value} className="g-opt">
+                          <input type="radio" name="channel" value={c.value} defaultChecked={i === 0} className="check" />
+                          <span>
+                            <b>{c.label}</b>
+                            <small className="truncate">{c.hint}</small>
                           </span>
                         </label>
                       ))}
                     </div>
                   </fieldset>
-                  <details className="group">
-                    <summary className="no-marker inline-flex min-h-11 cursor-pointer items-center text-sm text-muted hover:text-text md:min-h-8">+ Add a note for Claude</summary>
-                    <textarea name="note" rows={2} maxLength={1000} className="input mt-1" placeholder="e.g. mention we love their dumplings" />
+                  <details className="g-disc is-quiet">
+                    <summary>
+                      Add a note for Claude
+                      <svg viewBox="0 0 16 16" aria-hidden fill="none" stroke="currentColor" strokeWidth={1.8}><path d="M6 3.5 10.5 8 6 12.5" strokeLinecap="round" strokeLinejoin="round" /></svg>
+                    </summary>
+                    <textarea name="note" rows={2} maxLength={1000} className="input mt-1" placeholder="e.g. mention we love their dumplings" aria-label="Note for Claude" />
                   </details>
                   <SubmitButton pendingLabel="Asking…">Ask Claude to draft a pitch</SubmitButton>
-                  <p className="text-xs text-muted">You’ll approve it in Review before anything is sent.</p>
+                  <p className="hint">You’ll approve it in Review before anything is sent.</p>
                 </ActionForm>
               )}
             </Card>
           )}
 
           {showDrafts && (
-          <Card title="Pitches" actions={drafts.length > 0 ? <Link href="/review" className="text-xs text-accent hover:underline">Review queue</Link> : undefined}>
+          <Card title="Pitches" actions={drafts.length > 0 ? <Link href="/review" className="link-quiet">Review queue →</Link> : undefined} padded={drafts.length === 0}>
             {drafts.length === 0 ? (
-              <p className="text-sm text-muted">No pitches yet.</p>
+              <p className="meta">No pitches yet.</p>
             ) : (
-              <ul className="divide-y divide-border">
+              <ul className="list">
                 {drafts.map((d) => (
-                  <li key={d.id} className="flex flex-wrap items-center justify-between gap-2 py-2 text-sm">
-                    <span className="min-w-0">
-                      <Link href="/review" className="font-medium hover:underline">{d.title}</Link>
-                      <span className="block text-xs text-muted">
-                        {d.kind === "lead_email" ? `Email${d.meta.to ? ` to ${String(d.meta.to)}` : ""}` : d.meta.channel === "tiktok_dm" ? "TikTok DM" : "Instagram DM"}
-                        {" · "}
-                        {d.sentAt ? `sent ${formatDate(d.sentAt)}` : relativeTime(d.createdAt)}
-                      </span>
-                    </span>
-                    <StatusBadge status={d.status} />
+                  <li key={d.id} className="g-row">
+                    <Link href="/review" className="row-title">{d.title}</Link>
+                    <span className="end"><StatusBadge status={d.status} /></span>
+                    <p className="more">
+                      {d.kind === "lead_email" ? `Email${d.meta.to ? ` to ${String(d.meta.to)}` : ""}` : d.meta.channel === "tiktok_dm" ? "TikTok DM" : "Instagram DM"}
+                      {" · "}
+                      {d.sentAt ? `sent ${formatDate(d.sentAt)}` : relativeTime(d.createdAt)}
+                    </p>
                   </li>
                 ))}
               </ul>
@@ -164,35 +165,35 @@ export default async function LeadPage({ params, searchParams }: { params: Promi
           )}
         </div>
 
-        <div className="space-y-5">
+        <aside>
           <Card title="Links">
-            <ul className="space-y-2 text-sm">
+            <dl className="g-kv">
               {web && <LinkRow label="Website" href={web} text={lead.website!.replace(/^https?:\/\//, "").replace(/\/$/, "")} />}
               <LinkRow label="Google Maps" href={googleMapsHref(lead)} text={lead.googleMapsUrl ? "Open on Google Maps" : "Search on Google Maps"} />
               {lead.instagramHandle && <LinkRow label="Instagram" href={igHref(lead.instagramHandle)} text={`@${lead.instagramHandle}`} />}
               {lead.tiktokHandle && <LinkRow label="TikTok" href={ttHref(lead.tiktokHandle)} text={`@${lead.tiktokHandle}`} />}
-            </ul>
+            </dl>
           </Card>
 
           <Card title="Contact">
             {lead.contactName || lead.contactEmail || lead.contactPhone ? (
-              <ul className="space-y-1 text-sm">
+              <ul className="space-y-1">
                 {lead.contactName && <li>{lead.contactName}</li>}
-                {lead.contactEmail && <li><a href={`mailto:${lead.contactEmail}`} className="break-all hover:underline">{lead.contactEmail}</a></li>}
-                {lead.contactPhone && <li><a href={`tel:${lead.contactPhone.replace(/[^\d+]/g, "")}`} className="hover:underline">{lead.contactPhone}</a></li>}
+                {lead.contactEmail && <li><a href={`mailto:${lead.contactEmail}`} className="link break-all">{lead.contactEmail}</a></li>}
+                {lead.contactPhone && <li><a href={`tel:${lead.contactPhone.replace(/[^\d+]/g, "")}`} className="link">{lead.contactPhone}</a></li>}
               </ul>
             ) : (
-              <p className="text-sm text-muted">None saved.</p>
+              <p className="meta">None saved.</p>
             )}
-            <p className="mt-3 text-xs text-muted">
-              Public business contact info only. If they say they’re not interested, set the stage to Lost — nobody can pitch them again. Emails include an opt-out line.
+            <p className="hint mt-3">
+              Public business contact info only. If they say they’re not interested, set the stage to Lost and nobody can pitch them again. Emails include an opt-out line.
             </p>
           </Card>
 
           <Card title="Next step & notes">
-            <ActionForm action={saveFollowUpAction.bind(null, lead.id)} className="space-y-3" ariaLabel="Next step and notes">
+            <ActionForm action={saveFollowUpAction.bind(null, lead.id)} className="space-y-4" ariaLabel="Next step and notes">
               <div>
-                <div className="flex items-center justify-between gap-2">
+                <div className="flex items-baseline justify-between gap-2">
                   <label className="label" htmlFor="ld-next">Next step</label>
                   <NextStep date={lead.nextStepAt} today={today} />
                 </div>
@@ -205,39 +206,42 @@ export default async function LeadPage({ params, searchParams }: { params: Promi
               <SubmitButton variant="secondary">Save</SubmitButton>
             </ActionForm>
           </Card>
+        </aside>
+      </div>
+
+      {/* Under the two columns, in the main column's track (.cols with one child), so its rule ends where theirs does. */}
+      <div id="edit" className="cols scroll-mt-20">
+        <div>
+          <details className="sec g-fold">
+            <summary className="sec-head">
+              <span className="title">Edit details</span>
+              <svg viewBox="0 0 16 16" aria-hidden fill="none" stroke="currentColor" strokeWidth={1.8}><path d="M6 3.5 10.5 8 6 12.5" strokeLinecap="round" strokeLinejoin="round" /></svg>
+            </summary>
+            <div className="sec-body">
+              <ActionForm action={updateLeadAction.bind(null, lead.id)} className="space-y-4" ariaLabel="Edit lead">
+                <LeadFields lead={lead} idPrefix="edit" openMore />
+                <div className="sticky-actions action-bar flex flex-wrap items-center gap-x-3 gap-y-2">
+                  <SubmitButton variant="secondary">Save changes</SubmitButton>
+                </div>
+              </ActionForm>
+              <form action={deleteLeadAction.bind(null, lead.id)} className="mt-8">
+                <ConfirmButton confirm={`Delete ${lead.name}? Any unsent pitches to them are withdrawn.`}>Delete lead</ConfirmButton>
+              </form>
+            </div>
+          </details>
         </div>
       </div>
 
-      <section id="edit" className="mt-8 scroll-mt-20">
-        <details className="group rounded-xl border border-border bg-surface">
-          <summary className="no-marker flex min-h-12 cursor-pointer items-center justify-between px-4 text-sm font-semibold">
-            Edit details
-            <svg viewBox="0 0 16 16" aria-hidden className="size-3.5 transition group-open:rotate-180" fill="none" stroke="currentColor" strokeWidth={1.8}><path d="m4 6 4 4 4-4" strokeLinecap="round" strokeLinejoin="round" /></svg>
-          </summary>
-          <div className="border-t border-border p-4">
-            <ActionForm action={updateLeadAction.bind(null, lead.id)} className="space-y-4" ariaLabel="Edit lead">
-              <LeadFields lead={lead} idPrefix="edit" openMore />
-              <div className="sticky-actions flex flex-wrap items-center gap-2 rounded-xl bg-surface/95 py-2 backdrop-blur">
-                <SubmitButton>Save changes</SubmitButton>
-              </div>
-            </ActionForm>
-            <form action={deleteLeadAction.bind(null, lead.id)} className="mt-6 border-t border-border pt-4">
-              <ConfirmButton confirm={`Delete ${lead.name}? Any unsent pitches to them are withdrawn.`}>Delete lead</ConfirmButton>
-            </form>
-          </div>
-        </details>
-      </section>
-
-      <p className={cx("mt-4 text-xs text-muted")}>Added {formatDate(lead.createdAt)} · updated {relativeTime(lead.updatedAt)}</p>
+      <p className="meta mt-8">Added {formatDate(lead.createdAt)} · updated {relativeTime(lead.updatedAt)}</p>
     </>
   );
 }
 
 function LinkRow({ label, href, text }: { label: string; href: string; text: string }) {
   return (
-    <li className="flex min-h-11 items-center justify-between gap-3 md:min-h-8">
-      <span className="text-xs font-medium text-muted">{label}</span>
-      <a href={href} target="_blank" rel="noopener noreferrer" className="min-w-0 truncate text-right hover:underline">{text} ↗</a>
-    </li>
+    <div>
+      <dt>{label}</dt>
+      <dd><a href={href} target="_blank" rel="noopener noreferrer" className="link">{text} ↗</a></dd>
+    </div>
   );
 }

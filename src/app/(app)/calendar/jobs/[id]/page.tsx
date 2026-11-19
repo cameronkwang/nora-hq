@@ -5,7 +5,7 @@ import { getScheduleItem } from "@/lib/ops-schedule";
 import { SHOOT_CHECKLIST } from "@/lib/shoot-checklist";
 import { ShootChecklist } from "@/components/shoot-checklist";
 import { ReelPostedButton } from "@/components/reel-posted-button";
-import { Badge, LinkButton } from "@/components/ui";
+import { LinkButton, PageHeader, Status, Tag } from "@/components/ui";
 
 export const dynamic = "force-dynamic";
 
@@ -14,7 +14,9 @@ const monthName = (m: string) => new Date(`${m}-15T12:00:00Z`).toLocaleDateStrin
 
 /**
  * One job on Nora's schedule, built for the phone she's holding on site: when it is, links to the business
- * and deal, and the shoot checklist (day before, B-roll on site, after) as big tap rows.
+ * and deal, and the shoot checklist (day before, B-roll on site, after) as big tap rows. Never an amount.
+ * Ink: the serif title, the day and the job's facts on one muted line, quiet buttons to the deal and the business,
+ * the one focal action (Reel posted, ink), then the checklist as sections on hairlines.
  */
 export default async function ScheduleJobPage({ params }: { params: Promise<{ id: string }> }) {
   await requireUser();
@@ -24,37 +26,38 @@ export default async function ScheduleJobPage({ params }: { params: Promise<{ id
   const owesReel = job.needsReel && !job.reelPostedAt;
 
   return (
-    <div className="mx-auto max-w-xl">
-      <p className="mb-3 text-sm">
-        <Link href={`/calendar?month=${job.month}`} className="inline-flex min-h-11 items-center text-muted hover:underline md:min-h-0">
-          ← Schedule
-        </Link>
-      </p>
-
-      <header className="mb-4">
-        <h1 className="text-3xl font-semibold leading-tight tracking-tight break-words">{job.businessName}</h1>
-        <p className="mt-1 text-lg text-muted">{job.date ? dayLabel(job.date) : `Sometime in ${monthName(job.month)}`}</p>
-        <div className="mt-2 flex flex-wrap gap-2">
-          {job.isFree && <Badge tone="ok">Free</Badge>}
-          {owesReel && <Badge tone="warn">📸 Reel to post</Badge>}
-          {job.needsReel && job.reelPostedAt && <Badge tone="ok">Reel posted</Badge>}
-        </div>
-      </header>
+    <div className="job-page">
+      <PageHeader
+        crumb={<Link href={`/calendar?month=${job.month}`}>Schedule</Link>}
+        title={job.businessName}
+        subtitle={
+          <span className="job-facts">
+            <span className="text-text">{job.date ? dayLabel(job.date) : `Sometime in ${monthName(job.month)}`}</span>
+            {job.isFree && <Tag bare>Free</Tag>}
+            {owesReel && (
+              <Status tone="warn" small>
+                <span className="emoji" aria-hidden>📸</span> Reel to post
+              </Status>
+            )}
+            {job.needsReel && job.reelPostedAt && (
+              <Status tone="ok" small>
+                Reel posted
+              </Status>
+            )}
+          </span>
+        }
+      />
 
       {(job.dealId || job.clientId) && (
-        <div className="mb-5 flex flex-wrap gap-2">
-          {job.dealId && (
-            <LinkButton href={`/deals/${job.dealId}/visit`} variant="primary">
-              Visit mode
-            </LinkButton>
-          )}
+        <div className="job-links">
+          {job.dealId && <LinkButton href={`/deals/${job.dealId}/visit`}>Visit mode</LinkButton>}
           {job.dealId && <LinkButton href={`/deals/${job.dealId}`}>Deal</LinkButton>}
           {job.clientId && <LinkButton href={`/clients/${job.clientId}`}>{job.clientName ?? "Business"}</LinkButton>}
         </div>
       )}
 
       {job.needsReel && (
-        <div className="mb-5">
+        <div className="job-reel">
           <ReelPostedButton id={job.id} posted={!!job.reelPostedAt} />
         </div>
       )}

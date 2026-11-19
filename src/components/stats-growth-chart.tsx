@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { cx } from "./ui";
 
 /**
  * Follower growth for one platform: a single 2px line with a 10% wash, an end-dot + end label, a recessive
@@ -52,7 +53,8 @@ function useWidth<T extends HTMLElement>() {
 export function StatsGrowthChart({ title, points, color, days }: { title: string; points: Point[]; color: "ig" | "tt"; days: number }) {
   const [ref, width] = useWidth<HTMLDivElement>();
   const [hover, setHover] = useState<number | null>(null);
-  const stroke = color === "ig" ? "var(--ig)" : "var(--tt)";
+  // One series per chart, drawn in ink like every other line in the app; the platform's colour is the dot by the title.
+  const stroke = "var(--text)";
 
   const geo = useMemo(() => {
     if (points.length === 0 || width < 120) return null;
@@ -89,14 +91,14 @@ export function StatsGrowthChart({ title, points, color, days }: { title: string
   return (
     <figure className="min-w-0">
       <figcaption className="mb-2 flex items-baseline justify-between gap-2">
-        <span className="text-sm font-semibold">{title}</span>
-        <span className="text-xs text-muted">Followers, last {days} days</span>
+        <span className={cx("status font-medium", color === "ig" ? "is-ig" : "is-tt")}>{title}</span>
+        <span className="meta">Followers, last {days} days</span>
       </figcaption>
       <div ref={ref} className="relative">
         {points.length < 2 ? (
-          <div className="flex h-[168px] items-center justify-center rounded-lg border border-dashed border-border px-4 text-center text-sm text-muted">
-            {points.length === 0 ? "No follower history yet." : "One day logged — the line starts tomorrow."}
-          </div>
+          <p className="meta border-t border-border py-4">
+            {points.length === 0 ? "No follower history yet." : "One day logged. The line starts tomorrow."}
+          </p>
         ) : geo ? (
           <svg
             width={width}
@@ -118,12 +120,12 @@ export function StatsGrowthChart({ title, points, color, days }: { title: string
             {geo.t.map((v) => (
               <g key={v}>
                 <line x1={PAD.left} x2={width - PAD.right} y1={geo.y(v)} y2={geo.y(v)} stroke="var(--border)" strokeWidth={1} shapeRendering="crispEdges" />
-                <text x={PAD.left - 6} y={geo.y(v)} dy="0.32em" textAnchor="end" fontSize={11} fill="var(--muted)" className="tabular-nums">{fmt(v)}</text>
+                <text x={PAD.left - 6} y={geo.y(v)} dy="0.32em" textAnchor="end" fontSize={12} fill="var(--muted)" className="tabular-nums">{fmt(v)}</text>
               </g>
             ))}
-            <text x={PAD.left} y={H - 4} fontSize={11} fill="var(--muted)">{fmtDate(geo.firstDate)}</text>
-            <text x={width - PAD.right} y={H - 4} fontSize={11} fill="var(--muted)" textAnchor="end">{fmtDate(last.date)}</text>
-            <path d={geo.area} fill={stroke} opacity={0.1} />
+            <text x={PAD.left} y={H - 4} fontSize={12} fill="var(--muted)">{fmtDate(geo.firstDate)}</text>
+            <text x={width - PAD.right} y={H - 4} fontSize={12} fill="var(--muted)" textAnchor="end">{fmtDate(last.date)}</text>
+            <path d={geo.area} fill={stroke} opacity={0.05} />
             <path d={geo.line} fill="none" stroke={stroke} strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" />
             {/* End dot with a surface ring + direct end label. */}
             <circle cx={geo.xy[geo.xy.length - 1][0]} cy={geo.xy[geo.xy.length - 1][1]} r={4} fill={stroke} stroke="var(--surface)" strokeWidth={2} />
@@ -143,30 +145,30 @@ export function StatsGrowthChart({ title, points, color, days }: { title: string
         {h && geo && (
           <div
             role="status"
-            className="pointer-events-none absolute top-0 z-10 rounded-lg border border-border bg-surface px-2.5 py-1.5 text-xs shadow-md"
+            className="pop pointer-events-none absolute top-0 z-10 px-2.5 py-1.5 text-sm"
             style={{ left: Math.min(Math.max(0, h.xy[0] - 60), width - 128), width: 128 }}
           >
             <p className="flex items-center gap-1.5">
               <span aria-hidden className="inline-block h-0.5 w-3 rounded" style={{ background: stroke }} />
-              <span className="text-sm font-semibold tabular-nums">{h.p.followers.toLocaleString("en-US")}</span>
+              <span className="font-semibold tabular-nums">{h.p.followers.toLocaleString("en-US")}</span>
             </p>
             <p className="text-muted">{fmtDate(h.p.date)}</p>
           </div>
         )}
       </div>
       {points.length > 0 && (
-        <details className="mt-2 text-xs">
-          <summary className="inline-flex min-h-11 cursor-pointer items-center text-muted hover:text-text md:min-h-0">Show table</summary>
-          <div className="mt-2 max-h-48 overflow-y-auto rounded-lg border border-border">
-            <table className="w-full text-left tabular-nums">
-              <thead className="sticky top-0 bg-surface-2 text-muted">
-                <tr><th className="px-3 py-1.5 font-medium">Date</th><th className="px-3 py-1.5 text-right font-medium">Followers</th></tr>
+        <details className="mt-2 text-sm">
+          <summary className="no-marker inline-flex min-h-11 cursor-pointer items-center text-muted hover:text-text md:pointer-fine:min-h-8">Show table</summary>
+          <div className="mt-1 max-h-48 overflow-y-auto">
+            <table className="g-table tabular-nums">
+              <thead>
+                <tr><th>Date</th><th className="text-right">Followers</th></tr>
               </thead>
               <tbody>
                 {[...points].reverse().map((p) => (
-                  <tr key={p.date} className="border-t border-border">
-                    <td className="px-3 py-1">{fmtDate(p.date)}</td>
-                    <td className="px-3 py-1 text-right">{p.followers.toLocaleString("en-US")}</td>
+                  <tr key={p.date}>
+                    <td className="py-1!">{fmtDate(p.date)}</td>
+                    <td className="py-1! text-right">{p.followers.toLocaleString("en-US")}</td>
                   </tr>
                 ))}
               </tbody>

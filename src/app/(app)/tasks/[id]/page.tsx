@@ -7,7 +7,7 @@ import { headers } from "next/headers";
 import { addMonths, currentMonth, formatDate, lastMonths, monthLabel, relativeTime } from "@/lib/dates";
 import { ASSIGNEES, PLATFORMS, TASK_STATUSES } from "@/lib/schema";
 import { deleteTaskAction, saveTask } from "../actions";
-import { Button, Card, PageHeader, StatusBadge, buttonClass, clientLabel, cx, humanize } from "@/components/ui";
+import { Button, Card, PageHeader, Status, StatusBadge, buttonClass, clientLabel, humanize } from "@/components/ui";
 import { actorName } from "../../activity/actor";
 
 export const dynamic = "force-dynamic";
@@ -51,17 +51,15 @@ export default async function TaskPage({ params, searchParams }: { params: Promi
   const back = await backPath(id);
 
   return (
-    <div className="mx-auto max-w-5xl">
-      <Link href={back} className="mb-3 inline-flex min-h-11 items-center text-sm text-muted hover:text-text md:min-h-0">
-        ← {back.startsWith("/tasks") ? "All tasks" : "Back"}
-      </Link>
+    <div className="max-w-5xl">
       <PageHeader
+        crumb={<Link href={back}>{back.startsWith("/tasks") ? "All tasks" : "Back"}</Link>}
         title={<span className="break-words">{task.title}</span>}
         subtitle={
-          <span className="flex flex-wrap items-center gap-2">
+          <span className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
             <StatusBadge status={task.status} />
             {client && (
-              <Link href={`/clients/${client.id}`} className="hover:underline">
+              <Link href={`/clients/${client.id}`} className="link tap-target">
                 {clientLabel(client)}
               </Link>
             )}
@@ -74,18 +72,19 @@ export default async function TaskPage({ params, searchParams }: { params: Promi
       />
 
       {error && (
-        <p role="alert" className="mb-4 rounded-lg bg-danger-soft px-3 py-2 text-sm text-danger">
-          {error}
+        <p role="alert" className="notice mb-6">
+          <Status tone="danger" className="whitespace-normal">{error}</Status>
         </p>
       )}
 
-      <form action={saveTask} className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_20rem] lg:items-start">
+      {/* Two columns from lg: the title and notes, then the facts beside them. No boxes: the columns sit on hairlines. */}
+      <form action={saveTask} className="grid grid-cols-1 gap-x-16 gap-y-8 lg:grid-cols-[minmax(0,1fr)_18.75rem] lg:items-start">
         <input type="hidden" name="id" value={task.id} />
         <input type="hidden" name="returnTo" value={back} />
 
         {/* Main: what it is + notes */}
         <Card>
-          <div className="flex flex-col gap-4">
+          <div className="flex flex-col gap-5">
             <div>
               <label htmlFor="t-title" className="label">Title</label>
               <input id="t-title" name="title" required defaultValue={task.title} className="input" />
@@ -97,7 +96,7 @@ export default async function TaskPage({ params, searchParams }: { params: Promi
                 name="details"
                 rows={10}
                 defaultValue={task.details ?? ""}
-                className="input min-h-48 leading-relaxed"
+                className="input min-h-48"
                 placeholder="Links, context, what’s been tried, what’s next…"
               />
             </div>
@@ -147,7 +146,7 @@ export default async function TaskPage({ params, searchParams }: { params: Promi
             </div>
 
             <details className="col-span-2 lg:col-span-1" open={task.month !== cur || !!task.deliverableId}>
-              <summary className="no-marker flex min-h-11 items-center gap-1 text-sm font-medium text-muted hover:text-text lg:min-h-0">
+              <summary className="no-marker flex min-h-11 items-center gap-1 text-sm font-medium text-muted hover:text-text pointer-fine:lg:min-h-8">
                 Month &amp; monthly plan
                 <svg viewBox="0 0 16 16" aria-hidden className="size-3.5" fill="none" stroke="currentColor" strokeWidth={1.8}>
                   <path d="M4 6l4 4 4-4" strokeLinecap="round" strokeLinejoin="round" />
@@ -170,54 +169,56 @@ export default async function TaskPage({ params, searchParams }: { params: Promi
                       <option key={d.id} value={d.id}>
                         {d.title}
                         {d.targetPerMonth > 0 ? ` (${d.targetPerMonth}/mo)` : ""}
-                        {d.active ? "" : " — paused"}
+                        {d.active ? "" : " (paused)"}
                       </option>
                     ))}
                   </select>
-                  <p className="mt-1 text-xs text-muted">Done tasks linked here count toward the business’s monthly progress. Changing the business clears this.</p>
+                  <p className="hint">Done tasks linked here count toward the business’s monthly progress. Changing the business clears this.</p>
                 </div>
               </div>
             </details>
           </div>
         </Card>
 
-        <div className="sticky-actions flex items-center gap-2 rounded-xl border border-border bg-surface/95 p-2 shadow-sm backdrop-blur lg:col-span-2 lg:border-0 lg:bg-transparent lg:p-0 lg:shadow-none">
-          <Button type="submit" variant="primary" className="flex-1 sm:flex-none">Save</Button>
-          <Link href={back} className={cx(buttonClass("ghost"), "text-muted")}>
+        {/* The bar sticks above the tab bar on phones (to the window's foot on desktop), on solid paper with a hairline
+            on top; from lg it loses the hairline and padding, so it reads as the form's last line. */}
+        <div className="sticky-actions action-bar -mt-2 flex items-center gap-2 lg:col-span-2 lg:border-0 lg:py-0">
+          <Button type="submit" variant="secondary" className="flex-1 sm:flex-none">Save</Button>
+          <Link href={back} className={buttonClass("ghost")}>
             Cancel
           </Link>
         </div>
       </form>
 
       {(ask || drafts.length > 0) && (
-        <Card title="Linked" className="mt-4 lg:max-w-[calc(100%-21rem)]">
-          <ul className="flex flex-col gap-2 text-sm">
+        <Card title="Linked" className="lg:max-w-[calc(100%-22.75rem)]" padded={false}>
+          <ul className="list">
             {ask && (
-              <li>
-                From ask:{" "}
-                <Link href={`/asks/${ask.id}`} className="text-accent hover:underline">
+              <li className="row">
+                <span className="meta shrink-0">From ask</span>
+                <Link href={`/asks/${ask.id}`} className="link tap-target min-w-0 break-words">
                   {ask.body.length > 120 ? `${ask.body.slice(0, 120)}…` : ask.body}
                 </Link>
               </li>
             )}
             {drafts.map((d) => (
-              <li key={d.id} className="flex flex-wrap items-center gap-2">
-                <StatusBadge status={d.status} />
-                <Link href={`/review?draft=${d.id}`} className="min-w-0 break-words hover:underline">
+              <li key={d.id} className="row flex-wrap">
+                <Link href={`/review?draft=${d.id}`} className="row-title tap-target min-w-0 break-words">
                   {d.title}
                 </Link>
-                <span className="text-xs text-muted">{humanize(d.kind)}</span>
+                <span className="meta">{humanize(d.kind)}</span>
+                <StatusBadge status={d.status} />
               </li>
             ))}
           </ul>
         </Card>
       )}
 
-      <form action={deleteTaskAction} className="mt-6 border-t border-border pt-4">
+      <form action={deleteTaskAction} className="mt-10 flex flex-wrap items-baseline gap-x-3 gap-y-1 border-t border-border pt-4">
         <input type="hidden" name="id" value={task.id} />
         <input type="hidden" name="returnTo" value={back} />
         <Button type="submit" variant="danger" size="sm">Delete task</Button>
-        <span className="ml-3 text-xs text-muted">This can’t be undone.</span>
+        <span className="meta">This can’t be undone.</span>
       </form>
     </div>
   );

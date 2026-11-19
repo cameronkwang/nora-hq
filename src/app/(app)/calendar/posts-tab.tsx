@@ -8,13 +8,13 @@ import type { ContentPost } from "@/lib/schema";
 import { MonthPicker } from "@/components/month-picker";
 import { CalendarFilters } from "@/components/calendar-filters";
 import { AgendaList, MonthGrid, StatusDot, StatusLegend, type CalendarItem } from "@/components/calendar-grid";
-import { Card, EmptyState, LinkButton, PageHeader, PlatformTag, clientLabel, cx, humanize } from "@/components/ui";
+import { Card, EmptyState, LinkButton, PageHeader, PlatformTag, Status, clientLabel, humanize } from "@/components/ui";
 import { timeLabel, utcToZoned, zonedToUtc } from "./tz";
 
 type SP = Record<string, string | string[] | undefined>;
 const one = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v) ?? "";
 
-/** The content calendar (scheduled Instagram/TikTok posts) — the "Posts" tab of /calendar. Unchanged behaviour. */
+/** The content calendar (scheduled Instagram/TikTok posts): the "Posts" tab of /calendar. Unchanged behaviour. */
 export async function PostsTab({ sp, tabs }: { sp: SP; tabs: React.ReactNode }) {
   const now = currentMonth();
   const month = isMonth(one(sp.month)) ? one(sp.month) : now;
@@ -84,20 +84,30 @@ export async function PostsTab({ sp, tabs }: { sp: SP; tabs: React.ReactNode }) 
 
   return (
     <div>
-      <PageHeader
-        title="Content calendar"
-        subtitle={`${monthLabel(month)} · ${counts.total} post${counts.total === 1 ? "" : "s"} planned${counts.published ? `, ${counts.published} published` : ""}. Times are Eastern.`}
-        actions={<LinkButton href={newHref()} variant="primary">+ New post</LinkButton>}
-      />
+      <div className="sched-head">
+        <PageHeader
+          title="Content calendar"
+          subtitle={`${monthLabel(month)} · ${counts.total} post${counts.total === 1 ? "" : "s"} planned${counts.published ? `, ${counts.published} published` : ""}. Times are Eastern.`}
+          actions={
+            // A quiet ink action, like the schedule's Add: the screen's one primary is "New ask".
+            <LinkButton href={newHref()} variant="ghost" size="sm" className="text-text">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeLinecap="round" aria-hidden className="size-3.5!">
+                <path d="M12 5v14M5 12h14" />
+              </svg>
+              New post
+            </LinkButton>
+          }
+        />
+      </div>
       {tabs}
 
       {msg && (
-        <p role="status" className={cx("mb-4 rounded-lg px-4 py-3 text-sm", tone === "danger" ? "bg-danger-soft text-danger" : tone === "warn" ? "bg-warn-soft text-warn" : "bg-ok-soft text-ok")}>
-          {msg}
+        <p role="status" className="notice mt-4">
+          <Status tone={tone === "danger" ? "danger" : tone === "warn" ? "warn" : "ok"} className="whitespace-normal text-text">{msg}</Status>
         </p>
       )}
 
-      <div className="mb-5 flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+      <div className="sched-bar is-form">
         <MonthPicker month={month} current={now} />
         <CalendarFilters
           month={month === now ? "" : month}
@@ -108,59 +118,75 @@ export async function PostsTab({ sp, tabs }: { sp: SP; tabs: React.ReactNode }) 
       </div>
 
       {(counts.failed > 0 || counts.needsAction > 0) && (
-        <div className="mb-4 flex flex-wrap gap-2 text-sm">
-          {counts.failed > 0 && <span className="rounded-full bg-danger-soft px-3 py-1 font-medium text-danger">{counts.failed} failed to publish</span>}
-          {counts.needsAction > 0 && <span className="rounded-full bg-warn-soft px-3 py-1 font-medium text-warn">{counts.needsAction} past due — post it and mark published</span>}
-        </div>
-      )}
-
-      <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_18rem]">
-        <div className="min-w-0">
-          <div className="hidden md:block">
-            <MonthGrid month={month} items={items} todayStr={todayStr} newHref={newHref} />
-            <div className="mt-3"><StatusLegend /></div>
-          </div>
-          <div className="md:hidden">
-            {items.length ? (
-              <AgendaList items={items} todayStr={todayStr} />
-            ) : (
-              <EmptyState title={`Nothing scheduled in ${monthLabel(month)}`}>
-                <Link href={newHref()} className="text-accent hover:underline">Add a post</Link> or ask Claude to draft this month&apos;s captions.
-              </EmptyState>
-            )}
-          </div>
-          {items.length === 0 && (
-            <p className="mt-3 hidden text-sm text-muted md:block">
-              Nothing scheduled this month{client ? " for this business" : ""}. Click a day&apos;s + to add a post, or ask Claude to draft this month&apos;s captions.
+        <div className="mb-4">
+          {counts.failed > 0 && (
+            <p className="notice">
+              <Status tone="danger" className="whitespace-normal">{counts.failed} failed to publish</Status>
+            </p>
+          )}
+          {counts.needsAction > 0 && (
+            <p className="notice">
+              <Status tone="warn" className="whitespace-normal">{counts.needsAction} past due: post it and mark it published</Status>
             </p>
           )}
         </div>
+      )}
 
-        <aside className="min-w-0">
-          <Card title={`Unscheduled (${unscheduled.length})`} padded={false}>
-            {unscheduled.length === 0 ? (
-              <p className="px-4 py-4 text-sm text-muted">No loose ideas. Posts without a date show up here.</p>
-            ) : (
-              <ul className="max-h-[32rem] divide-y divide-border overflow-y-auto">
-                {unscheduled.map((p) => (
-                  <li key={p.id}>
-                    <Link href={`/calendar/${p.id}`} className="flex flex-col gap-0.5 px-4 py-2.5 hover:bg-surface-2">
-                      <span className="flex items-center gap-2 text-sm font-medium">
-                        <StatusDot status={p.status} />
-                        <span className="truncate">{fullName(p.clientId)}</span>
-                      </span>
-                      <span className="flex flex-wrap items-center gap-x-2 text-xs text-muted">
-                        <PlatformTag platform={p.platform} /> {humanize(p.format)} · {p.status === "approved" ? "Ready" : humanize(p.status)} · added {relativeTime(p.createdAt)}
-                      </span>
-                      {p.caption && <span className="line-clamp-2 break-words text-xs text-muted">{p.caption}</span>}
-                    </Link>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </Card>
-        </aside>
+      <div className="hidden md:block">
+        <MonthGrid month={month} items={items} todayStr={todayStr} newHref={newHref} />
+        <StatusLegend />
+        {items.length === 0 && (
+          <p className="meta mt-3">
+            Nothing scheduled this month{client ? " for this business" : ""}. Click a day&apos;s + to add a post, or ask Claude to draft this month&apos;s captions.
+          </p>
+        )}
       </div>
+      <div className="md:hidden">
+        {items.length ? (
+          <AgendaList items={items} todayStr={todayStr} />
+        ) : (
+          <div className="mt-4 border-t border-border">
+            <EmptyState title={`Nothing scheduled in ${monthLabel(month)}`}>
+              <Link href={newHref()} className="link">Add a post</Link> or ask Claude to draft this month&apos;s captions.
+            </EmptyState>
+          </div>
+        )}
+      </div>
+
+      {/* Ideas with no date yet. Under the grid, so the month gets the full width. */}
+      <Card title={<>Unscheduled <span className="meta num">{unscheduled.length}</span></>} padded={false}>
+        {unscheduled.length === 0 ? (
+          <p className="sec-note">No loose ideas. Posts without a date show up here.</p>
+        ) : (
+          // overflow-x-auto changes nothing here (a vertical scroller clips sideways anyway); it tells the focus ring to
+          // draw inside the row, so the scroller can't cut its sides off.
+          <ul className="list max-h-[32rem] max-w-[45rem] overflow-y-auto overflow-x-auto">
+            {unscheduled.map((p) => (
+              <li key={p.id}>
+                <Link href={`/calendar/${p.id}`} className="cal-post">
+                  <span className="main">
+                    <span className="row-title break-words">{fullName(p.clientId)}</span>
+                    <span className="facts-line meta">
+                      <span>
+                        <PlatformTag platform={p.platform} inherit />
+                      </span>{" "}
+                      <span>{humanize(p.format)}</span>{" "}
+                      <span>
+                        <span className="inline-flex items-baseline gap-1.5">
+                          <StatusDot status={p.status} />
+                          {p.status === "approved" ? "Ready" : humanize(p.status)}
+                        </span>
+                      </span>{" "}
+                      <span>added {relativeTime(p.createdAt)}</span>
+                    </span>
+                    {p.caption && <span className="caption meta">{p.caption}</span>}
+                  </span>
+                </Link>
+              </li>
+            ))}
+          </ul>
+        )}
+      </Card>
     </div>
   );
 }

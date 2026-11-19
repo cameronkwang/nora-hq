@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { saveCreatorCellAction, type CellField } from "@/app/(app)/creators/actions";
-import { Badge, StatusBadge, cx, formatNumber } from "./ui";
+import { Status, StatusBadge, cx, formatNumber } from "./ui";
 
 /** Plain, serialisable row for the creators table (built on the server in creators/page.tsx). */
 export type CreatorTableRow = {
@@ -33,8 +33,8 @@ const COLUMNS: Array<{ key: SortKey; label: string; kind?: Kind; num?: boolean; 
   { key: "email", label: "Email", kind: "email", width: "w-44" },
   { key: "city", label: "City", kind: "text", width: "w-32" },
   { key: "niche", label: "Niche", kind: "text", width: "w-32" },
-  { key: "instagramFollowers", label: "IG followers", kind: "count", num: true, width: "w-24" },
-  { key: "tiktokFollowers", label: "TikTok followers", kind: "count", num: true, width: "w-24" },
+  { key: "instagramFollowers", label: "IG followers", kind: "count", num: true, width: "w-36" },
+  { key: "tiktokFollowers", label: "TikTok followers", kind: "count", num: true, width: "w-36" },
   { key: "engagementRate", label: "Eng. %", kind: "rate", num: true, width: "w-20" },
   { key: "businesses", label: "Businesses", width: "" },
   { key: "nextFollowUp", label: "Next follow-up", width: "w-28" },
@@ -79,11 +79,13 @@ export function CreatorTable({ rows: initial }: { rows: CreatorTableRow[] }) {
     <>
       <p className="sr-only" role="status" aria-live="polite">{status?.text}</p>
       {status?.error && (
-        <p role="alert" className="mb-3 hidden rounded-lg bg-danger-soft px-3 py-2 text-sm text-danger md:block">{status.text}</p>
+        <p role="alert" className="notice mb-3 hidden md:flex">
+          <span className="status is-danger">{status.text}</span>
+        </p>
       )}
 
-      {/* Phones: stacked cards */}
-      <ul className="divide-y divide-border md:hidden">
+      {/* Phones: one row per creator */}
+      <ul className="list md:hidden">
         {sorted.map((r0) => {
           const r = byId.get(r0.id) ?? r0;
           return <CreatorCard key={r.id} r={r} />;
@@ -91,9 +93,9 @@ export function CreatorTable({ rows: initial }: { rows: CreatorTableRow[] }) {
       </ul>
 
       {/* Tablet / desktop: the spreadsheet */}
-      <div className="relative hidden max-h-[calc(100dvh-14rem)] overflow-auto md:block" role="region" aria-label="Creators table" tabIndex={-1}>
-        <table className="w-full min-w-[94rem] table-fixed border-separate border-spacing-0 text-left text-sm">
-          <thead className="text-xs text-muted">
+      <div className="g-scroll is-x-hint relative hidden max-h-[calc(100dvh-14rem)] md:block" role="region" aria-label="Creators table" tabIndex={-1}>
+        <table className="g-table is-cells min-w-[100rem] table-fixed">
+          <thead>
             <tr>
               {COLUMNS.map((c, i) => {
                 const active = sort.key === c.key;
@@ -102,15 +104,18 @@ export function CreatorTable({ rows: initial }: { rows: CreatorTableRow[] }) {
                     key={c.key}
                     scope="col"
                     aria-sort={active ? (sort.dir === 1 ? "ascending" : "descending") : undefined}
-                    className={cx("sticky top-0 border-b border-border bg-surface px-1 py-1.5 font-medium", c.width, c.num && "text-right", i === 0 ? "left-0 z-20" : "z-10")}
+                    className={cx("px-0! py-1!", c.width, c.num && "text-right", i === 0 ? "left-0 z-20" : "z-10")}
                   >
                     <button
                       type="button"
                       onClick={() => setSort((s) => (s.key === c.key ? { key: c.key, dir: s.dir === 1 ? -1 : 1 } : { key: c.key, dir: c.num || c.key === "businesses" ? -1 : 1 }))}
-                      className={cx("inline-flex min-h-8 items-center gap-1 rounded px-1.5 hover:text-text", active && "text-text", c.num && "flex-row-reverse")}
+                      className={cx("inline-flex min-h-8 items-center gap-1 rounded-sm px-1.5 uppercase pointer-coarse:min-h-11 tracking-[inherit] hover:text-text", active && "text-text", c.num && "flex-row-reverse")}
                     >
                       {c.label}
-                      <span aria-hidden className={cx("text-[10px]", !active && "invisible")}>{sort.dir === 1 ? "▲" : "▼"}</span>
+                      {/* A drawn arrow, not a tiny text glyph: nothing on the page is set under 12px. */}
+                      <svg aria-hidden viewBox="0 0 10 10" className={cx("size-2.5 shrink-0", !active && "invisible", sort.dir === -1 && "rotate-180")} fill="currentColor">
+                        <path d="M5 2 9 8H1z" />
+                      </svg>
                     </button>
                   </th>
                 );
@@ -121,15 +126,9 @@ export function CreatorTable({ rows: initial }: { rows: CreatorTableRow[] }) {
             {sorted.map((r0) => {
               const r = byId.get(r0.id) ?? r0;
               return (
-                <tr key={r.id} className={cx("group", r.doNotContact && "text-muted")}>
+                <tr key={r.id} className={cx(r.doNotContact && "text-muted")}>
                   {COLUMNS.map((c, i) => (
-                    <td
-                      key={c.key}
-                      className={cx(
-                        "border-b border-border px-1 py-1 align-middle",
-                        i === 0 ? "sticky left-0 z-[1] bg-surface" : "group-hover:bg-surface-2/50",
-                      )}
-                    >
+                    <td key={c.key} className={cx(i === 0 && "sticky left-0 z-[1] bg-bg")}>
                       {c.key === "businesses" ? (
                         <Businesses r={r} />
                       ) : c.key === "nextFollowUp" ? (
@@ -147,12 +146,12 @@ export function CreatorTable({ rows: initial }: { rows: CreatorTableRow[] }) {
                           />
                           {i === 0 && (
                             <>
-                              {r.doNotContact && <Badge tone="danger" className="shrink-0">DNC</Badge>}
+                              {r.doNotContact && <Status tone="danger" small className="shrink-0">DNC</Status>}
                               <Link
                                 href={`/creators/${r.id}`}
                                 aria-label={`Open ${r.name}`}
                                 title="Open profile"
-                                className="tap-target shrink-0 rounded p-1 text-muted hover:bg-surface-2 hover:text-text"
+                                className="tap-target shrink-0 rounded-sm p-1 text-faint hover:bg-surface-2 hover:text-text"
                               >
                                 <svg viewBox="0 0 16 16" aria-hidden className="size-3.5" fill="none" stroke="currentColor" strokeWidth={1.8}>
                                   <path d="M6 3.5 10.5 8 6 12.5" strokeLinecap="round" strokeLinejoin="round" />
@@ -170,7 +169,7 @@ export function CreatorTable({ rows: initial }: { rows: CreatorTableRow[] }) {
           </tbody>
         </table>
       </div>
-      <p className="hidden px-4 py-2 text-xs text-muted md:block">Click any cell to edit. Changes save when you leave the cell — Enter saves, Esc undoes.</p>
+      <p className="meta hidden pt-3 md:block">Click any cell to edit. Changes save when you leave the cell. Enter saves, Esc undoes.</p>
     </>
   );
 }
@@ -262,25 +261,23 @@ function EditableCell({
         void commit(text);
       }}
       className={cx(
-        "w-full min-w-0 truncate rounded-md border bg-transparent px-1.5 py-1 text-sm outline-none transition",
-        "placeholder:text-muted/60 hover:border-border focus:border-accent focus:bg-surface",
+        "g-cell truncate",
         (kind === "count" || kind === "rate") && "text-right tabular-nums",
         field === "name" && "font-medium",
-        kind === "handle" && (field === "instagramHandle" ? "text-ig" : "text-tt"),
-        state === "error" ? "border-danger bg-danger-soft" : state === "saved" ? "border-ok" : "border-transparent",
-        state === "saving" && "opacity-60",
+        state === "saved" && "is-saved",
+        state === "saving" && "is-saving",
       )}
     />
   );
 }
 
 function Businesses({ r }: { r: CreatorTableRow }) {
-  if (r.outreach.length === 0) return <span className="px-1.5 text-xs text-muted">—</span>;
+  if (r.outreach.length === 0) return <span className="px-1.5 text-sm text-faint">—</span>;
   return (
-    <Link href={`/creators/${r.id}`} className="flex flex-wrap gap-1 rounded px-1 py-0.5 hover:bg-surface-2" aria-label={`${r.name}: ${r.outreach.map((o) => `${o.client} ${o.stage.replace(/_/g, " ")}`).join(", ")}`}>
+    <Link href={`/creators/${r.id}`} className="group/b flex flex-wrap gap-x-4 gap-y-0.5 rounded-sm px-1.5 py-1 text-sm no-underline" aria-label={`${r.name}: ${r.outreach.map((o) => `${o.client} ${o.stage.replace(/_/g, " ")}`).join(", ")}`}>
       {r.outreach.map((o) => (
-        <span key={o.id} className={cx("inline-flex items-center gap-1 rounded-full border border-border py-px pl-2 pr-px text-xs", o.dim && "opacity-50")}>
-          <span className="max-w-28 truncate">{o.client}</span>
+        <span key={o.id} className={cx("inline-flex items-baseline gap-2 whitespace-nowrap", o.dim && "opacity-50")}>
+          <span className="max-w-32 truncate group-hover/b:underline">{o.client}</span>
           <StatusBadge status={o.stage} />
         </span>
       ))}
@@ -289,9 +286,9 @@ function Businesses({ r }: { r: CreatorTableRow }) {
 }
 
 function FollowUp({ r }: { r: CreatorTableRow }) {
-  if (!r.nextFollowUp) return <span className="px-1.5 text-xs text-muted">—</span>;
+  if (!r.nextFollowUp) return <span className="px-1.5 text-sm text-faint">—</span>;
   return r.nextFollowUp.due ? (
-    <Badge tone="warn">Due {r.nextFollowUp.label}</Badge>
+    <Status tone="warn" small className="px-1.5">Due {r.nextFollowUp.label}</Status>
   ) : (
     <span className="px-1.5 text-sm tabular-nums">{r.nextFollowUp.label}</span>
   );
@@ -303,37 +300,29 @@ function CreatorCard({ r }: { r: CreatorTableRow }) {
     r.tiktokFollowers != null ? `TikTok ${formatNumber(r.tiktokFollowers)}` : "",
     r.engagementRate != null ? `${r.engagementRate.toFixed(1).replace(/\.0$/, "")}% eng.` : "",
   ].filter(Boolean);
+  const handles = [r.instagramHandle ? `@${r.instagramHandle}` : "", r.tiktokHandle ? `TT @${r.tiktokHandle}` : "", !r.instagramHandle && !r.tiktokHandle && r.email ? r.email : ""].filter(Boolean);
+  const facts = [r.city, r.niche, ...stats].filter(Boolean) as string[];
   return (
-    <li className="px-4 py-3">
-      <div className="flex items-start gap-3">
-        <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-center gap-2">
-            <Link href={`/creators/${r.id}`} className="font-medium hover:underline">{r.name}</Link>
-            {r.doNotContact && <Badge tone="danger">Do not contact</Badge>}
-          </div>
-          <p className="mt-0.5 flex flex-wrap gap-x-2 text-xs">
-            {r.instagramHandle && <span className="text-ig">@{r.instagramHandle}</span>}
-            {r.tiktokHandle && <span className="text-tt">TT @{r.tiktokHandle}</span>}
-            {!r.instagramHandle && !r.tiktokHandle && r.email && <span className="truncate text-muted">{r.email}</span>}
-          </p>
-          {(r.city || r.niche || stats.length > 0) && (
-            <p className="mt-0.5 text-xs text-muted">{[r.city, r.niche, ...stats].filter(Boolean).join(" · ")}</p>
-          )}
-        </div>
-        <Link href={`/creators/${r.id}`} className="-mr-2 inline-flex min-h-11 shrink-0 items-center rounded-lg px-3 text-sm font-medium text-accent hover:bg-surface-2">
-          Edit
-        </Link>
+    <li className="g-row">
+      <div className="head">
+        <Link href={`/creators/${r.id}`}>{r.name}</Link>
+        {r.doNotContact && <Status tone="danger" small>Do not contact</Status>}
       </div>
+      <span className="end">
+        <Link href={`/creators/${r.id}`} className="link-quiet -my-3 -mr-2 inline-flex min-h-11 items-center px-2">Edit</Link>
+      </span>
+      {handles.length > 0 && <p className="more g-dots truncate">{handles.map((h) => <span key={h}>{h}</span>)}</p>}
+      {facts.length > 0 && <p className="more g-dots">{facts.map((f, i) => <span key={i}>{f}</span>)}</p>}
       {(r.outreach.length > 0 || r.nextFollowUp) && (
-        <div className="mt-2 flex flex-wrap items-center gap-1.5">
+        <div className="more mt-1 flex flex-wrap items-baseline gap-x-4 gap-y-0.5">
           {r.outreach.map((o) => (
-            <span key={o.id} className={cx("inline-flex items-center gap-1 rounded-full border border-border py-px pl-2 pr-px text-xs", o.dim && "opacity-50")}>
-              <span className="max-w-32 truncate">{o.client}</span>
+            <span key={o.id} className={cx("inline-flex min-w-0 items-baseline gap-2", o.dim && "opacity-50")}>
+              <span className="max-w-40 truncate text-text">{o.client}</span>
               <StatusBadge status={o.stage} />
             </span>
           ))}
           {r.nextFollowUp && (
-            r.nextFollowUp.due ? <Badge tone="warn">Follow up due</Badge> : <span className="text-xs text-muted">Follow up {r.nextFollowUp.label}</span>
+            r.nextFollowUp.due ? <Status tone="warn" small>Follow up due</Status> : <span>Follow up {r.nextFollowUp.label}</span>
           )}
         </div>
       )}

@@ -36,10 +36,10 @@ export function ReplyFields({
           maxLength={4000}
           rows={Math.min(14, Math.max(5, body.split("\n").length + 1))}
           defaultValue={body}
-          className="input leading-relaxed"
+          className="input"
           placeholder={"Hi {name}! Thanks so much for reaching out about {business}…"}
         />
-        <p className="mt-1 text-xs text-muted">
+        <p className="hint">
           Placeholders fill in automatically where we know them: <code>{"{name}"}</code> <code>{"{business}"}</code> <code>{"{date}"}</code> <code>{"{link}"}</code>
         </p>
       </div>

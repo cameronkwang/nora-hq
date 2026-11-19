@@ -5,7 +5,7 @@ import { useState, useTransition } from "react";
 import { importScheduleAction } from "@/app/(app)/calendar/schedule-actions";
 import type { ImportResult } from "@/lib/ops-schedule";
 import { ScheduleSheet } from "./schedule-sheet";
-import { Badge, Button, buttonClass, cx } from "./ui";
+import { Button, Status, Tag, buttonClass, cx } from "./ui";
 
 const EXAMPLE = `November
 1. 11/04 | Antonelli’s - FREE 📸
@@ -56,7 +56,7 @@ export function SchedulePaste() {
       setError(null);
       const r = await importScheduleAction(text, false);
       if (!r.ok) return setError(r.error);
-      setDone(`Done — ${r.result.add} added, ${r.result.update} updated.`);
+      setDone(`Done: ${r.result.add} added, ${r.result.update} updated.`);
       setPreview(null);
       router.refresh();
     });
@@ -66,19 +66,24 @@ export function SchedulePaste() {
 
   return (
     <>
-      <button type="button" className={buttonClass("secondary")} onClick={() => setOpen(true)} aria-haspopup="dialog">
-        Paste schedule
+      <button type="button" className={buttonClass("ghost", "sm")} onClick={() => setOpen(true)} aria-haspopup="dialog">
+        {/* "Paste" on a phone, so the title keeps its actions on one line; the button is still "Paste schedule". */}
+        <span>
+          Paste<span className="max-md:sr-only"> schedule</span>
+        </span>
       </button>
       <ScheduleSheet
         open={open}
         onClose={close}
         wide
-        title="Paste Nora's schedule"
+        title="Paste Nora’s schedule"
         subtitle="Copy the list from your notes and paste it here. Dates, FREE and 📸 are kept; amounts and payment notes are left out."
       >
         {done ? (
-          <div role="status" className="space-y-3 py-2">
-            <p className="rounded-lg bg-ok-soft px-3 py-2 text-sm text-ok">{done}</p>
+          <div role="status" className="space-y-4">
+            <p className="notice">
+              <Status tone="ok" className="whitespace-normal text-text">{done}</Status>
+            </p>
             <div className="flex flex-wrap gap-2">
               <Button type="button" variant="primary" onClick={close}>Got it</Button>
               <Button type="button" onClick={reset}>Paste more</Button>
@@ -100,10 +105,14 @@ export function SchedulePaste() {
                 placeholder={EXAMPLE}
                 className="input font-mono"
               />
-              <p className="mt-1 text-xs text-muted">One per line: <code>11/04 | Business</code>. Use <code>11/XX</code> when there&apos;s no set day. Pasting again updates — nothing is duplicated.</p>
+              <p className="hint">One per line: <code>11/04 | Business</code>. Use <code>11/XX</code> when there&apos;s no set day. Pasting again updates; nothing is duplicated.</p>
             </div>
 
-            {error && <p role="alert" className="rounded-lg bg-danger-soft px-3 py-2 text-sm text-danger">{error}</p>}
+            {error && (
+              <p role="alert" className="notice">
+                <Status tone="danger" className="whitespace-normal">{error}</Status>
+              </p>
+            )}
 
             {!preview && (
               <div>
@@ -114,35 +123,40 @@ export function SchedulePaste() {
             )}
 
             {preview && (
-              <section aria-label="Preview" className="rounded-xl border border-border">
-                <header className="flex flex-wrap items-center gap-2 border-b border-border px-3 py-2.5 text-sm">
-                  <Badge tone="accent">{preview.add} new</Badge>
-                  <Badge tone="info">{preview.update} to update</Badge>
-                  <Badge>{preview.unchanged} unchanged</Badge>
-                  {preview.skipped.length > 0 && <Badge tone="warn">{preview.skipped.length} skipped</Badge>}
+              <section aria-label="Preview" className="mt-2">
+                {/* The counts, each a dot and plain words, on the ink rule. */}
+                <header className="paste-head">
+                  <Status tone="ink" small>{preview.add} new</Status>
+                  <Status tone="info" small>{preview.update} to update</Status>
+                  <Status tone="neutral" small>{preview.unchanged} unchanged</Status>
+                  {preview.skipped.length > 0 && <Status tone="warn" small>{preview.skipped.length} skipped</Status>}
                 </header>
-                <ul className="max-h-[45dvh] divide-y divide-border overflow-y-auto">
+                <ul className="list max-h-[45dvh] overflow-y-auto border-t border-border">
                   {preview.skipped.map((s, i) => (
-                    <li key={`skip-${i}`} className="flex gap-3 bg-warn-soft/40 px-3 py-2 text-sm">
-                      <span className="w-16 shrink-0 text-xs font-semibold text-warn">Skipped</span>
+                    <li key={`skip-${i}`} className="paste-row">
+                      <span className="what">
+                        <Status tone="warn" small>Skipped</Status>
+                      </span>
                       <span className="min-w-0 flex-1">
-                        <span className="block break-words font-mono text-xs">{s.line || "(empty)"}</span>
-                        <span className="block text-xs text-muted">{s.reason}</span>
+                        <span className="block break-words font-mono text-sm">{s.line || "(empty)"}</span>
+                        <span className="meta block">{s.reason}</span>
                       </span>
                     </li>
                   ))}
                   {shown.map((r, i) => (
-                    <li key={`${r.month}-${r.businessName}-${i}`} className={cx("flex gap-3 px-3 py-2 text-sm", r.action === "unchanged" && "text-muted")}>
-                      <span className={cx("w-16 shrink-0 text-xs font-semibold", r.action === "add" ? "text-accent" : r.action === "update" ? "text-info" : "text-muted")}>
-                        {r.action === "add" ? "New" : r.action === "update" ? "Update" : "Same"}
+                    <li key={`${r.month}-${r.businessName}-${i}`} className={cx("paste-row", r.action === "unchanged" && "is-same")}>
+                      <span className="what">
+                        <Status tone={r.action === "add" ? "ink" : r.action === "update" ? "info" : "neutral"} small>
+                          {r.action === "add" ? "New" : r.action === "update" ? "Update" : "Same"}
+                        </Status>
                       </span>
                       <span className="min-w-0 flex-1">
-                        <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                        <span className="flex flex-wrap items-baseline gap-x-2">
                           <span className="font-medium">{r.businessName}</span>
-                          {r.isFree && <Badge tone="ok">Free</Badge>}
-                          {r.needsReel && <span title="Reel to post">📸</span>}
+                          {r.isFree && <Tag bare>Free</Tag>}
+                          {r.needsReel && <span className="emoji" title="Reel to post">📸</span>}
                         </span>
-                        <span className="block text-xs text-muted">
+                        <span className="meta block">
                           {monthShort(r.month)} · {day(r.date)}
                           {r.clientName && ` · ${r.clientName}`}
                           {r.changes.length > 0 && ` · ${r.changes.join(", ")}`}
@@ -151,7 +165,7 @@ export function SchedulePaste() {
                     </li>
                   ))}
                 </ul>
-                <div className="flex flex-wrap items-center gap-2 border-t border-border p-3">
+                <div className="paste-foot">
                   <Button type="button" variant="primary" disabled={changes === 0 || importing} onClick={doImport} className="flex-1 sm:flex-none">
                     {importing ? "Importing…" : changes === 0 ? "Nothing new to import" : `Import ${changes} change${changes === 1 ? "" : "s"}`}
                   </Button>

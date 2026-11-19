@@ -79,45 +79,49 @@ export function ReadyToSend({ groups, backHref }: { groups: SendGroup[]; backHre
   if (!group || !current) {
     const others = live.filter((g) => g.key !== group?.key);
     return (
-      <div className="flex flex-col gap-4">
-        {sentCount > 0 && (
-          <p role="status" className="rounded-lg bg-ok-soft px-4 py-3 text-sm text-ok">
-            {sentCount} marked sent. First messages and nudges get a follow-up in 5 days.
-          </p>
-        )}
-        {group && skippedHere > 0 && (
-          <div className="rounded-xl border border-border bg-surface p-4">
-            <p className="text-sm font-medium">You skipped {skippedHere} for {group.sendFrom ?? group.business}.</p>
-            <p className="mt-1 text-sm text-muted">They stay approved until you send them.</p>
-            <button type="button" onClick={() => setSkipped([])} className={cx(buttonClass("primary"), "mt-3 w-full sm:w-auto")}>
-              Go through them again
-            </button>
+      // 24px under the chips (their 16px margin collapses into this one), where the first draft starts on the other tabs.
+      <div className="mt-6 flex flex-col gap-6">
+        {(sentCount > 0 || (group && skippedHere > 0)) && (
+          <div>
+            {sentCount > 0 && (
+              <p role="status" className="notice">
+                <span className="status is-ok whitespace-normal text-text">{sentCount} marked sent. First messages and nudges get a follow-up in 5 days.</span>
+              </p>
+            )}
+            {group && skippedHere > 0 && (
+              <div className="notice items-center">
+                <p className="min-w-0 flex-1 basis-56">
+                  <span className="font-medium">You skipped {skippedHere} for {group.sendFrom ?? group.business}.</span>{" "}
+                  <span className="text-muted">They stay approved until you send them.</span>
+                </p>
+                <button type="button" onClick={() => setSkipped([])} className={cx(buttonClass("secondary"), "w-full sm:w-auto")}>
+                  Go through them again
+                </button>
+              </div>
+            )}
           </div>
         )}
         {live.length === 0 ? (
-          <div className="rounded-lg border border-dashed border-border px-4 py-8 text-center">
-            <p className="text-sm font-medium">Nothing left to send</p>
-            <p className="mt-1 text-sm text-muted">Approved outreach shows up here as soon as you approve it.</p>
+          <div className="empty border-t border-border">
+            <p>Nothing left to send</p>
+            <p>Approved outreach shows up here as soon as you approve it.</p>
           </div>
         ) : (
           (group ? others : live).length > 0 && (
             <div>
-              <p className="label">{group ? "Next account" : "Pick the account you're signed in to"}</p>
-              <ul className="flex flex-col gap-2">
+              <p className="eyebrow border-b border-border pb-2">{group ? "Next account" : "Pick the account you're signed in to"}</p>
+              <ul className="list">
                 {(group ? others : live).map((g) => (
                   <li key={g.key}>
-                    <button
-                      type="button"
-                      onClick={() => start(g.key)}
-                      className="flex min-h-14 w-full items-center justify-between gap-3 rounded-xl border border-border bg-surface px-4 py-3 text-left hover:bg-surface-2"
-                    >
+                    {/* One row per account: who to send as, the business, and how many are waiting (the count comes last). */}
+                    <button type="button" onClick={() => start(g.key)} className="send-pick">
                       <span className="min-w-0">
-                        <span className="block break-words text-base font-semibold">Send as {g.sendFrom ?? g.business}</span>
-                        <span className="block text-sm text-muted">
+                        <span className="row-title block break-words">Send as {g.sendFrom ?? g.business}</span>
+                        <span className="meta block">
                           {g.sendFrom ? `${g.business}${g.sendFromKind && g.sendFromKind !== "other" ? ` · ${SEND_FROM_LABEL[g.sendFromKind]}` : ""}` : "No sender saved yet: use the business's own account"}
                         </span>
                       </span>
-                      <span className="shrink-0 rounded-full bg-accent px-2.5 py-0.5 text-sm font-semibold text-accent-fg tabular-nums">{g.items.length}</span>
+                      <span className="count shrink-0 text-base">{g.items.length}</span>
                     </button>
                   </li>
                 ))}
@@ -126,7 +130,7 @@ export function ReadyToSend({ groups, backHref }: { groups: SendGroup[]; backHre
           )
         )}
         <p>
-          <Link href={backHref} className="text-sm text-accent hover:underline">← Back to the list</Link>
+          <Link href={backHref} className="link-quiet inline-flex min-h-11 items-center">← Back to the list</Link>
         </p>
       </div>
     );
@@ -138,69 +142,84 @@ export function ReadyToSend({ groups, backHref }: { groups: SendGroup[]; backHre
     : null;
 
   return (
-    <div className="max-md:pb-40">
-      <div className="mb-3 flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <p className="text-xs font-medium text-muted">{group.business}</p>
-          <h2 className="break-words text-lg font-semibold">Send as {group.sendFrom ?? group.business}</h2>
-          <p className="text-sm text-muted" aria-live="polite">
-            {group.sendFrom && group.sendFromKind && group.sendFromKind !== "other" ? `${SEND_FROM_LABEL[group.sendFromKind]} · ` : ""}
-            not Nora · {queue.length} left{skippedHere > 0 ? ` · ${skippedHere} skipped` : ""}
-          </p>
-        </div>
-        <button type="button" onClick={() => setActiveKey(null)} className={cx(buttonClass("ghost", "sm"), "shrink-0")}>
+    <div className="mt-6 max-w-2xl max-md:pb-40">
+      {/* A section: ink rule, who you send as (serif), one quiet action; then one line of facts. */}
+      <header className="sec-head">
+        <h2 className="title break-words">Send as {group.sendFrom ?? group.business}</h2>
+        <button type="button" onClick={() => setActiveKey(null)} className={cx(buttonClass("ghost", "sm"), "-my-1 -mr-1.5 shrink-0")}>
           {live.length > 1 ? "Switch" : "Close"}
         </button>
-      </div>
+      </header>
+      <p className="sec-note" aria-live="polite">
+        {group.sendFrom ? `${group.business} · ` : ""}
+        {group.sendFrom && group.sendFromKind && group.sendFromKind !== "other" ? `${SEND_FROM_LABEL[group.sendFromKind]} · ` : ""}
+        not Nora · <b className="num">{queue.length}</b> left{skippedHere > 0 ? ` · ${skippedHere} skipped` : ""}
+      </p>
 
       {!group.sendFrom && (
-        <p className="mb-3 rounded-lg bg-warn-soft px-3 py-2 text-sm text-warn">
-          No sender is saved for {group.business}. Send these from the business&apos;s own account, not Nora&apos;s.{" "}
-          <Link href={`/clients/${group.clientId}/settings#outreach-profile`} className="font-semibold underline">Set it</Link>
+        <p className="notice block">
+          <span className="status is-warn is-run">No sender is saved for {group.business}.</span> Send these from the business&apos;s own account, not Nora&apos;s.{" "}
+          <Link href={`/clients/${group.clientId}/settings#outreach-profile`} className="link">Set it</Link>
         </p>
       )}
-      {group.offer && <p className="mb-3 rounded-lg bg-accent-soft px-3 py-2 text-sm">Offer: {group.offer}</p>}
+      {group.offer && <p className="notice block break-words">Offer: {group.offer}</p>}
 
-      <article className="rounded-xl border border-border bg-surface">
-        <header className="flex flex-col gap-1 border-b border-border px-4 py-3">
-          <p className="break-words text-base font-semibold">
+      {/* The message: who it goes to, then the words. Content of the section above, so no second ink rule. */}
+      <article className="mt-6">
+        <header>
+          <p className="break-words font-semibold">
             {current.creatorName}
             {current.to && <span className="font-normal text-muted"> · {current.to}</span>}
           </p>
-          <p className="text-sm text-muted">
+          <p className="meta">
             {current.channelLabel}
-            {current.followers ? ` · ${current.followers}` : ""} · <span className={cx(current.check.warn && "font-medium text-warn")}>{current.check.label}</span> ·{" "}
-            {current.posted ? <span className="font-medium text-danger">already posted about {group.business}</span> : "no prior post recorded"}
+            {current.followers ? ` · ${current.followers}` : ""} · <span className={cx(current.check.warn && "status is-warn is-run font-medium")}>{current.check.label}</span> ·{" "}
+            {current.posted ? <span className="status is-danger is-run font-medium">already posted about {group.business}</span> : "no prior post recorded"}
           </p>
-          {current.mailto && <p className="break-words text-sm"><span className="text-muted">Subject:</span> {current.mailto.subject || "(no subject)"}</p>}
+          {current.mailto && <p className="mt-1 break-words text-sm"><span className="text-muted">Subject:</span> {current.mailto.subject || "(no subject)"}</p>}
         </header>
-        <div className="flex flex-col gap-3 p-4">
-          {current.blocked && <p role="alert" className="rounded-lg bg-danger-soft px-3 py-2 text-sm text-danger">{current.blocked} Skip it.</p>}
-          {current.posted && (
-            <p className="rounded-lg bg-danger-soft px-3 py-2 text-sm text-danger">
-              They already posted about {group.business}. Only send this if you meant to.{" "}
-              {current.posted.url && <a href={current.posted.url} target="_blank" rel="noopener noreferrer nofollow" className="font-semibold underline">See the post ↗</a>}
+        <div className="mt-3 flex flex-col gap-3">
+          {current.blocked && (
+            <p role="alert" className="status is-danger flex whitespace-normal">
+              <span>{current.blocked} Skip it.</span>
             </p>
           )}
-          {current.mismatch && <p className="rounded-lg bg-warn-soft px-3 py-2 text-sm text-warn">{current.mismatch}</p>}
-          <p className="whitespace-pre-wrap break-words text-base leading-relaxed">{current.body}</p>
-          <p className="text-xs text-muted">
-            <Link href={`/review?draft=${current.id}`} className="text-accent hover:underline">Edit this message</Link>
+          {current.posted && (
+            <p className="status is-danger flex whitespace-normal">
+              <span>
+                They already posted about {group.business}. Only send this if you meant to.{" "}
+                {current.posted.url && <a href={current.posted.url} target="_blank" rel="noopener noreferrer nofollow" className="link">See the post ↗</a>}
+              </span>
+            </p>
+          )}
+          {current.mismatch && (
+            <p className="status is-warn flex whitespace-normal">
+              <span>{current.mismatch}</span>
+            </p>
+          )}
+          <p className="whitespace-pre-wrap break-words border-t border-border pt-3">{current.body}</p>
+          <p className="meta">
+            <Link href={`/review?draft=${current.id}`} className="link">Edit this message</Link>
             {current.profile && (
               <>
                 {" · "}
-                <a href={current.profile.href} target="_blank" rel="noreferrer" className="text-accent hover:underline">{current.profile.label} ↗</a>
+                <a href={current.profile.href} target="_blank" rel="noreferrer" className="link">{current.profile.label} ↗</a>
               </>
             )}
           </p>
         </div>
       </article>
 
-      {error && <p role="alert" className="mt-3 rounded-lg bg-danger-soft px-3 py-2 text-sm text-danger">{error}</p>}
+      {error && (
+        <p role="alert" className="status is-danger mt-3 flex whitespace-normal">
+          <span>{error}</span>
+        </p>
+      )}
 
-      <div className="fixed inset-x-0 bottom-[var(--tabbar-h)] z-20 border-t border-border bg-surface/95 px-4 py-2 backdrop-blur md:static md:mt-4 md:border-0 md:bg-transparent md:p-0 md:backdrop-blur-none">
-        <div className="mx-auto flex max-w-xl flex-col gap-2 md:mx-0">
-          <div className="grid grid-cols-2 gap-2">
+      {/* The four buttons: a solid bar above the tab bar on phones (two rows, thumbs-sized); one row of natural widths on desktop. */}
+      <div className="queue-bar send-bar fixed inset-x-0 bottom-[var(--tabbar-h)] z-20 px-4 py-2 md:static md:mt-6 md:border-0 md:bg-transparent md:p-0">
+        <div className="mx-auto flex max-w-xl flex-col gap-2 md:mx-0 md:max-w-none md:flex-row md:flex-wrap">
+          <div className="grid grid-cols-2 gap-2 md:flex">
             <button type="button" onClick={() => void copy(current)} className={buttonClass("secondary")}>
               <span aria-live="polite">{copied ? "Copied ✓" : "Copy text"}</span>
             </button>
@@ -226,11 +245,11 @@ export function ReadyToSend({ groups, backHref }: { groups: SendGroup[]; backHre
               <span className={cx(buttonClass("secondary"), "pointer-events-none opacity-50")}>No handle saved</span>
             )}
           </div>
-          <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,2fr)] gap-2">
+          <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,2fr)] gap-2 md:flex">
             <button type="button" onClick={() => setSkipped((s) => [...s, current.id])} disabled={busy} className={buttonClass("secondary")}>
               Skip
             </button>
-            <button type="button" onClick={() => void markSent(current)} disabled={busy || !!current.blocked} className={buttonClass("primary")}>
+            <button type="button" onClick={() => void markSent(current)} disabled={busy || !!current.blocked} className={cx(buttonClass("primary"), "md:px-6")}>
               {busy ? "Saving…" : "Sent ✓"}
             </button>
           </div>

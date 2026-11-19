@@ -91,11 +91,11 @@ export function Badge({ tone = "neutral", children, className }: { tone?: Tone; 
 
 const STATUS_TONE: Record<string, Tone> = {
   todo: "neutral", in_progress: "info", needs_review: "warn", blocked: "danger", done: "ok",
-  new: "accent", archived: "neutral",
+  new: "info", archived: "neutral",
   approved: "ok", rejected: "neutral", sent: "ok", failed: "danger",
   idea: "neutral", drafted: "info", scheduled: "info", published: "ok",
-  sourced: "neutral", shortlisted: "neutral", contacted: "info", followed_up: "info", replied: "accent",
-  negotiating: "accent", agreed: "ok", visit_scheduled: "ok", posted: "ok", declined: "neutral", no_response: "neutral",
+  sourced: "neutral", shortlisted: "neutral", contacted: "info", followed_up: "info", replied: "info",
+  negotiating: "warn", agreed: "ok", visit_scheduled: "ok", posted: "ok", declined: "neutral", no_response: "neutral",
   ok: "ok", error: "danger", expired: "warn",
 };
 

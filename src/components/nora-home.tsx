@@ -1,4 +1,5 @@
 import Link from "next/link";
+import type { ReactNode } from "react";
 import { and, desc, eq, ne, or } from "drizzle-orm";
 import { getDb, schema } from "@/lib/db";
 import { relativeTime } from "@/lib/dates";
@@ -6,7 +7,7 @@ import { askThreadState, listAskMessagesFor } from "@/lib/ops";
 import { reelsToPost, scheduleOn } from "@/lib/ops-schedule";
 import { dealsOwed } from "@/lib/ops-deals";
 import { CHECKLIST_TOTAL, checklistDone } from "@/lib/shoot-checklist";
-import { Badge, Card, EmptyState } from "./ui";
+import { Card, Count, EmptyState, Status, Tag } from "./ui";
 
 /**
  * Nora's Home: her day, not the agency view. What she's shooting today and tomorrow (each job opens its
@@ -21,11 +22,43 @@ function addDays(date: string, n: number): string {
 }
 const dayName = (d: string) => new Date(`${d}T12:00:00Z`).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", timeZone: "UTC" });
 
-const ASK_STATUS: Record<string, { label: string; tone: "neutral" | "info" | "ok" | "warn" | "accent" }> = {
+const ASK_STATUS: Record<string, { label: string; tone: "neutral" | "info" | "ok" | "warn" }> = {
   new: { label: "Sent", tone: "neutral" },
   in_progress: { label: "In progress", tone: "info" },
   done: { label: "Done", tone: "ok" },
 };
+
+export function Chevron({ className = "chev" }: { className?: string }) {
+  return (
+    <svg className={className} width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="m9 6 6 6-6 6" />
+    </svg>
+  );
+}
+
+/**
+ * One thing on Home (an ask, a draft, a shoot, a reel): title, one more fact, where, when. One line wide, two lines
+ * narrow, the whole row is the link. `clamp` is for a title that is free text (an ask's first line): one line with an
+ * ellipsis wide, two lines narrow. Shared by Cameron's Home and Nora's.
+ */
+export function HomeRow({ href, title, note, where, when, clamp }: { href: string; title: ReactNode; note?: ReactNode; where?: ReactNode; when?: ReactNode; clamp?: boolean }) {
+  return (
+    <li>
+      <Link href={href} className="row approve-row">
+        <span className={clamp ? "approve-main is-clamp" : "approve-main"}>
+          <span className="row-title" title={clamp && typeof title === "string" ? title : undefined}>{title}</span>
+          {note && <span className="approve-note max-lg:hidden">{note}</span>}
+        </span>
+        <span className="row-meta">
+          {note && <span className="lg:hidden">{note}</span>}
+          {where && <span className="meta where">{where}</span>}
+          {when && <span className="meta when">{when}</span>}
+        </span>
+        <Chevron />
+      </Link>
+    </li>
+  );
+}
 
 export async function NoraHome({ email, name, now, skipAskIds = [] }: { email: string; name: string; now: string; skipAskIds?: string[] }) {
   const db = await getDb();
@@ -48,98 +81,93 @@ export async function NoraHome({ email, name, now, skipAskIds = [] }: { email: s
   const threads = await listAskMessagesFor(mine.map((a) => a.id));
 
   return (
-    <div className="flex flex-col gap-6">
-      <Card title="Shoots" actions={<Link href="/calendar" className="text-xs text-accent hover:underline">Schedule</Link>} padded={false}>
+    <>
+      <Card title="Shoots" actions={<Link href="/calendar" className="link-quiet">Schedule →</Link>} padded={false}>
         {todayJobs.length + tomorrowJobs.length === 0 ? (
-          <div className="p-4">
-            <EmptyState title="Nothing booked today or tomorrow.">
-              <Link href="/calendar" className="text-accent hover:underline">See the whole schedule</Link>
-            </EmptyState>
-          </div>
+          <EmptyState title="Nothing booked today or tomorrow.">
+            <Link href="/calendar" className="link">See the whole schedule</Link>
+          </EmptyState>
         ) : (
-          <ul className="divide-y divide-border">
-            {[...todayJobs.map((j) => ({ j, when: "Today" })), ...tomorrowJobs.map((j) => ({ j, when: "Tomorrow" }))].map(({ j, when }) => {
-              const done = checklistDone(j.checklist);
-              return (
-                <li key={j.id}>
-                  <Link href={`/calendar/jobs/${j.id}`} className="flex min-h-14 items-center gap-3 px-4 py-2.5 active:bg-surface-2">
-                    <span className="min-w-0 flex-1">
-                      <span className="block truncate text-[15px] font-medium">{j.businessName}</span>
-                      <span className="mt-0.5 flex flex-wrap items-center gap-1.5 text-xs text-muted">
-                        <span className={when === "Today" ? "font-semibold text-accent" : undefined}>{when}</span>
-                        <span>· Shoot list {done}/{CHECKLIST_TOTAL}</span>
-                        {j.isFree && <Badge tone="ok">Free</Badge>}
-                      </span>
-                    </span>
-                    <span aria-hidden className="shrink-0 text-muted">›</span>
-                  </Link>
-                </li>
-              );
-            })}
-          </ul>
-        )}
-      </Card>
-
-      <Card
-        title={<>Reels to post{owedReels.length > 0 && <span className="font-normal text-muted"> · {owedReels.length}</span>}</>}
-        actions={owedReels.length > 0 ? <Link href="/calendar?show=reels" className="text-xs text-accent hover:underline">All</Link> : undefined}
-        padded={false}
-      >
-        {owedReels.length === 0 ? (
-          <p className="p-4 text-sm text-muted">All caught up. No reels owed.</p>
-        ) : (
-          <ul className="divide-y divide-border">
-            {owedReels.slice(0, 5).map((r) => (
-              <li key={r.id}>
-                <Link href={`/calendar/jobs/${r.id}`} className="flex min-h-12 items-center gap-3 px-4 py-2 active:bg-surface-2">
-                  <span className="min-w-0 flex-1 truncate text-[15px]">📸 {r.businessName}</span>
-                  <span className="shrink-0 text-xs text-muted">{r.date ? `shot ${dayName(r.date)}` : "no set day"}</span>
-                </Link>
-              </li>
+          <ul className="list">
+            {[...todayJobs.map((j) => ({ j, when: "Today" })), ...tomorrowJobs.map((j) => ({ j, when: "Tomorrow" }))].map(({ j, when }) => (
+              <HomeRow
+                key={j.id}
+                href={`/calendar/jobs/${j.id}`}
+                title={
+                  <>
+                    {j.businessName}
+                    {j.isFree && <Tag>Free</Tag>}
+                  </>
+                }
+                where={<span className="num">Shoot list {checklistDone(j.checklist)}/{CHECKLIST_TOTAL}</span>}
+                when={when === "Today" ? <span className="font-medium text-text">Today</span> : when}
+              />
             ))}
           </ul>
         )}
       </Card>
 
+      <Card
+        title={<>Reels to post{owedReels.length > 0 && <Count n={owedReels.length} />}</>}
+        actions={owedReels.length > 0 ? <Link href="/calendar?show=reels" className="link-quiet">All →</Link> : undefined}
+        padded={false}
+      >
+        {owedReels.length === 0 ? (
+          <p className="sec-note">All caught up. No reels owed.</p>
+        ) : (
+          <ul className="list">
+            {owedReels.slice(0, 5).map((r) => (
+              <HomeRow
+                key={r.id}
+                href={`/calendar/jobs/${r.id}`}
+                title={
+                  <>
+                    <span className="emoji" aria-hidden>📸</span> {r.businessName}
+                  </>
+                }
+                where={r.date ? `shot ${dayName(r.date)}` : "no set day"}
+              />
+            ))}
+          </ul>
+        )}
+      </Card>
+
+      {/* Paid or not, never an amount: one row between hairlines that opens the deals. */}
       {owed.count > 0 && (
-        <Link href="/deals" className="flex min-h-12 items-center justify-between gap-3 rounded-xl border border-border bg-surface px-4 py-3 active:bg-surface-2">
-          <span className="text-[15px]">
-            <span className="font-medium">
+        <Link href="/deals" className="notice mt-10 items-center hover:underline max-md:mt-8">
+          <Status tone={owed.overdueCount > 0 ? "danger" : "warn"} className="font-medium">
+            <span>
               {owed.count} collab{owed.count === 1 ? "" : "s"} not paid yet
+              {owed.overdueCount > 0 && <span className="font-normal text-muted"> · {owed.overdueCount} overdue</span>}
             </span>
-            {owed.overdueCount > 0 && <span className="text-danger"> · {owed.overdueCount} overdue</span>}
-          </span>
-          <span aria-hidden className="text-muted">›</span>
+          </Status>
+          <Chevron />
         </Link>
       )}
 
-      <Card title="Your asks" actions={<Link href="/asks/new" className="text-xs text-accent hover:underline">New ask</Link>} padded={false}>
+      <Card title="Your asks" actions={<Link href="/asks/new" className="link-quiet">New ask →</Link>} padded={false}>
         {mine.length === 0 ? (
-          <p className="p-4 text-sm text-muted">Anything you send with the + button shows up here, with whether Cameron or Claude has answered.</p>
+          <p className="sec-note">Anything you send with the + button shows up here, with whether Cameron or Claude has answered.</p>
         ) : (
-          <ul className="divide-y divide-border">
+          <ul className="list">
             {mine.map((a) => {
               const thread = threads.get(a.id) ?? [];
               const state = askThreadState(a, thread.at(-1));
               const s = ASK_STATUS[a.status] ?? ASK_STATUS.new;
               return (
-                <li key={a.id}>
-                  <Link href={`/asks/${a.id}`} className="flex min-h-14 items-center gap-3 px-4 py-2.5 active:bg-surface-2">
-                    <span className="min-w-0 flex-1">
-                      <span className="block truncate text-[15px]">{a.body.split("\n")[0]}</span>
-                      <span className="mt-0.5 flex flex-wrap items-center gap-1.5 text-xs text-muted">
-                        {state === "claude_asked" ? <Badge tone="warn">Claude asked you something</Badge> : <Badge tone={s.tone}>{s.label}</Badge>}
-                        <span>{relativeTime(a.updatedAt)}</span>
-                      </span>
-                    </span>
-                    <span aria-hidden className="shrink-0 text-muted">›</span>
-                  </Link>
-                </li>
+                <HomeRow
+                  key={a.id}
+                  href={`/asks/${a.id}`}
+                  title={a.body.split("\n")[0]}
+                  clamp
+                  note={state === "claude_asked" ? <Status tone="warn" small>Claude asked you something</Status> : <Status tone={s.tone} small>{s.label}</Status>}
+                  when={relativeTime(a.updatedAt)}
+                />
               );
             })}
           </ul>
         )}
       </Card>
-    </div>
+    </>
   );
 }

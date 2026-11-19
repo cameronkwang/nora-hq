@@ -1,6 +1,3 @@
-/* STARTING POINT, carried over from the first Ink attempt (built on an older main): the classes its pages used. Today's
-   pages do not use them yet; the calendar_tasks page step ports the pages onto them, changes them freely, and deletes
-   what it does not need. */
 /* Calendar (month grid, tabs), Nora's Schedule, Tasks. Rules here sit in the "pages" layer: above the shared
    classes in globals.css, below Tailwind utilities. Only layout a shared class or a utility cannot say lives here.
    Nora's Schedule never shows money: there is no slot for an amount anywhere below. */
@@ -36,6 +33,10 @@
     .task-link .row-meta { display: contents; }
     .task-link .where { grid-column: 2; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .task-link .when { grid-column: 3; justify-self: end; padding-right: 30px; text-align: right; white-space: nowrap; }
+    /* A row that leaves the business out (the business page, a plan group): no empty business column; the date still
+       ends on the same right edge. */
+    .task-link.no-where { grid-template-columns: minmax(0, 1fr) calc(6.75rem + 30px); }
+    .task-link.no-where .when { grid-column: 2; }
   }
   @media (max-width: 1023px) {
     .task-link { display: block; padding: 10px 0; }
@@ -88,12 +89,15 @@
 
   /* The bulk bar floats (a .pop): above the tab bar on phones, sticky at the top of the list on desktop. */
   .bulk-bar { padding: 8px 10px; }
+  /* Its focus clearance (about 10.5rem tall on a phone) lives with the other focus-clearance rules in globals.css. */
   .bulk-bar .input { width: auto; height: 1.75rem; font-size: var(--text-sm); padding-left: 10px; }
   @media (max-width: 767px), (pointer: coarse) { .bulk-bar .input { height: var(--control-h); width: 100%; } }
   @media (min-width: 640px) { .bulk-bar .input { width: auto; } }
 
   /* ---- Board: five columns of plain rows on hairlines. A card is a row you can drag. */
-  .board { display: grid; grid-template-columns: repeat(5, minmax(11.5rem, 1fr)); column-gap: 16px; overflow-x: auto; padding-bottom: 4px; }
+  /* It scrolls sideways inside itself on a narrow window; 4px of room on each side (taken back with the margin) keeps a
+     focused card's ring from being cut off at the scroller's edge. */
+  .board { display: grid; grid-template-columns: repeat(5, minmax(11.5rem, 1fr)); column-gap: 16px; overflow-x: auto; margin: 0 -4px; padding: 0 4px 4px; }
   .board-col { display: flex; flex-direction: column; min-width: 0; border-radius: var(--radius-sm); transition: background-color 0.15s; }
   .board-col.is-over { background: var(--surface-2); }
   .board-head { display: flex; align-items: baseline; gap: 8px; padding: 12px 0 8px; border-top: var(--rule-ink); border-bottom: var(--rule); }
@@ -109,6 +113,7 @@
   .board-status:hover, .board-status:focus { color: var(--text); }
   .board-more { display: block; padding: 10px 0; font-size: var(--text-sm); color: var(--muted); text-decoration: none; }
   .board-more:hover { color: var(--text); }
+  /* Phones: five status tabs in a row that scrolls sideways; each tab keeps its full width (dot, words, count). */
   .board-tabs { overflow-x: auto; scrollbar-width: none; }
   .board-tabs::-webkit-scrollbar { display: none; }
   @media (min-width: 1024px) and (pointer: fine) {
@@ -135,9 +140,10 @@
   .sched-bar.is-form { align-items: flex-end; margin-bottom: 12px; }
 
   /* ---- Nora's schedule: day groups, an eyebrow on a hairline, then one line per visit. */
-  .sched-list { max-width: 45rem; }
+  .sched-list, .sched-bar:not(.is-form) { max-width: 45rem; }   /* the chips end where the list ends */
   .group-label { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-top: 22px; padding-bottom: 8px; border-bottom: var(--rule); }
-  .group-label b { font-weight: inherit; color: var(--accent); }
+  /* Today's group reads in ink (600). The schedule's one red letter is today's numeral in the month grid. */
+  .group-label b { font-weight: inherit; color: var(--text); }
   .group-label.is-today { color: var(--text); }
   /* One line per visit: name, the reel checkbox, Edit. Every control is the same height, so every row is. */
   .sched-row { column-gap: 8px; padding: 6px 0; }
@@ -169,6 +175,24 @@
   @media (max-width: 359px) {                         /* the narrowest phones: the reel words go, the box and 📸 stay */
     .reel-check .reel-words { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
   }
+
+  /* ---- One job (/calendar/jobs/<id>): built for the phone Nora holds on site. One column, left-aligned; the day and
+     the job's facts on the subtitle line; quiet buttons to the deal and the business; Reel posted (the focal action);
+     then the shoot checklist. Never an amount. */
+  .job-page { max-width: 36rem; }
+  .job-facts { display: inline-flex; flex-wrap: wrap; align-items: baseline; gap: 4px 14px; }
+  .job-links { display: flex; flex-wrap: wrap; gap: 8px; }
+  .job-reel { margin-top: 16px; }
+  .job-links + .job-reel { margin-top: 12px; }
+  /* A step: the whole row is the button (role=checkbox). An ink box like the task tick, the step, its hint under it. */
+  .shoot-step { display: flex; align-items: flex-start; gap: 14px; width: 100%; min-height: 3.5rem; padding: 12px 0; border: 0; background: none; color: var(--text); font: inherit; text-align: left; cursor: pointer; border-radius: var(--radius-xs); }
+  .shoot-step > i { flex: none; width: 1.375rem; height: 1.375rem; margin-top: calc((var(--leading-base) - 1.375rem) / 2); border: 1.5px solid var(--border-strong); border-radius: 5px; background: var(--surface) center / 100% no-repeat; }
+  .shoot-step:hover > i { border-color: var(--text); }
+  .shoot-step.is-done > i { border-color: var(--text); background-color: var(--text); background-image: var(--check-mark); }
+  .shoot-step:hover .shoot-label { text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 3px; }
+  .shoot-step.is-done .shoot-label { color: var(--muted); text-decoration: line-through; text-decoration-thickness: 1px; }
+  .shoot-label { display: block; }
+  .shoot .sec-note { padding-bottom: 4px; }
 
   /* ---- Month grid (the Schedule's month at a glance and the Posts calendar): an open grid on hairlines, no box. */
   .mgrid-head, .mgrid-body { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); }

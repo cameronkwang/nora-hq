@@ -91,11 +91,11 @@ export function draftWarnings(kind: string, body: string, meta?: Record<string, 
     out.push({ tone: lim.hard ? "danger" : "warn", text: `${lim.label} is ${(body.length - lim.max).toLocaleString("en-US")} characters over the ${lim.max.toLocaleString("en-US")} limit.` });
   if (kind === "instagram_post") {
     const n = countHashtags(body);
-    if (n > 30) out.push({ tone: "danger", text: `${n} hashtags — Instagram allows 30 at most and may reject the post.` });
+    if (n > 30) out.push({ tone: "danger", text: `${n} hashtags. Instagram allows 30 at most and may reject the post.` });
   }
   if (kind === "outreach_email" || kind === "outreach_dm") {
     if (asksForPlatformReview(body))
-      out.push({ tone: "danger", text: "This asks for a Google or Yelp review in exchange for a visit. That's an illegal incentivized review — remove it before sending." });
+      out.push({ tone: "danger", text: "This asks for a Google or Yelp review in exchange for a visit. That's an illegal incentivized review: remove it before sending." });
     if (!hasDisclosureLanguage(body))
       out.push({ tone: "warn", text: "No disclosure language. Mention it's gifted/a partnership and that posts need #ad or a paid-partnership label." });
     if (readsAsNora(body))

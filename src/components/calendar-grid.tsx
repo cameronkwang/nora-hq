@@ -1,7 +1,10 @@
 import Link from "next/link";
-import { cx, humanize } from "./ui";
+import { cx, humanize, type Tone } from "./ui";
 
-/** Server-safe month grid (md+) and agenda list (mobile) for the content calendar. */
+/**
+ * Server-safe month grid (md+) and agenda list (phones) for the content calendar. Ink: an open grid on hairlines,
+ * a 7px dot for the post's state, the platform in words.
+ */
 
 export type CalendarItem = {
   id: string;
@@ -15,47 +18,59 @@ export type CalendarItem = {
   mediaCount: number;
 };
 
-export const STATUS_DOT: Record<string, string> = {
-  idea: "bg-muted",
-  drafted: "bg-warn",
-  approved: "bg-accent",
-  scheduled: "bg-info",
-  publishing: "bg-info",
-  published: "bg-ok",
-  failed: "bg-danger",
+/** The dot's colour per post state. */
+export const STATUS_TONE: Record<string, Tone> = {
+  idea: "neutral",
+  drafted: "warn",
+  approved: "ink", // "Ready": an ink dot, so it can never be mistaken for Failed (danger) in either scheme
+  scheduled: "info",
+  publishing: "info",
+  published: "ok",
+  failed: "danger",
 };
 
+const statusLabel = (s: string) => (s === "approved" ? "Ready" : humanize(s));
+/** The .status modifier for a post state ("is-idle" is the hollow dot). */
+const dotCls = (status: string) => {
+  const tone = STATUS_TONE[status] ?? "neutral";
+  return tone === "neutral" ? "is-idle" : `is-${tone}`;
+};
+const platformLabel = (p: string) => (p === "instagram" ? "Instagram" : "TikTok");
+
+/** Just the dot (the words are next to it, or in the legend). */
 export function StatusDot({ status }: { status: string }) {
-  return <span aria-hidden className={cx("inline-block size-2 shrink-0 rounded-full", STATUS_DOT[status] ?? "bg-muted")} />;
+  return <span aria-hidden className={cx("status", dotCls(status))} />;
 }
 
 export function StatusLegend() {
   return (
-    <ul className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted" aria-label="Status colours">
-      {Object.keys(STATUS_DOT).filter((s) => s !== "publishing").map((s) => (
-        <li key={s} className="flex items-center gap-1.5">
-          <StatusDot status={s} /> {s === "approved" ? "Ready" : humanize(s)}
-        </li>
-      ))}
-      <li className="flex items-center gap-1.5"><span aria-hidden className="inline-block h-3 w-0.5 bg-ig" /> Instagram</li>
-      <li className="flex items-center gap-1.5"><span aria-hidden className="inline-block h-3 w-0.5 bg-tt" /> TikTok</li>
+    <ul className="cal-legend" aria-label="Status colours">
+      {Object.keys(STATUS_TONE)
+        .filter((s) => s !== "publishing")
+        .map((s) => (
+          <li key={s} className={cx("status is-small", dotCls(s))}>
+            {statusLabel(s)}
+          </li>
+        ))}
     </ul>
   );
 }
 
-function Chip({ item }: { item: CalendarItem }) {
+/** One post in a day: the dot and the business, then the time and the platform. */
+function Post({ item }: { item: CalendarItem }) {
   return (
     <Link
       href={`/calendar/${item.id}`}
-      title={`${item.clientName} · ${item.platform === "instagram" ? "Instagram" : "TikTok"} ${item.format} · ${humanize(item.status)}${item.caption ? `\n${item.caption.slice(0, 140)}` : ""}`}
-      className={cx(
-        "flex items-center gap-1 truncate rounded border-l-2 bg-surface-2 px-1.5 py-0.5 text-[11px] leading-tight hover:bg-accent-soft",
-        item.platform === "instagram" ? "border-ig" : "border-tt",
-      )}
+      title={`${item.clientName} · ${platformLabel(item.platform)} ${item.format} · ${statusLabel(item.status)}${item.caption ? `\n${item.caption.slice(0, 140)}` : ""}`}
+      className="mgrid-item mgrid-post"
     >
-      <StatusDot status={item.status} />
-      <span className="shrink-0 tabular-nums text-muted">{item.time}</span>
-      <span className="truncate font-medium">{item.clientName}</span>
+      <span className="l1">
+        <StatusDot status={item.status} />
+        <span>{item.clientName}</span>
+      </span>
+      <span className="l2 num">
+        {item.time} · {platformLabel(item.platform)}
+      </span>
     </Link>
   );
 }
@@ -73,33 +88,30 @@ export function MonthGrid({ month, items, todayStr, newHref }: { month: string; 
   for (const it of items) byDay.set(it.date, [...(byDay.get(it.date) ?? []), it]);
 
   return (
-    <div className="overflow-hidden rounded-xl border border-border bg-surface">
-      <div className="grid grid-cols-7 border-b border-border bg-surface-2 text-center text-xs font-semibold text-muted">
+    <div className="mt-3">
+      <div className="mgrid-head eyebrow">
         {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((d) => (
-          <div key={d} className="py-2">{d}</div>
+          <div key={d}>{d}</div>
         ))}
       </div>
-      <div className="grid grid-cols-7">
+      <div className="mgrid-body">
         {cells.map((date, i) => {
           const list = date ? (byDay.get(date) ?? []) : [];
-          const isToday = date === todayStr;
           return (
-            <div key={date ?? `empty-${i}`} className={cx("group min-h-28 min-w-0 border-b border-r border-border p-1.5 [&:nth-child(7n)]:border-r-0", !date && "bg-surface-2/40")}>
+            <div key={date ?? `empty-${i}`} className={cx("mgrid-cell min-h-28", date === todayStr && "is-today")}>
               {date && (
                 <>
-                  <div className="mb-1 flex items-center justify-between">
-                    <span className={cx("flex size-6 items-center justify-center rounded-full text-xs", isToday ? "bg-accent font-semibold text-accent-fg" : "text-muted")}>
-                      {Number(date.slice(8))}
-                    </span>
-                    <Link href={newHref(date)} aria-label={`Add a post on ${date}`} className="rounded px-1 text-sm text-muted opacity-0 hover:bg-surface-2 hover:text-text focus:opacity-100 group-hover:opacity-100">
+                  <div className="mgrid-day">
+                    <span>{Number(date.slice(8))}</span>
+                    <Link href={newHref(date)} aria-label={`Add a post on ${date}`} className="mgrid-add">
                       +
                     </Link>
                   </div>
-                  <div className="flex flex-col gap-1">
+                  <div className="mgrid-items gap-2">
                     {list.slice(0, 4).map((it) => (
-                      <Chip key={it.id} item={it} />
+                      <Post key={it.id} item={it} />
                     ))}
-                    {list.length > 4 && <span className="px-1 text-[11px] text-muted">+{list.length - 4} more</span>}
+                    {list.length > 4 && <span className="mgrid-more">+{list.length - 4} more</span>}
                   </div>
                 </>
               )}
@@ -111,32 +123,35 @@ export function MonthGrid({ month, items, todayStr, newHref }: { month: string; 
   );
 }
 
+/** Phones: the month as day groups (a caps label on a hairline), one row per post with the time in the margin. */
 export function AgendaList({ items, todayStr }: { items: CalendarItem[]; todayStr: string }) {
   const days = [...new Set(items.map((i) => i.date))].sort();
   return (
-    <ol className="flex flex-col gap-4">
+    <ol>
       {days.map((day) => {
         const d = new Date(`${day}T12:00:00Z`);
+        const today = day === todayStr;
         return (
           <li key={day}>
-            <h3 className={cx("mb-1.5 text-sm font-semibold", day === todayStr && "text-accent")}>
+            <h3 className={cx("eyebrow group-label", today && "is-today")}>
               {d.toLocaleDateString("en-US", { weekday: "long", month: "short", day: "numeric", timeZone: "UTC" })}
-              {day === todayStr && " · Today"}
+              {today && <b>Today</b>}
             </h3>
-            <ul className="divide-y divide-border overflow-hidden rounded-xl border border-border bg-surface">
+            <ul className="list">
               {items.filter((i) => i.date === day).map((it) => (
                 <li key={it.id}>
-                  <Link href={`/calendar/${it.id}`} className={cx("flex gap-3 border-l-4 px-3 py-2.5 hover:bg-surface-2", it.platform === "instagram" ? "border-ig" : "border-tt")}>
-                    <span className="w-14 shrink-0 pt-0.5 text-xs tabular-nums text-muted">{it.time}</span>
-                    <span className="min-w-0 flex-1">
-                      <span className="flex items-center gap-2 text-sm font-medium">
-                        <span className="truncate">{it.clientName}</span>
+                  <Link href={`/calendar/${it.id}`} className="cal-post">
+                    <span className="time meta num">{it.time}</span>
+                    <span className="main">
+                      <span className="row-title">{it.clientName}</span>
+                      <span className="facts-line meta">
+                        <span className={cx("status is-small", dotCls(it.status))}>{statusLabel(it.status)}</span>{" "}
+                        <span>
+                          {platformLabel(it.platform)} {it.format}
+                        </span>{" "}
+                        {it.mediaCount > 0 && <span>{it.mediaCount} media</span>}
                       </span>
-                      <span className="flex items-center gap-1.5 text-xs text-muted">
-                        <StatusDot status={it.status} /> {it.status === "approved" ? "Ready" : humanize(it.status)} · {it.platform === "instagram" ? "Instagram" : "TikTok"} {it.format}
-                        {it.mediaCount > 0 && ` · ${it.mediaCount} media`}
-                      </span>
-                      {it.caption && <span className="mt-0.5 line-clamp-2 block break-words text-xs text-muted">{it.caption}</span>}
+                      {it.caption && <span className="caption meta">{it.caption}</span>}
                     </span>
                   </Link>
                 </li>

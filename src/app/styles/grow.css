@@ -1,7 +1,5 @@
-/* STARTING POINT, carried over from the first Ink attempt (built on an older main): the classes its pages used. Today's
-   pages do not use them yet; the grow page step ports the pages onto them, changes them freely, and deletes what it
-   does not need. */
-/* Creators, Outreach, Deals, Leads, Collab requests (team side), Reports, Numbers / Insights, Saved replies.
+/* Creators, Outreach, Deals (and Contracts), Leads, Collab requests (team side), Reports, Numbers / Insights, My stats,
+   Google reviews, Saved replies and the media kit (/kit-settings and the public /kit).
    Rules here sit in the "pages" layer: above the shared classes in globals.css, below Tailwind utilities.
    Everything is a refinement of the shared Ink classes (sections, lists, rows, status, tags, chips, tabs); the only
    new shapes are layouts: a two-line row, the pipeline board, the spreadsheets and the shot list. */
@@ -85,8 +83,11 @@
   .g-row.is-muted > .row-title, .g-row.is-muted .head > :first-child { color: var(--muted); }
 
   /* Facts joined by a middle dot (empty ones are left out by the page). */
-  .g-dots > :not(.status) + :not(.status)::before { content: "·"; margin: 0 6px; color: var(--muted); font-weight: 400; }
-  .g-dots > * + .status, .g-dots > .status + * { margin-left: 12px; }   /* a status brings its own dot */
+  .g-dots > :not(.status, .tag) + :not(.status, .tag)::before { content: "·"; margin: 0 6px; color: var(--muted); font-weight: 400; }
+  /* A status brings its own dot and a tag its own box: 12px of space instead, kept on the right of the item before it, so
+     a status that wraps to the next line starts flush left. */
+  .g-dots > :has(+ :is(.status, .tag)), .g-dots > :is(.status, .tag) { margin-right: 12px; }
+  .g-dots > .tag { margin-left: 0; }
 
   /* ---- The pipeline board (outreach and leads). Columns are group labels on a hairline with a plain list under them;
      a wide screen shows them side by side and scrolls sideways inside the board, a phone shows one at a time. */
@@ -153,11 +154,12 @@
   .g-scroll { overflow: auto; }
   /* A wide table that scrolls sideways says so: a soft ink fade on the right edge while there is more to the right.
      The paper-coloured cover scrolls with the content (local) and hides the fade once the last column is in view. */
-  .g-scroll.is-x-hint {
+  .g-scroll.is-x-hint, .g-board-scroll {
     background:
       linear-gradient(to left, var(--bg) 40%, transparent) right / 2.5rem 100% no-repeat local,
       linear-gradient(to left, color-mix(in srgb, var(--text) 12%, transparent), transparent) right / 1rem 100% no-repeat scroll;
   }
+  @media (max-width: 767px) { .g-board-scroll { background: none; } }   /* a phone shows one column, nothing to scroll */
 
   /* A spreadsheet cell: a borderless input that shows its edge on hover and an ink edge while you type. */
   .g-cell {
@@ -221,9 +223,6 @@
     .g-opt > .check { margin-top: 1px; }
   }
 
-  /* ---- Sticky action bar (Save on a long form, Import): solid paper with a hairline, no blur */
-  .g-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 12px 0; background: var(--bg); border-top: var(--rule); }
-
   /* ---- Shot list: big tap rows with the ink square. role=checkbox buttons. */
   .g-shots > li { display: flex; align-items: stretch; }
   .g-shot {
@@ -251,9 +250,8 @@
   .g-months .chip .status { gap: 7px; }
   .g-months > li { flex: none; }
 
-  /* ---- A quoted reply under a review, and report text */
+  /* ---- A quoted reply under a review */
   .g-quote { padding-left: 14px; border-left: 2px solid var(--border-strong); }
-  .g-prose { max-width: 42rem; }
 
   /* ---- Ranked bars (audience): one thin ink bar per row, the share in words at the end */
   .g-hbars { display: flex; flex-direction: column; gap: 8px; }
@@ -272,6 +270,29 @@
   .g-notes > div + div { border-top: var(--rule); }
   .g-notes p { margin-top: 2px; white-space: pre-line; overflow-wrap: anywhere; }
   .g-notes .is-strong { font-size: 1.0625rem; line-height: 1.5rem; }
+
+  /* ---- Words joined by a middle dot (content styles, past collabs, top cities on the media kit) */
+  .g-words { display: flex; flex-wrap: wrap; row-gap: 2px; }
+  .g-words > li:not(:last-child)::after { content: "·"; margin: 0 8px; color: var(--muted); }   /* after, so a wrapped line never starts with a dot */
+  .g-words .n { margin-right: 6px; color: var(--muted); font-variant-numeric: tabular-nums; }
+
+  /* ---- A picture of another page (the media kit preview, the contract preview): a hairline frame, nothing else.
+     On a wide screen it stays in view beside its form and scrolls on its own. */
+  .g-frame { min-width: 0; border: var(--rule); border-radius: var(--radius-lg); padding: 32px 20px 40px; }
+  @media (min-width: 1200px) { .g-frame { max-height: calc(100dvh - 7rem); overflow-y: auto; padding: 36px 32px 44px; } }
+
+  /* ---- Options that wrap side by side (past collabs to show) */
+  .g-opts.is-wrap { display: flex; flex-wrap: wrap; column-gap: 28px; }
+
+  /* ---- A choice of two (contract type): outlined options, the chosen one with a 2px ink edge. role=radio buttons. */
+  .g-kind {
+    display: block; min-width: 0; min-height: var(--control-h); padding: 9px 12px 10px; text-align: left;
+    border: 1px solid var(--border-strong); border-radius: var(--radius-sm); background: var(--surface); color: var(--text); font: inherit; cursor: pointer;
+  }
+  .g-kind:hover { border-color: var(--text); }
+  .g-kind[aria-checked="true"] { border-color: var(--text); box-shadow: inset 0 0 0 1px var(--text); }
+  .g-kind b { display: block; font-weight: 500; }
+  .g-kind small { display: block; font-size: var(--text-sm); line-height: 1.25rem; color: var(--muted); }
 
   /* ---- Columns in an import page: the input on the left, the preview on the right */
   .g-split { display: grid; gap: var(--space-10); }

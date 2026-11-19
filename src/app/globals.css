@@ -270,6 +270,13 @@ html { scroll-padding-bottom: calc(var(--tabbar-h) + 0.75rem); }
 html:has(.sticky-actions, .action-bar, .queue-bar, .ask-bar, [class*="bottom-[var(--tabbar-h)]"], [class*="bottom-[calc(var(--tabbar-h)"]) {
   scroll-padding-bottom: calc(var(--tabbar-h) + 5.5rem);
 }
+/* Two phone bars are taller than 5.5rem: the send mode bar (two rows of 44px buttons, about 7rem) and the floating
+   bulk-select panel on /tasks (about 10.5rem). While one is up, focus stops above its top edge. More specific than the
+   rule above, so it wins while the bar is on the page. */
+@media (max-width: 767px) {
+  html:has(.queue-bar.send-bar) { scroll-padding-bottom: calc(var(--tabbar-h) + 7.75rem); }
+  html:has(.bulk-bar.bulk-bar) { scroll-padding-bottom: calc(var(--tabbar-h) + 12rem); }
+}
 
 /* Checkboxes and radios that do not use .check still print in ink. */
 input[type="checkbox"], input[type="radio"] { accent-color: var(--text); }
@@ -778,6 +785,9 @@ summary.no-marker::-webkit-details-marker { display: none; }
   .tabs { display: flex; gap: 24px; border-bottom: var(--rule); }
   .tabs :is(a, button) { display: inline-flex; align-items: center; gap: 6px; min-height: 2.5rem; margin-bottom: -1px; padding: 0; border: 0; border-bottom: 2px solid transparent; background: none; color: var(--muted); font-weight: 500; text-decoration: none; white-space: nowrap; cursor: pointer; }
   .tabs :is(a, button):hover { color: var(--text); }
+  /* A tab strip that scrolls sideways keeps every tab at its full width (they would otherwise shrink to 44px and their
+     nowrap labels overlap). */
+  .tabs:is(.overflow-x-auto, .board-tabs) :is(a, button) { flex: none; }
   .tabs :is(a, button):is([aria-current="page"], [aria-selected="true"], [aria-pressed="true"]) { color: var(--text); border-bottom-color: var(--text); font-weight: 600; }
   @media (max-width: 767px), (pointer: coarse) { .tabs :is(a, button) { min-height: 2.75rem; min-width: 2.75rem; justify-content: center; } }
   /* Small phones: tighter tabs so a four-tab row (Inbox, Insights) fits instead of cutting its last tab at the edge. */

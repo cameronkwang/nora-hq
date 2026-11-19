@@ -4,7 +4,8 @@ import type { ReactNode } from "react";
  * A small, safe Markdown renderer for client reports (Claude writes them). Builds React elements only — never
  * raw HTML — so nothing in a report can inject markup or script. Supports: # / ## / ### headings, paragraphs,
  * "-"/"*"/"•" bullets, "1." lists, > quotes, --- rules, **bold**, *italic* / _italic_, `code` and
- * [links](https://…) (http, https and mailto only). Also exports markdownToPlainText for email + copy.
+ * [links](https://…) (http, https and mailto only), and on screen | pipe | tables |. Also exports markdownToPlainText
+ * for email + copy (which reads a table as it always has: its lines joined into one paragraph).
  * No hooks and no server imports: usable from server and client components alike.
  */
 
@@ -13,9 +14,15 @@ type Block =
   | { t: "p"; text: string }
   | { t: "ul" | "ol"; items: string[] }
   | { t: "quote"; text: string }
-  | { t: "hr" };
+  | { t: "hr" }
+  | { t: "table"; head: string[]; rows: string[][] };
 
-function parse(md: string): Block[] {
+const TABLE_RE = /^\|.*\|$/;
+const TABLE_SEP_RE = /^\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|?$/;
+const cells = (row: string) => row.trim().replace(/^\|/, "").replace(/\|$/, "").split("|").map((c) => c.trim());
+
+/** `tables` turns "| a | b |" + "|---|---|" + rows into a table block (the on-screen preview only). */
+function parse(md: string, { tables = false }: { tables?: boolean } = {}): Block[] {
   const lines = md.replace(/\r\n?/g, "\n").split("\n");
   const out: Block[] = [];
   let para: string[] = [];
@@ -30,6 +37,16 @@ function parse(md: string): Block[] {
     const h = /^(#{1,6})\s+(.*)$/.exec(trimmed);
     if (h) { flush(); out.push({ t: "h", level: Math.min(3, h[1].length) as 1 | 2 | 3, text: h[2].replace(/\s*#+$/, "") }); continue; }
     if (/^(-{3,}|\*{3,}|_{3,})$/.test(trimmed)) { flush(); out.push({ t: "hr" }); continue; }
+    if (tables && TABLE_RE.test(trimmed) && i + 1 < lines.length && TABLE_SEP_RE.test(lines[i + 1].trim())) {
+      flush();
+      const head = cells(trimmed);
+      const rows: string[][] = [];
+      i += 2;
+      while (i < lines.length && TABLE_RE.test(lines[i].trim())) rows.push(cells(lines[i++]));
+      i--;
+      out.push({ t: "table", head, rows });
+      continue;
+    }
     const bullet = /^[-*•+]\s+(.*)$/.exec(trimmed);
     const num = /^\d+[.)]\s+(.*)$/.exec(trimmed);
     if (bullet || num) {
@@ -77,7 +94,7 @@ function inline(text: string, key = "i"): ReactNode[] {
       const href = m[3];
       nodes.push(
         SAFE_URL.test(href) ? (
-          <a key={k} href={href} target="_blank" rel="noopener noreferrer nofollow" className="text-accent underline-offset-2 hover:underline">{inline(m[2], k)}</a>
+          <a key={k} href={href} target="_blank" rel="noopener noreferrer nofollow" className="link">{inline(m[2], k)}</a>
         ) : (
           <span key={k}>{m[2]}</span>
         ),
@@ -93,19 +110,19 @@ function inline(text: string, key = "i"): ReactNode[] {
 }
 
 export function ReportMarkdown({ body, className }: { body: string; className?: string }) {
-  const blocks = parse(body);
+  const blocks = parse(body, { tables: true });
   return (
-    <div className={["min-w-0 break-words text-[15px] leading-relaxed md:text-sm", className].filter(Boolean).join(" ")}>
+    <div className={["min-w-0 max-w-[42rem] break-words", className].filter(Boolean).join(" ")}>
       {blocks.map((b, i) => {
         const k = `b${i}`;
         switch (b.t) {
           case "h":
             return b.level === 1 ? (
-              <h2 key={k} className="mb-2 mt-5 text-xl font-semibold tracking-tight first:mt-0">{inline(b.text, k)}</h2>
+              <h2 key={k} className="title mb-2 mt-6 first:mt-0">{inline(b.text, k)}</h2>
             ) : b.level === 2 ? (
-              <h3 key={k} className="mb-1.5 mt-5 text-base font-semibold first:mt-0">{inline(b.text, k)}</h3>
+              <h3 key={k} className="mb-1 mt-5 font-semibold first:mt-0">{inline(b.text, k)}</h3>
             ) : (
-              <h4 key={k} className="mb-1 mt-4 text-sm font-semibold uppercase tracking-wide text-muted first:mt-0">{inline(b.text, k)}</h4>
+              <h4 key={k} className="eyebrow mb-1 mt-5 first:mt-0">{inline(b.text, k)}</h4>
             );
           case "p":
             return <p key={k} className="my-2">{inline(b.text, k)}</p>;
@@ -114,9 +131,25 @@ export function ReportMarkdown({ body, className }: { body: string; className?: 
           case "ol":
             return <ol key={k} className="my-2 list-decimal space-y-1 pl-5">{b.items.map((it, j) => <li key={j}>{inline(it, `${k}-${j}`)}</li>)}</ol>;
           case "quote":
-            return <blockquote key={k} className="my-3 border-l-2 border-accent pl-3 text-muted">{inline(b.text, k)}</blockquote>;
+            return <blockquote key={k} className="g-quote my-3 text-muted">{inline(b.text, k)}</blockquote>;
           case "hr":
-            return <hr key={k} className="my-4 border-border" />;
+            return <hr key={k} className="my-5 border-border" />;
+          case "table":
+            // Caps heads on a hairline, rows on hairlines (.g-table); numbers in tabular figures. Wide ones scroll.
+            return (
+              <div key={k} className="g-scroll my-3">
+                <table className="g-table">
+                  <thead>
+                    <tr>{b.head.map((c, j) => <th key={j} scope="col">{inline(c, `${k}h${j}`)}</th>)}</tr>
+                  </thead>
+                  <tbody>
+                    {b.rows.map((row, ri) => (
+                      <tr key={ri}>{b.head.map((_, j) => <td key={j}>{inline(row[j] ?? "", `${k}r${ri}c${j}`)}</td>)}</tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            );
         }
       })}
     </div>

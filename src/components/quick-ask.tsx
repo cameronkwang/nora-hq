@@ -15,7 +15,7 @@ const LABEL = (r: Chip, other: string) => (r === "adhoc" ? `Task for ${other}` :
 const MAX_HEIGHT = 240;
 
 /**
- * The composer at the very top of Home: type (or dictate) a line, optionally pick who it's for,
+ * The composer under the greeting on Home: type (or dictate) a line, optionally pick who it's for,
  * optionally add a photo, Send. Stays on Home and confirms inline. "Task for <other person>" puts a task straight
  * on the other person's list instead of making an ask.
  */
@@ -39,8 +39,9 @@ export function QuickAsk({ me, directUpload }: { me: "cameron" | "nora" | null; 
     const el = area.current;
     if (!el) return;
     el.style.height = "auto";
-    el.style.height = `${Math.min(el.scrollHeight, MAX_HEIGHT)}px`;
-    el.style.overflowY = el.scrollHeight > MAX_HEIGHT ? "auto" : "hidden";
+    const full = el.scrollHeight + (el.offsetHeight - el.clientHeight); // the field has a border now: count it
+    el.style.height = `${Math.min(full, MAX_HEIGHT)}px`;
+    el.style.overflowY = full > MAX_HEIGHT ? "auto" : "hidden";
   }, [text]);
 
   useEffect(() => {
@@ -88,7 +89,7 @@ export function QuickAsk({ me, directUpload }: { me: "cameron" | "nora" | null; 
   }
 
   return (
-    <form onSubmit={send} className="rounded-xl border border-border bg-surface p-2 shadow-sm focus-within:border-accent/60">
+    <form onSubmit={send} className="composer">
       <label htmlFor="quick-ask" className="sr-only">Ask anything</label>
       <textarea
         id="quick-ask"
@@ -102,22 +103,21 @@ export function QuickAsk({ me, directUpload }: { me: "cameron" | "nora" | null; 
         onKeyDown={onKeyDown}
         readOnly={busy}
         enterKeyHint="send"
-        placeholder="Ask anything — Claude or Cameron will pick it up"
-        className="block w-full resize-none bg-transparent px-2 py-2 text-base leading-6 text-text outline-none placeholder:text-muted/80"
-        style={{ minHeight: "2.5rem" }}
+        placeholder="Ask anything. Claude or Cameron will pick it up"
+        className="input composer-input"
       />
 
       {files.length > 0 && (
-        <ul className="flex flex-wrap gap-1.5 px-2 pb-1">
+        <ul className="composer-files">
           {files.map((f, i) => (
-            <li key={`${f.name}-${i}`} className="inline-flex max-w-48 items-center gap-1 rounded-full bg-surface-2 py-0.5 pl-2.5 pr-0.5 text-xs text-muted">
+            <li key={`${f.name}-${i}`}>
               <span className="truncate">{f.name || "Photo"}</span>
               <button
                 type="button"
                 disabled={busy}
                 onClick={() => setFiles(files.filter((_, j) => j !== i))}
                 aria-label={`Remove ${f.name}`}
-                className="tap-target flex size-6 items-center justify-center rounded-full hover:bg-surface"
+                className="tap-target flex size-6 items-center justify-center rounded-md text-muted hover:bg-surface-2 hover:text-text"
               >
                 ✕
               </button>
@@ -126,30 +126,19 @@ export function QuickAsk({ me, directUpload }: { me: "cameron" | "nora" | null; 
         </ul>
       )}
 
-      <div className="flex flex-wrap items-center gap-x-2 gap-y-2 px-1 pt-1">
-        <div role="radiogroup" aria-label="Who's it for?" className="flex min-w-0 basis-full flex-wrap gap-1.5 sm:basis-0 sm:flex-1">
+      <div className="composer-bar">
+        <div role="radiogroup" aria-label="Who's it for?">
           {chips.map((r) => {
             const on = r === route;
             return (
-              <button
-                key={r}
-                type="button"
-                role="radio"
-                aria-checked={on}
-                disabled={busy}
-                onClick={() => setRoute(r)}
-                className={cx(
-                  "inline-flex min-h-8 items-center rounded-full border px-2.5 text-xs font-medium transition pointer-coarse:min-h-11 pointer-coarse:px-3 pointer-coarse:text-sm",
-                  on ? "border-accent bg-accent-soft text-accent" : "border-transparent bg-surface-2 text-muted hover:text-text",
-                )}
-              >
-                {LABEL(r, otherName)}
+              <button key={r} type="button" role="radio" aria-checked={on} disabled={busy} onClick={() => setRoute(r)} className={cx("chip", on && "is-on")}>
+                <span>{LABEL(r, otherName)}</span>
               </button>
             );
           })}
         </div>
 
-        <div className="ml-auto flex items-center gap-1.5">
+        <div className="composer-actions">
           <input
             id={fileId}
             type="file"
@@ -162,37 +151,31 @@ export function QuickAsk({ me, directUpload }: { me: "cameron" | "nora" | null; 
               e.target.value = "";
             }}
           />
-          <label
-            htmlFor={fileId}
-            title="Add a photo or video"
-            className={cx(
-              "inline-flex size-10 cursor-pointer items-center justify-center rounded-lg text-muted hover:bg-surface-2 hover:text-text pointer-coarse:size-11",
-              busy && "pointer-events-none opacity-50",
-            )}
-          >
+          <label htmlFor={fileId} title="Add a photo or video" className={cx(buttonClass("ghost"), "composer-icon cursor-pointer", busy && "pointer-events-none opacity-50")}>
             <span className="sr-only">Add a photo or video</span>
-            <svg aria-hidden viewBox="0 0 24 24" className="size-5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+            <svg aria-hidden viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round">
               <path d="M4 8h3l1.5-2h7L17 8h3a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1Z" />
               <circle cx="12" cy="13" r="3.5" />
             </svg>
           </label>
-          <button type="submit" disabled={!canSend} className={cx(buttonClass("primary"), "min-w-20")}>
+          {/* Secondary on purpose: the one accent action on Home is "New ask" in the sidebar and the tab bar. */}
+          <button type="submit" disabled={!canSend} className={cx(buttonClass("secondary"), "min-w-20")}>
             {busy ? (files.length ? "Uploading…" : "Sending…") : "Send"}
           </button>
         </div>
       </div>
 
-      <div aria-live="polite" className="px-2">
+      <div aria-live="polite" className="composer-msg">
         {sent && (
-          <p role="status" className="flex flex-wrap items-center gap-x-2 pt-2 text-sm text-ok">
-            <span>{sent.message}</span>
-            <Link href={sent.href} className="inline-flex min-h-11 items-center text-muted underline-offset-2 hover:underline md:min-h-0">
+          <p role="status" className="flex flex-wrap items-baseline gap-x-3">
+            <span className="status is-ok whitespace-normal">{sent.message}</span>
+            <Link href={sent.href} className="link inline-flex min-h-11 items-center md:min-h-0">
               View
             </Link>
           </p>
         )}
         {error && (
-          <p role="alert" className="pt-2 text-sm text-danger">
+          <p role="alert" className="status is-danger whitespace-normal">
             {error}
           </p>
         )}

@@ -1,12 +1,10 @@
-/* STARTING POINT, carried over from the first Ink attempt (built on an older main): the classes its pages used. Today's
-   pages do not use them yet; the home_inbox page step ports the pages onto them, changes them freely, and deletes what
-   it does not need. */
-/* Home, Inbox, Review, Asks. Rules here sit in the "pages" layer: above the shared classes in globals.css,
+/* Home (Cameron's and Nora's), Inbox and asks, Review and the phone send mode. Rules here sit in the "pages" layer: above the shared classes in globals.css,
    below Tailwind utilities. Only layout that a shared class or a utility cannot say lives here. */
 @layer pages {
   /* ============================================================ HOME */
 
-  /* Composer: one field that grows as you type, then who it is for, the photo button and Send on one line. */
+  /* Composer (under the greeting): one field that grows as you type, then who it is for, the photo button and Send on
+     one line. */
   .composer { margin-bottom: 28px; }
   .composer-input {
     min-height: var(--control-h);
@@ -36,9 +34,11 @@
   /* Health strip: one row per business, a dot and words. */
   .health-row { display: grid; grid-template-columns: 16rem minmax(0, 1fr) 14px; column-gap: 16px; }
   .health-row .status { white-space: normal; }
+  @media (min-width: 1024px) { .health-row .row-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } }
 
-  /* To approve and For you share their right-hand columns (business, when) with the task rows
-     (.task-link in calendar-tasks.css), so the lists line up. Keep the two column templates equal. */
+  /* A row on Home (an ask, a draft, a shoot, a reel: HomeRow in nora-home.tsx). For you, To approve and Nora's lists
+     share their right-hand columns (business, when) with the task rows (.task-link in calendar-tasks.css), so the lists
+     line up. Keep the two column templates equal. */
   .approve-row { display: grid; grid-template-columns: minmax(0, 1fr) 10.5rem 6.75rem 14px; column-gap: 16px; align-items: baseline; }
   .approve-row .row-meta { display: contents; }
   .approve-row .where { grid-column: 2; overflow: hidden; text-overflow: ellipsis; }
@@ -51,18 +51,6 @@
   .approve-main.is-clamp .approve-note { flex: none; margin-left: 12px; }             /* one more fact after a row's title (its kind, who asked) */
   /* Two lists under one title (asks, then tasks): the hairline carries on between them. */
   .approve-stack > * + * { border-top: var(--rule); }
-
-  /* Nora's week: an agenda. Day in the margin, visits beside it. Never an amount. */
-  .agenda > li { display: grid; grid-template-columns: 4.75rem minmax(0, 1fr); align-items: baseline; }
-  .agenda > li + li { border-top: var(--rule); }
-  .day-date { display: flex; align-items: baseline; gap: 4px; }
-  .day-date .dow { width: 2.125rem; }                        /* fixed, so the day numerals form a column */
-  .day-date .dom { font-family: var(--font-display); font-size: 1.5rem; line-height: 1; font-weight: 450; font-variant-numeric: lining-nums; letter-spacing: -0.01em; }
-  .is-today .day-date .dow { color: var(--text); }
-  .is-today .day-date .dom { color: var(--accent); }        /* a red-letter day */
-  .agenda .row { column-gap: 12px; }
-  .reel { font-size: var(--text-sm); white-space: nowrap; }
-  .reel.is-later { color: var(--muted); }
 
   /* Businesses: a ledger. Name (and what is waiting there), then this month's plan, open tasks and views. */
   .ledger-row { display: grid; grid-template-columns: minmax(0, 1fr) 11.5rem 6.5rem 9.75rem; column-gap: 16px; align-items: baseline; min-height: var(--row-h); padding: calc((var(--row-h) - var(--leading-base)) / 2) 0; }
@@ -102,10 +90,6 @@
     .approve-row .where { overflow: visible; }
     .approve-row .when { text-align: left; }
     .approve-row .chev { grid-column: 2; grid-row: 1 / span 2; }
-  }
-  @media (max-width: 767px) {
-    .agenda > li { grid-template-columns: 5.5rem minmax(0, 1fr); }
-    .day-date .dow { width: 2.375rem; }
   }
   @media (max-width: 767px), (pointer: coarse) {
     .ledger-wait a { display: inline-flex; align-items: center; min-height: 2.75rem; }   /* each one is its own tap target */

@@ -267,28 +267,18 @@ export function NumbersSheet({
   return (
     <div>
       {/* ---------- controls (desktop) ---------- */}
-      <div className="mb-4 hidden flex-wrap items-center gap-3 md:flex">
+      <div className="mb-5 hidden flex-wrap items-center gap-x-8 gap-y-3 md:flex">
         <RangePicker end={end} current={current} months={months} href={href} onLeave={commit} />
-        <div role="tablist" aria-label="Platform" className="inline-flex rounded-lg border border-border bg-surface p-0.5">
+        <div role="tablist" aria-label="Platform" className="tabs border-b-0">
           {(["instagram", "tiktok"] as const).map((p) => (
-            <button
-              key={p}
-              type="button"
-              role="tab"
-              aria-selected={platform === p}
-              onClick={() => setPlatform(p)}
-              className={cx(
-                "rounded-md px-3 py-1.5 text-sm font-medium",
-                platform === p ? "bg-accent-soft text-accent" : "text-muted hover:text-text",
-              )}
-            >
+            <button key={p} type="button" role="tab" aria-selected={platform === p} onClick={() => setPlatform(p)}>
               {PLATFORM_LABEL[p]}
             </button>
           ))}
         </div>
-        <label className="flex items-center gap-2 text-sm">
-          <span className="text-muted">Show</span>
-          <select value={metric} onChange={(e) => setMetric(e.target.value as SheetMetric)} className="input w-auto py-1.5">
+        <label className="flex items-center gap-2">
+          <span className="meta">Show</span>
+          <select value={metric} onChange={(e) => setMetric(e.target.value as SheetMetric)} className="input w-auto">
             {(Object.keys(METRIC_LABEL) as SheetMetric[]).map((m) => (
               <option key={m} value={m}>
                 {METRIC_LABEL[m]}
@@ -303,79 +293,82 @@ export function NumbersSheet({
       </div>
 
       {/* ---------- controls (phone) ---------- */}
-      <div className="mb-3 flex items-center justify-between gap-2 md:hidden">
-        <div className="inline-flex items-center rounded-lg border border-border bg-surface">
-          <Link href={href(shift(end, -1))} onClick={commit} scroll={false} className="flex h-11 w-11 items-center justify-center rounded-l-lg" aria-label={`Previous month, ${label(shift(end, -1), "long")}`}>
-            ←
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2 md:hidden">
+        <div className="monthpick g-range -ml-3">
+          <Link href={href(shift(end, -1))} onClick={commit} scroll={false} aria-label={`Previous month, ${label(shift(end, -1), "long")}`}>
+            <Chevron dir="left" />
           </Link>
-          <span className="min-w-32 border-x border-border px-2 text-center text-sm font-semibold leading-[2.75rem]">{label(end, "long")}</span>
+          <span className="min-w-[9.5rem] px-1 text-center">{label(end, "long")}</span>
           {end < current ? (
-            <Link href={href(shift(end, 1))} onClick={commit} scroll={false} className="flex h-11 w-11 items-center justify-center rounded-r-lg" aria-label={`Next month, ${label(shift(end, 1), "long")}`}>
-              →
+            <Link href={href(shift(end, 1))} onClick={commit} scroll={false} aria-label={`Next month, ${label(shift(end, 1), "long")}`}>
+              <Chevron dir="right" />
             </Link>
           ) : (
-            <span aria-hidden className="flex h-11 w-11 items-center justify-center text-muted opacity-40">→</span>
+            <span aria-hidden className="off"><Chevron dir="right" /></span>
           )}
         </div>
-        <NumbersMenu exportHref={exportHref} />
+        {/* Never squeezed: on the narrowest phones it drops under the month instead of wrapping its own label. */}
+        <div className="ml-auto shrink-0">
+          <NumbersMenu exportHref={exportHref} />
+        </div>
       </div>
 
       {status.errors > 0 && (
-        <p role="alert" className="mb-3 rounded-lg bg-danger-soft px-3 py-2 text-sm text-danger">
-          {status.errors === 1 ? "1 number wasn't saved" : `${status.errors} numbers weren't saved`} — fix the red {status.errors === 1 ? "box" : "boxes"} and try again.
+        <p role="alert" className="notice mb-4">
+          <span className="status is-danger">
+            {status.errors === 1 ? "1 number wasn't saved" : `${status.errors} numbers weren't saved`}. Fix the red {status.errors === 1 ? "box" : "boxes"} and try again.
+          </span>
         </p>
       )}
 
       {/* ---------- phone: one month, IG + TikTok views side by side ---------- */}
       <div className="md:hidden">
-        <p className="mb-2 text-xs text-muted">
+        <p className="meta mb-1">
           Views (impressions) · saves as you type{status.saving ? " · saving…" : ""}
         </p>
-        <ul className="divide-y divide-border rounded-xl border border-border bg-surface">
+        <ul className="list is-ruled">
           {clients.map((c, i) => (
-            <li key={c.id} className="px-3 py-3">
-              <Link href={`/clients/${c.id}#views`} className="block min-w-0 pb-2">
-                <span className="block truncate text-sm font-medium">{c.name}</span>
-                {c.location && <span className="block truncate text-xs text-muted">{c.location}</span>}
+            <li key={c.id} className="g-numrow">
+              <Link href={`/clients/${c.id}#views`} className="min-w-0 pb-1">
+                <b className="block truncate">{c.name}</b>
+                {c.location && <span className="meta block truncate">{c.location}</span>}
               </Link>
-              <div className="grid grid-cols-2 gap-2">
-                {(["instagram", "tiktok"] as const).map((p, j) => {
-                  const k = keyOf(c.id, end, p, "views");
-                  const cell = cells[k];
-                  const synced = sources[`${c.id}|${end}|${p}`] === "api";
-                  return (
-                    <label key={p} className="block min-w-0">
-                      <span className={cx("mb-1 flex items-center gap-1 text-xs font-medium", p === "instagram" ? "text-ig" : "text-tt")}>
-                        {PLATFORM_LABEL[p]}
-                        {synced && <span className="font-normal text-muted">· synced</span>}
-                        <StatusDot status={cell?.status} />
-                      </span>
-                      <input
-                        data-phone-cell={i * 2 + j}
-                        value={cell?.text ?? ""}
-                        onChange={(e) => edit(k, e.target.value)}
-                        onBlur={() => leave(k)}
-                        onFocus={(e) => e.currentTarget.select()}
-                        onKeyDown={(e) => {
-                          if (e.key !== "Enter") return;
-                          e.preventDefault();
-                          const nextEl = document.querySelector<HTMLInputElement>(`[data-phone-cell="${i * 2 + j + 1}"]`);
-                          if (nextEl) nextEl.focus();
-                          else e.currentTarget.blur();
-                        }}
-                        inputMode="decimal"
-                        enterKeyHint={i === clients.length - 1 && j === 1 ? "done" : "next"}
-                        autoComplete="off"
-                        placeholder="—"
-                        aria-invalid={cell?.status === "error" || undefined}
-                        title={cell?.error}
-                        className={cx("input text-right tabular-nums", cell?.status === "error" && "border-danger")}
-                      />
-                      {cell?.status === "error" && <span className="mt-1 block text-xs text-danger">{cell.error}</span>}
-                    </label>
-                  );
-                })}
-              </div>
+              {(["instagram", "tiktok"] as const).map((p, j) => {
+                const k = keyOf(c.id, end, p, "views");
+                const cell = cells[k];
+                const synced = sources[`${c.id}|${end}|${p}`] === "api";
+                return (
+                  <label key={p} className="block min-w-0">
+                    <span className="mb-1 flex items-center gap-2 text-sm">
+                      <span className={cx("status is-small", p === "instagram" ? "is-ig" : "is-tt")}>{PLATFORM_LABEL[p]}</span>
+                      {synced && <span className="text-muted">· synced</span>}
+                      <StatusDot status={cell?.status} />
+                    </span>
+                    <input
+                      data-phone-cell={i * 2 + j}
+                      value={cell?.text ?? ""}
+                      onChange={(e) => edit(k, e.target.value)}
+                      onBlur={() => leave(k)}
+                      onFocus={(e) => e.currentTarget.select()}
+                      onKeyDown={(e) => {
+                        if (e.key !== "Enter") return;
+                        e.preventDefault();
+                        const nextEl = document.querySelector<HTMLInputElement>(`[data-phone-cell="${i * 2 + j + 1}"]`);
+                        if (nextEl) nextEl.focus();
+                        else e.currentTarget.blur();
+                      }}
+                      inputMode="decimal"
+                      enterKeyHint={i === clients.length - 1 && j === 1 ? "done" : "next"}
+                      autoComplete="off"
+                      placeholder="—"
+                      aria-invalid={cell?.status === "error" || undefined}
+                      title={cell?.error}
+                      className={cx("input text-right tabular-nums", cell?.status === "error" && "border-danger")}
+                    />
+                    {cell?.status === "error" && <span className="mt-1 block text-sm text-danger">{cell.error}</span>}
+                  </label>
+                );
+              })}
             </li>
           ))}
         </ul>
@@ -398,7 +391,7 @@ export function NumbersSheet({
           latest={latest}
           prevOfLatest={prevOfLatest}
         />
-        <p className="mt-2 text-xs text-muted">
+        <p className="meta mt-3 max-w-3xl">
           {metric === "views" ? "Views (impressions): Instagram renamed impressions to views in 2025. " : ""}
           Arrow keys or Enter to move · paste a block straight from Google Sheets · “12.5k” works · clear a box to remove a number.
           <span className="ml-1 inline-flex items-center gap-1"><SyncIcon /> = synced automatically; you can still type over it.</span>
@@ -519,24 +512,23 @@ function Grid({
     return any ? sum : null;
   };
 
-  const head = "px-2 py-2 text-right text-xs font-semibold text-muted";
   return (
-    <div ref={box} className="relative overflow-x-auto rounded-xl border border-border bg-surface">
-      <table className="w-full min-w-[44rem] border-collapse text-sm">
+    <div ref={box} className="relative overflow-x-auto">
+      <table className="g-sheet">
         <caption className="sr-only">
           {PLATFORM_LABEL[platform]} {METRIC_LABEL[metric].toLowerCase()} by business and month
         </caption>
         <thead>
-          <tr className="border-b border-border">
-            <th scope="col" className="sticky left-0 z-10 bg-surface px-3 py-2 text-left text-xs font-semibold text-muted">
+          <tr>
+            <th scope="col" className="sticky left-0 z-10 bg-bg">
               Business
             </th>
             {months.map((m) => (
-              <th key={m} scope="col" className={cx(head, "w-[9.5%]", m === current && "text-accent")}>
+              <th key={m} scope="col" className={cx("w-[9.5%]", m === current && "is-now")}>
                 {label(m, "month")} <span className="font-normal">{m.slice(2, 4)}</span>
               </th>
             ))}
-            <th scope="col" className={cx(head, "w-[8%] border-l border-border")} title={`${label(latest, "long")} vs ${label(prevOfLatest, "long")}`}>
+            <th scope="col" className="w-[8%]" title={`${label(latest, "long")} vs ${label(prevOfLatest, "long")}`}>
               vs last month
             </th>
           </tr>
@@ -546,19 +538,19 @@ function Grid({
             const cur = valueOf(cl.id, latest, platform, metric);
             const prev = valueOf(cl.id, prevOfLatest, platform, metric);
             return (
-              <tr key={cl.id} className="border-b border-border">
-                <th scope="row" className="sticky left-0 z-10 max-w-56 bg-surface px-3 py-1.5 text-left font-normal">
-                  <Link href={`/clients/${cl.id}#views`} className="block truncate font-medium hover:underline">
+              <tr key={cl.id}>
+                <th scope="row" className="max-w-56">
+                  <Link href={`/clients/${cl.id}#views`} className="block truncate font-medium no-underline hover:underline">
                     {cl.name}
                   </Link>
-                  {cl.location && <span className="block truncate text-xs text-muted">{cl.location}</span>}
+                  {cl.location && <span className="meta block truncate">{cl.location}</span>}
                 </th>
                 {months.map((m, c) => {
                   const k = keyOf(cl.id, m, platform, metric);
                   const cell = cells[k];
                   const synced = sources[`${cl.id}|${m}|${platform}`] === "api";
                   return (
-                    <td key={m} className="relative border-l border-border p-0">
+                    <td key={m}>
                       <input
                         data-cell={`${r}:${c}`}
                         value={cell?.text ?? ""}
@@ -572,25 +564,21 @@ function Grid({
                         spellCheck={false}
                         aria-label={`${cl.name}${cl.location ? ` ${cl.location}` : ""}, ${label(m, "long")}`}
                         aria-invalid={cell?.status === "error" || undefined}
-                        title={cell?.error ?? (synced ? "Synced automatically — you can still edit it" : undefined)}
-                        className={cx(
-                          "block h-10 w-full bg-transparent px-2 text-right tabular-nums outline-none focus:bg-accent-soft/40 focus:ring-2 focus:ring-inset focus:ring-accent",
-                          cell?.status === "error" && "bg-danger-soft text-danger ring-1 ring-inset ring-danger",
-                          cell?.status === "saving" && "text-muted",
-                        )}
+                        title={cell?.error ?? (synced ? "Synced automatically; you can still edit it" : undefined)}
+                        className={cx("g-numcell", cell?.status === "saving" && "is-saving")}
                       />
                       {synced && (
-                        <span className="pointer-events-none absolute left-1 top-1 text-muted" aria-hidden>
+                        <span className="mark top" aria-hidden>
                           <SyncIcon />
                         </span>
                       )}
-                      <span className="pointer-events-none absolute bottom-1 left-1">
+                      <span className="mark bottom">
                         <StatusDot status={cell?.status} />
                       </span>
                     </td>
                   );
                 })}
-                <td className="border-l border-border px-2 text-right">
+                <td className="chg">
                   <Change cur={cur} prev={prev} />
                 </td>
               </tr>
@@ -598,19 +586,19 @@ function Grid({
           })}
         </tbody>
         <tfoot>
-          <tr className="bg-surface-2/60 font-semibold">
-            <th scope="row" className="sticky left-0 z-10 bg-surface-2 px-3 py-2 text-left text-xs">
+          <tr>
+            <th scope="row">
               Total
             </th>
             {months.map((m) => {
               const t = total(m);
               return (
-                <td key={m} className="border-l border-border px-2 py-2 text-right tabular-nums">
-                  {t == null ? <span className="text-muted">—</span> : t.toLocaleString("en-US")}
+                <td key={m} className="text-sm">
+                  {t == null ? <span className="font-normal text-faint">—</span> : t.toLocaleString("en-US")}
                 </td>
               );
             })}
-            <td className="border-l border-border px-2 text-right">
+            <td className="chg">
               <Change cur={total(latest)} prev={total(prevOfLatest)} />
             </td>
           </tr>
@@ -627,18 +615,15 @@ function RangePicker({ end, current, months, href, onLeave }: { end: string; cur
   const first = months[0];
   const sameYear = first.slice(0, 4) === end.slice(0, 4);
   const text = `${sameYear ? label(first, "month") : label(first, "short")} – ${label(end, "short")}`;
-  const btn = "flex h-9 w-9 items-center justify-center text-sm hover:bg-surface-2";
   return (
-    <div className="flex items-center gap-2">
-      <div className="inline-flex items-center rounded-lg border border-border bg-surface">
-        <Link href={href(shift(end, -1))} onClick={onLeave} scroll={false} className={cx(btn, "rounded-l-lg")} aria-label="One month earlier" title="One month earlier">
-          ←
+    <div className="flex items-center gap-3">
+      <div className="monthpick g-range -ml-2">
+        <Link href={href(shift(end, -1))} onClick={onLeave} scroll={false} aria-label="One month earlier" title="One month earlier">
+          <Chevron dir="left" />
         </Link>
-        <label className="relative border-x border-border">
+        <label className="m">
           <span className="sr-only">Last month shown</span>
-          <span aria-hidden className="pointer-events-none block min-w-36 px-3 py-2 text-center text-sm font-semibold">
-            {text}
-          </span>
+          <span aria-hidden className="pointer-events-none">{text}</span>
           <input
             type="month"
             value={end}
@@ -649,19 +634,18 @@ function RangePicker({ end, current, months, href, onLeave }: { end: string; cur
                 router.push(href(e.target.value), { scroll: false });
               }
             }}
-            className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
           />
         </label>
         {end < current ? (
-          <Link href={href(shift(end, 1))} onClick={onLeave} scroll={false} className={cx(btn, "rounded-r-lg")} aria-label="One month later" title="One month later">
-            →
+          <Link href={href(shift(end, 1))} onClick={onLeave} scroll={false} aria-label="One month later" title="One month later">
+            <Chevron dir="right" />
           </Link>
         ) : (
-          <span aria-hidden className={cx(btn, "cursor-default text-muted opacity-40 hover:bg-transparent")}>→</span>
+          <span aria-hidden className="off"><Chevron dir="right" /></span>
         )}
       </div>
       {end !== current && (
-        <Link href={href(current)} onClick={onLeave} scroll={false} className="text-xs text-accent hover:underline">
+        <Link href={href(current)} onClick={onLeave} scroll={false} className="link-quiet">
           Back to now
         </Link>
       )}
@@ -669,13 +653,22 @@ function RangePicker({ end, current, months, href, onLeave }: { end: string; cur
   );
 }
 
-function Change({ cur, prev }: { cur: number | null; prev: number | null }) {
-  if (cur == null || prev == null || prev === 0) return <span className="text-xs text-muted">—</span>;
-  const pct = Math.round(((cur - prev) / prev) * 100);
+function Chevron({ dir }: { dir: "left" | "right" }) {
   return (
-    <span className={cx("text-xs font-medium tabular-nums", pct > 0 ? "text-ok" : pct < 0 ? "text-danger" : "text-muted")}>
-      {pct > 0 ? "+" : ""}
-      {pct}%
+    <svg viewBox="0 0 16 16" aria-hidden fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+      <path d={dir === "left" ? "M10 3.5 5.5 8 10 12.5" : "M6 3.5 10.5 8 6 12.5"} />
+    </svg>
+  );
+}
+
+function Change({ cur, prev }: { cur: number | null; prev: number | null }) {
+  if (cur == null || prev == null || prev === 0) return <span className="text-sm font-normal text-faint">—</span>;
+  const pct = Math.round(((cur - prev) / prev) * 100);
+  // Ink for growth, muted for a drop: the sign says which way, no traffic-light colours.
+  return (
+    <span className={cx("text-sm tabular-nums", pct > 0 ? "font-medium text-text" : "font-normal text-muted")}>
+      {pct > 0 ? "+" : pct < 0 ? "−" : ""}
+      {Math.abs(pct)}%
     </span>
   );
 }
@@ -683,7 +676,7 @@ function Change({ cur, prev }: { cur: number | null; prev: number | null }) {
 function SaveStatus({ errors, saving, savedNow }: { errors: number; saving: boolean; savedNow: boolean }) {
   const msg = saving ? "Saving…" : errors ? "" : savedNow ? "Saved" : "";
   return (
-    <span aria-live="polite" className={cx("text-xs", savedNow && !saving ? "text-ok" : "text-muted")}>
+    <span aria-live="polite" className={cx("status is-small", msg ? (savedNow && !saving ? "is-ok" : "is-idle") : "before:hidden")}>
       {msg}
     </span>
   );

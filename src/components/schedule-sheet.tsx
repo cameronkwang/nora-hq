@@ -1,11 +1,11 @@
 "use client";
 
 import { useEffect, useRef, type ReactNode } from "react";
-import { cx } from "./ui";
+import { buttonClass, cx } from "./ui";
 
 /**
- * Controlled bottom sheet (phones) / centered dialog (desktop) on a native <dialog> — focus trap and Esc
- * for free. Same look as the Find leads sheet.
+ * Controlled bottom sheet (phones) / centered dialog (desktop) on a native <dialog>: focus trap and Esc
+ * for free. A raised surface (14px radius, the one floating shadow), the title in the serif.
  */
 export function ScheduleSheet({
   open,
@@ -47,15 +47,15 @@ export function ScheduleSheet({
       onClick={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
-      className={cx("sheet fixed inset-x-0 top-auto bottom-0 w-full md:inset-0 md:m-auto md:h-fit", wide ? "md:max-w-2xl" : "md:max-w-md")}
+      className={cx("sheet sched-sheet fixed inset-x-0 top-auto bottom-0 w-full md:inset-0 md:m-auto md:h-fit", wide ? "md:max-w-2xl" : "md:max-w-md")}
     >
-      <div className="sheet-panel mx-auto max-h-[90dvh] overflow-y-auto overscroll-contain rounded-t-2xl bg-surface px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-3 shadow-xl md:rounded-2xl md:p-5">
-        <div className="mb-3 flex items-start justify-between gap-3">
+      <div className="sheet-panel mx-auto max-h-[90dvh] overflow-y-auto overscroll-contain rounded-t-xl px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-4 md:rounded-xl md:p-6">
+        <div className="sheet-head">
           <div className="min-w-0">
-            <h2 id={titleId} className="text-base font-semibold">{title}</h2>
-            {subtitle && <p className="text-sm text-muted">{subtitle}</p>}
+            <h2 id={titleId} className="title break-words">{title}</h2>
+            {subtitle && <p className="meta mt-1">{subtitle}</p>}
           </div>
-          <button type="button" onClick={onClose} className="-mr-2 -mt-1 flex h-11 shrink-0 items-center rounded-lg px-3 text-sm font-medium text-accent">
+          <button type="button" onClick={onClose} className={cx(buttonClass("ghost"), "shrink-0 text-text")}>
             Close
           </button>
         </div>

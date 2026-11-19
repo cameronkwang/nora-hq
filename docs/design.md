@@ -164,7 +164,8 @@ Email to Myah the Beauty   S&F Massage…   5h ago  ›
   hairline outline, 12px / 600 caps, muted (plain, untracked 12px under `:lang(zh)`). Never coloured.
 - **Status** `.status.is-ok|is-warn|is-danger|is-info|is-idle|is-accent|is-ink` (`<Status tone>`): a 7px
   dot and plain words. Words are ink, except `is-ok` and `is-idle` which are muted (nothing to do).
-  `is-idle` is a hollow dot. `is-ink` is a solid ink dot for a settled state that is neither good
+  `is-idle` is a hollow dot. No state uses `is-accent` (new asks and collab requests are `is-info`, a hot lead
+  stage is `is-warn`, "Claude is on it" is `is-ink`). `is-ink` is a solid ink dot for a settled state that is neither good
   news nor a warning (a post that is "Ready"), so it is never confused with `is-danger`. This replaces every soft-coloured pill. Platforms are the same thing:
   `.status.is-ig|is-tt|is-google|is-facebook` (`<PlatformTag>`).
 - **Counts** `.count` (`<Count>`): a cinnabar numeral, no pill (sidebar, section titles, tabs). The
@@ -182,13 +183,17 @@ Email to Myah the Beauty   S&F Massage…   5h ago  ›
   done, `--border` when not (`.bar`, a 3px line, above 12 items). Always next to "3 of 8" in words.
   No green, no accent.
 - **Tabs** `.tabs`: text tabs on a hairline; the current one (`aria-current="page"`) is ink / 600
-  with a 2px ink underline. 44px tall and at least 44px wide on touch.
+  with a 2px ink underline. 44px tall and at least 44px wide on touch. A tab strip that scrolls sideways
+  (`.tabs.overflow-x-auto`, `.board-tabs`) keeps each tab at its full width. Section tabs (sibling pages under one
+  sidebar entry: Inbox, Outreach, Insights) sit above the page title, drawn by the layout; a page's own view tabs
+  (Schedule / Posts, the task scopes) sit under its title and subtitle.
 - **Segmented choice** `.seg` (`<ThemeChoice>`: Auto / Light / Dark): quiet text buttons in a row;
   the chosen one (`aria-checked`, `aria-pressed` or `aria-current`) reads like the current sidebar row.
 - **Month switcher** `.monthpick`: no box. Two ghost arrows (32px, 44px touch) around
   "November 2026" (`.m`) in 600.
 - **View switch** (List / Board / Table, `<ViewToggle>`): quiet text buttons; the current one reads
-  like the current sidebar row (`--surface-2`, ink, 600).
+  like the current sidebar row (`--surface-2`, ink, 600). On a phone only the icons show (44px squares; the labels
+  stay for screen readers), so the page head keeps to one row.
 - **Figures** `.figure` inside `.figures` (`<Stat>` / `<Figure>`): `.eyebrow` label, the number in
   Newsreader 28px tabular (`.value`), a meta line. No box; figures are separated by 48px of space.
   On a phone they are two columns whose labels, numbers and meta lines share rows (subgrid), so a
@@ -206,7 +211,9 @@ Email to Myah the Beauty   S&F Massage…   5h ago  ›
   `html` has `scroll-padding-bottom: calc(var(--tabbar-h) + 0.75rem)`, raised to `+ 5.5rem` while the
   page has a `.sticky-actions`, `.action-bar`, `.queue-bar` or `.ask-bar`, or an element pinned with
   `bottom-[var(--tabbar-h)]` / `bottom-[calc(var(--tabbar-h)...)]`. So: give a new bar one of those
-  classes, keep it under 5.5rem tall, and sheets keep `scroll-padding-block: 8px` on `.sheet-panel`.
+  classes, keep it under 5.5rem tall, and sheets keep `scroll-padding-block: 8px` on `.sheet-panel`. The two phone
+  bars that are taller have their own rule next to it in `globals.css`: the send mode bar (`.queue-bar.send-bar`,
+  +7.75rem) and the bulk-select panel on /tasks (`.bulk-bar`, +12rem).
 
 ## Shell
 

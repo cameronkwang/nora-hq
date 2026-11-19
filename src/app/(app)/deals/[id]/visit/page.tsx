@@ -27,42 +27,40 @@ export default async function VisitPage({ params, searchParams }: { params: Prom
   const phone = deal.contactPhone;
   const shotDone = deal.status === "shot" || deal.status === "posted" || deal.status === "complete";
   const error = typeof sp.error === "string" ? sp.error : "";
-  const action = "flex min-h-12 flex-1 items-center justify-center gap-2 rounded-xl border border-border bg-surface px-3 text-[15px] font-medium active:bg-surface-2";
 
   return (
-    <div className="mx-auto max-w-xl">
-      <p className="mb-3 text-sm">
-        <Link href={`/deals/${deal.id}`} className="inline-flex min-h-11 items-center text-muted hover:underline md:min-h-0">← Deal details</Link>
-      </p>
-
-      <header className="mb-4">
-        <h1 className="text-3xl font-semibold leading-tight tracking-tight break-words">{deal.businessName}</h1>
-        <p className="mt-1 text-lg text-muted">
-          {deal.visitAt ? formatVisit(deal.visitAt) : "No visit time set"}
-          <span className="text-base"> · {COMP_LABEL[deal.compType]}</span>
+    <div className="max-w-xl">
+      <header className="page-head">
+        <p className="crumb">
+          <Link href={`/deals/${deal.id}`}>Deal details</Link>
         </p>
-        {deal.contactName && <p className="mt-0.5 text-sm text-muted">Ask for {deal.contactName}</p>}
+        <h1 className="display break-words">{deal.businessName}</h1>
+        <p className="sub g-meta">
+          <span className="text-text">{deal.visitAt ? formatVisit(deal.visitAt) : "No visit time set"}</span>
+          <span>{COMP_LABEL[deal.compType]}</span>
+          {deal.contactName && <span>Ask for {deal.contactName}</span>}
+        </p>
       </header>
 
-      {error && <p role="alert" className="mb-4 rounded-lg bg-danger-soft px-3 py-2 text-sm text-danger">{error}</p>}
+      {error && <p role="alert" className="notice mb-6"><span className="status is-danger">{error}</span></p>}
 
       {(maps || phone) && (
-        <div className="mb-5 grid gap-2">
+        <div className="mb-8 grid gap-3">
           {maps && (
-            <>
-              <a href={maps.apple} target="_blank" rel="noreferrer" className="block rounded-xl border border-border bg-surface px-4 py-3 active:bg-surface-2">
-                <span className="block text-xs font-semibold text-muted">Address · tap for Maps</span>
-                <span className="mt-0.5 block text-[17px] font-medium text-accent">{deal.address}</span>
-              </a>
-              <a href={maps.google} target="_blank" rel="noreferrer" className="-mt-1 self-start px-1 py-2 text-sm text-muted underline">Open in Google Maps instead</a>
-            </>
+            <div>
+              <p className="eyebrow">Address · tap for Maps</p>
+              <a href={maps.apple} target="_blank" rel="noreferrer" className="link mt-1 inline-block text-[17px] font-medium leading-6">{deal.address}</a>
+              <p>
+                <a href={maps.google} target="_blank" rel="noreferrer" className="link-quiet inline-flex min-h-11 items-center underline underline-offset-[3px] md:pointer-fine:min-h-8">Open in Google Maps instead</a>
+              </p>
+            </div>
           )}
           {phone && (
             <div className="flex gap-2">
-              <a href={telHref(phone)} className={action}>
+              <a href={telHref(phone)} className={cx(buttonClass("secondary"), "flex-1")}>
                 <PhoneIcon /> Call
               </a>
-              <a href={telHref(phone, "sms")} className={action}>
+              <a href={telHref(phone, "sms")} className={cx(buttonClass("secondary"), "flex-1")}>
                 <TextIcon /> Text
               </a>
             </div>
@@ -70,52 +68,58 @@ export default async function VisitPage({ params, searchParams }: { params: Prom
         </div>
       )}
 
-      <div className="space-y-4">
-        {deal.menuNotes && <Note title="Order / signature dishes" text={deal.menuNotes} strong />}
-        {deal.dietaryNotes && <Note title="Dietary" text={deal.dietaryNotes} />}
-        {deal.filmingNotes && <Note title="Filming notes" text={deal.filmingNotes} />}
+      {(deal.menuNotes || deal.dietaryNotes || deal.filmingNotes) && (
+        <div className="g-notes border-t border-border">
+          {deal.menuNotes && <Note title="Order / signature dishes" text={deal.menuNotes} strong />}
+          {deal.dietaryNotes && <Note title="Dietary" text={deal.dietaryNotes} />}
+          {deal.filmingNotes && <Note title="Filming notes" text={deal.filmingNotes} />}
+        </div>
+      )}
 
-        <p className="rounded-xl bg-warn-soft px-4 py-3 text-[15px] leading-snug text-warn">
-          <span className="font-semibold">{disclosureLine(deal.compType)}</span>
-          <span className="mt-1 block text-sm">FTC: disclose #ad / Paid partnership / gifted — on screen and in the caption, every post.</span>
-        </p>
+      <div role="note" className="notice block">
+        <p className="status is-warn whitespace-normal font-medium">{disclosureLine(deal.compType)}</p>
+        <p className="meta mt-1">FTC: disclose #ad / Paid partnership / gifted, on screen and in the caption, every post.</p>
+      </div>
 
-        <section aria-labelledby="shots-h">
-          <h2 id="shots-h" className="mb-2 text-lg font-semibold">Shot list</h2>
-          <DealShotList dealId={deal.id} shots={deal.shotList} large />
+      <section aria-labelledby="shots-h" className="sec">
+        <header className="sec-head">
+          <h2 id="shots-h" className="title">Shot list</h2>
           {job && (
-            <Link href={`/calendar/jobs/${job.id}`} className="mt-2 inline-flex min-h-11 items-center text-[15px] font-medium text-accent hover:underline">
+            <Link href={`/calendar/jobs/${job.id}`} className="link-quiet">
               B-roll checklist →
             </Link>
           )}
+        </header>
+        <DealShotList dealId={deal.id} shots={deal.shotList} large />
+      </section>
+
+      {deal.deliverables.length > 0 && (
+        <section aria-labelledby="del-h" className="sec">
+          <header className="sec-head">
+            <h2 id="del-h" className="title">Deliverables</h2>
+          </header>
+          <ul className="list">
+            {deal.deliverables.map((d) => (
+              <li key={d.id} className="row">
+                <span className={cx("row-title is-plain", d.postedAt && "text-muted line-through")}>{DELIVERABLE_LABEL[d.kind]}</span>
+                <span className="meta">{d.postedAt ? "Posted" : d.dueDate ? `due ${formatDate(d.dueDate)}` : ""}</span>
+              </li>
+            ))}
+          </ul>
         </section>
+      )}
 
-        {deal.deliverables.length > 0 && (
-          <section aria-labelledby="del-h">
-            <h2 id="del-h" className="mb-2 text-lg font-semibold">Deliverables</h2>
-            <ul className="divide-y divide-border rounded-xl border border-border bg-surface">
-              {deal.deliverables.map((d) => (
-                <li key={d.id} className="flex min-h-12 items-center justify-between gap-3 px-4 py-2 text-[15px]">
-                  <span className={cx(d.postedAt && "text-muted line-through")}>{DELIVERABLE_LABEL[d.kind]}</span>
-                  <span className="text-sm text-muted">{d.postedAt ? "Posted" : d.dueDate ? `due ${formatDate(d.dueDate)}` : ""}</span>
-                </li>
-              ))}
-            </ul>
-          </section>
-        )}
-      </div>
-
-      <div className="sticky-actions mt-6">
+      <div className="sticky-actions action-bar flex flex-wrap items-center gap-x-3 gap-y-2 mt-8">
         {shotDone ? (
-          <Link href={`/deals/${deal.id}`} className={cx(buttonClass("secondary"), "w-full !min-h-12 text-base shadow-sm")}>
-            Marked shot ✓ — add post links on the deal
+          <Link href={`/deals/${deal.id}`} className={cx(buttonClass("secondary"), "h-auto min-h-12 w-full whitespace-normal py-2 text-center leading-6")}>
+            Marked shot ✓. Add post links on the deal
           </Link>
         ) : (
-          <form action={setDealStatusAction}>
+          <form action={setDealStatusAction} className="w-full">
             <input type="hidden" name="id" value={deal.id} />
             <input type="hidden" name="status" value="shot" />
             <input type="hidden" name="back" value={`/deals/${deal.id}/visit`} />
-            <SubmitButton pendingLabel="Saving…" className="w-full !min-h-12 text-base shadow-sm">Mark shot</SubmitButton>
+            <SubmitButton variant="primary" pendingLabel="Saving…" className="min-h-12 w-full">Mark shot</SubmitButton>
           </form>
         )}
       </div>
@@ -125,16 +129,16 @@ export default async function VisitPage({ params, searchParams }: { params: Prom
 
 function Note({ title, text, strong = false }: { title: string; text: string; strong?: boolean }) {
   return (
-    <section className="rounded-xl border border-border bg-surface px-4 py-3">
-      <h2 className="text-xs font-semibold uppercase tracking-wide text-muted">{title}</h2>
-      <p className={cx("mt-1 whitespace-pre-line break-words leading-relaxed", strong ? "text-[17px]" : "text-[15px]")}>{text}</p>
-    </section>
+    <div>
+      <h2 className="eyebrow">{title}</h2>
+      <p className={cx(strong && "is-strong")}>{text}</p>
+    </div>
   );
 }
 
 function PhoneIcon() {
   return (
-    <svg viewBox="0 0 20 20" className="size-5" fill="none" stroke="currentColor" strokeWidth={1.8} aria-hidden>
+    <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={1.8} aria-hidden>
       <path d="M5 2.5h2.5l1.2 3.5-1.8 1.2a10 10 0 005 5l1.2-1.8 3.5 1.2V14a2 2 0 01-2 2A12.5 12.5 0 013 4.5a2 2 0 012-2z" strokeLinejoin="round" />
     </svg>
   );
@@ -142,7 +146,7 @@ function PhoneIcon() {
 
 function TextIcon() {
   return (
-    <svg viewBox="0 0 20 20" className="size-5" fill="none" stroke="currentColor" strokeWidth={1.8} aria-hidden>
+    <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={1.8} aria-hidden>
       <path d="M3 5a2 2 0 012-2h10a2 2 0 012 2v7a2 2 0 01-2 2H8l-4 3v-3.2A2 2 0 013 12V5z" strokeLinejoin="round" />
     </svg>
   );

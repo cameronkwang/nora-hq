@@ -28,10 +28,12 @@ export function ViewToggle({ options, current, cookieName, label = "View" }: { o
             onClick={() => remember(o.value)}
             aria-current={on ? "page" : undefined}
             // Quiet text buttons; the current one reads like the current sidebar row (surface-2, ink, 600).
-            className={cx(buttonClass("ghost", "sm"), on && "bg-surface-2 font-semibold text-text")}
+            // On a phone only the icon shows (the label stays for screen readers), so the page head keeps to one row.
+            className={cx(buttonClass("ghost", "sm"), "max-md:min-w-11 max-md:justify-center max-md:px-0", on && "bg-surface-2 font-semibold text-text")}
+            title={o.label}
           >
             <ViewIcon view={o.value} />
-            {o.label}
+            <span className="max-md:sr-only">{o.label}</span>
           </Link>
         );
       })}

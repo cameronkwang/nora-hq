@@ -4,7 +4,7 @@ import { relativeTime } from "@/lib/dates";
 import { collabCounts, listCollabRequests } from "@/lib/ops-collab";
 import type { CollabRequestStatus } from "@/lib/schema";
 import { COLLAB_STATUS_LABEL, CollabComp, CollabShareCard, CollabTypeChips } from "@/components/collab-bits";
-import { EmptyState, PageHeader, cx } from "@/components/ui";
+import { Count, EmptyState, PageHeader } from "@/components/ui";
 import { collabFormUrl } from "./url";
 
 export const dynamic = "force-dynamic";
@@ -32,57 +32,45 @@ export default async function CollabsPage({ searchParams }: { searchParams: Prom
     <>
       <PageHeader title="Collab requests" subtitle="Businesses asking to work with Nora, from the public form." />
 
-      <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_20rem]">
+      <div className="cols mt-0">
         <div className="min-w-0">
-          <nav aria-label="Collab request lists" className="relative -mx-4 mb-4 overflow-x-auto px-4">
-            <div className="flex min-w-max gap-1 rounded-lg bg-surface-2 p-1 text-sm">
-              {tabs.map((t) => (
-                <Link
-                  key={t.key}
-                  href={t.key === "new" ? "/collabs" : `/collabs?tab=${t.key}`}
-                  aria-current={t.key === tab.key ? "page" : undefined}
-                  className={cx(
-                    "inline-flex items-center rounded-md px-3 py-1.5 font-medium pointer-coarse:min-h-11",
-                    t.key === tab.key ? "bg-surface text-text shadow-sm" : "text-muted hover:text-text",
-                  )}
-                >
-                  {COLLAB_STATUS_LABEL[t.key]}
-                  {counts[t.key] > 0 && <span className="ml-1.5 text-xs tabular-nums text-muted">{counts[t.key]}</span>}
-                </Link>
-              ))}
-            </div>
+          <nav aria-label="Collab request lists" className="tabs mb-1 overflow-x-auto">
+            {tabs.map((t) => (
+              <Link
+                key={t.key}
+                href={t.key === "new" ? "/collabs" : `/collabs?tab=${t.key}`}
+                aria-current={t.key === tab.key ? "page" : undefined}
+                className="flex-none"
+              >
+                {COLLAB_STATUS_LABEL[t.key]}
+                {counts[t.key] > 0 && (t.key === "new" ? <Count n={counts[t.key]} /> : <span className="meta num font-normal">{counts[t.key]}</span>)}
+              </Link>
+            ))}
           </nav>
 
           {rows.length === 0 ? (
             <EmptyState title={tab.empty} />
           ) : (
-            <ul className="flex flex-col gap-2">
+            <ul className="list">
               {rows.map((r) => (
-                <li key={r.id}>
-                  <Link
-                    href={`/collabs/${r.id}`}
-                    className="block rounded-xl border border-border bg-surface p-4 transition-colors hover:bg-surface-2 focus-visible:bg-surface-2"
-                  >
-                    <div className="flex items-baseline justify-between gap-3">
-                      <p className="min-w-0 truncate font-semibold">
-                        {r.businessName}
-                        {r.city && <span className="font-normal text-muted"> · {r.city}</span>}
-                      </p>
-                      <time dateTime={r.createdAt.toISOString()} className="shrink-0 text-xs text-muted">{relativeTime(r.createdAt, now)}</time>
-                    </div>
-                    <CollabTypeChips types={r.collabType} className="mt-2" />
-                    <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1">
-                      <CollabComp compensation={r.compensation} budget={r.budget} />
-                      {r.timeline && r.timeline !== "Not given" && <span className="text-sm text-muted">{r.timeline}</span>}
-                    </div>
+                <li key={r.id} className="g-row">
+                  <Link href={`/collabs/${r.id}`} className="row-title">
+                    {r.businessName}
+                    {r.city && <span className="font-normal text-muted"> · {r.city}</span>}
                   </Link>
+                  <time dateTime={r.createdAt.toISOString()} className="end meta">{relativeTime(r.createdAt, now)}</time>
+                  <div className="more flex flex-wrap items-baseline gap-x-3 gap-y-1">
+                    <CollabTypeChips types={r.collabType} />
+                    <CollabComp compensation={r.compensation} budget={r.budget} />
+                    {r.timeline && r.timeline !== "Not given" && <span>{r.timeline}</span>}
+                  </div>
                 </li>
               ))}
             </ul>
           )}
         </div>
 
-        <aside className="space-y-4">
+        <aside>
           <CollabShareCard url={url} />
         </aside>
       </div>

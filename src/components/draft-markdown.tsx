@@ -32,12 +32,12 @@ function inline(text: string, keyBase = "i"): ReactNode[] {
     const key = `${keyBase}-${k++}`;
     const [whole, b1, b2, code, linkText, linkHref, i1, i2, bare] = m;
     if (b1 !== undefined || b2 !== undefined) out.push(<strong key={key}>{inline(b1 ?? b2 ?? "", key)}</strong>);
-    else if (code !== undefined) out.push(<code key={key} className="rounded bg-surface-2 px-1 py-0.5 text-[0.9em]">{code}</code>);
+    else if (code !== undefined) out.push(<code key={key} className="rounded-sm bg-surface-2 px-1 py-0.5 text-[0.9em]">{code}</code>);
     else if (linkText !== undefined) {
       const href = safeHref(linkHref ?? "");
       out.push(
         href ? (
-          <a key={key} href={href} target="_blank" rel="noopener noreferrer nofollow" className="text-accent underline underline-offset-2">
+          <a key={key} href={href} target="_blank" rel="noopener noreferrer nofollow" className="link">
             {inline(linkText, key)}
           </a>
         ) : (
@@ -47,7 +47,7 @@ function inline(text: string, keyBase = "i"): ReactNode[] {
     } else if (i1 !== undefined || i2 !== undefined) out.push(<em key={key}>{inline(i1 ?? i2 ?? "", key)}</em>);
     else if (bare !== undefined) {
       const href = safeHref(bare);
-      out.push(href ? <a key={key} href={href} target="_blank" rel="noopener noreferrer nofollow" className="break-all text-accent underline underline-offset-2">{bare}</a> : bare);
+      out.push(href ? <a key={key} href={href} target="_blank" rel="noopener noreferrer nofollow" className="link break-all">{bare}</a> : bare);
     }
     last = at + whole.length;
   }
@@ -86,7 +86,8 @@ export function Markdown({ source, className }: { source: string; className?: st
     const h = H_RE.exec(line);
     if (h) {
       const level = h[1].length;
-      const cls = level === 1 ? "text-lg font-semibold" : level === 2 ? "text-base font-semibold" : "text-sm font-semibold";
+      // A report reads as a page: its top heading takes the serif, the rest stay in the sans.
+      const cls = level === 1 ? "title" : level === 2 ? "font-semibold" : "text-sm font-semibold";
       blocks.push(level === 1 ? <h3 key={key} className={cls}>{inline(h[2], key)}</h3> : level === 2 ? <h4 key={key} className={cls}>{inline(h[2], key)}</h4> : <h5 key={key} className={cls}>{inline(h[2], key)}</h5>);
       i++;
       continue;
@@ -103,13 +104,13 @@ export function Markdown({ source, className }: { source: string; className?: st
       while (i < lines.length && TABLE_RE.test(lines[i])) rows.push(cells(lines[i++]));
       blocks.push(
         <div key={key} className="overflow-x-auto">
-          <table className="w-full min-w-max border-collapse text-sm">
+          <table className="w-full min-w-max border-collapse">
             <thead>
-              <tr>{head.map((c, j) => <th key={j} className="border-b border-border px-2 py-1.5 text-left font-semibold">{inline(c, `${key}h${j}`)}</th>)}</tr>
+              <tr>{head.map((c, j) => <th key={j} className="eyebrow border-b border-border py-2 pr-6 text-left last:pr-0">{inline(c, `${key}h${j}`)}</th>)}</tr>
             </thead>
             <tbody>
               {rows.map((r, ri) => (
-                <tr key={ri}>{head.map((_, j) => <td key={j} className="border-b border-border px-2 py-1.5 align-top">{inline(r[j] ?? "", `${key}r${ri}c${j}`)}</td>)}</tr>
+                <tr key={ri}>{head.map((_, j) => <td key={j} className="num border-b border-border py-2 pr-6 align-top last:pr-0">{inline(r[j] ?? "", `${key}r${ri}c${j}`)}</td>)}</tr>
               ))}
             </tbody>
           </table>
@@ -129,7 +130,7 @@ export function Markdown({ source, className }: { source: string; className?: st
     if (QUOTE_RE.test(line)) {
       const q: string[] = [];
       while (i < lines.length && QUOTE_RE.test(lines[i])) q.push(QUOTE_RE.exec(lines[i++])![1]);
-      blocks.push(<blockquote key={key} className="border-l-2 border-border pl-3 text-muted">{withBreaks(q, key)}</blockquote>);
+      blocks.push(<blockquote key={key} className="ask-quote text-muted">{withBreaks(q, key)}</blockquote>);
       continue;
     }
     const para: string[] = [];
@@ -137,5 +138,5 @@ export function Markdown({ source, className }: { source: string; className?: st
     blocks.push(<p key={key}>{withBreaks(para, key)}</p>);
   }
 
-  return <div className={["flex flex-col gap-3 break-words text-sm leading-relaxed", className].filter(Boolean).join(" ")}>{blocks}</div>;
+  return <div className={["flex flex-col gap-3 break-words", className].filter(Boolean).join(" ")}>{blocks}</div>;
 }

@@ -4,7 +4,7 @@ import { useState } from "react";
 import { mailtoHref, type PaymentText } from "@/lib/payment-request";
 import { CopyButton } from "./copy-button";
 import { PaymentLineForm } from "./payment-line-form";
-import { buttonClass, cx } from "./ui";
+import { buttonClass } from "./ui";
 
 type Kind = "invoice" | "reminder";
 const KINDS: Array<{ value: Kind; label: string }> = [
@@ -47,41 +47,32 @@ export function PaymentRequest({
   const taId = "payment-request-text";
 
   return (
-    <details open={open} onToggle={(e) => setOpen(e.currentTarget.open)} className="group mt-4 rounded-lg border border-border">
-      <summary className="no-marker flex min-h-11 cursor-pointer select-none items-center justify-between gap-2 px-3 text-sm font-medium">
+    <details open={open} onToggle={(e) => setOpen(e.currentTarget.open)} className="g-disc mt-5">
+      <summary className="select-none">
         {invoiced ? "Send a reminder" : "Request payment"}
-        <svg viewBox="0 0 16 16" aria-hidden className="size-3.5 shrink-0 transition group-open:rotate-180" fill="none" stroke="currentColor" strokeWidth={1.8}>
-          <path d="m4 6 4 4 4-4" strokeLinecap="round" strokeLinejoin="round" />
+        <svg viewBox="0 0 16 16" aria-hidden fill="none" stroke="currentColor" strokeWidth={1.8}>
+          <path d="M6 3.5 10.5 8 6 12.5" strokeLinecap="round" strokeLinejoin="round" />
         </svg>
       </summary>
-      <div className="flex flex-col gap-3 border-t border-border p-3">
+      <div className="g-disc-body flex flex-col gap-4">
         {!paymentLine && <PaymentLineForm line={null} id="deal-payment-line" />}
 
-        <div role="group" aria-label="Which text" className="flex flex-wrap gap-2">
+        <div role="group" aria-label="Which text" className="chips">
           {KINDS.map((k) => (
-            <button
-              key={k.value}
-              type="button"
-              aria-pressed={kind === k.value}
-              onClick={() => setKind(k.value)}
-              className={cx(
-                "inline-flex min-h-9 items-center rounded-full border px-3 text-sm font-medium pointer-coarse:min-h-11",
-                kind === k.value ? "border-accent bg-accent-soft text-accent" : "border-border bg-surface text-muted hover:text-text",
-              )}
-            >
-              {k.label}
+            <button key={k.value} type="button" aria-pressed={kind === k.value} onClick={() => setKind(k.value)} className="chip">
+              <span>{k.label}</span>
             </button>
           ))}
         </div>
 
         {missing.length > 0 && (
-          <p className="rounded-lg bg-warn-soft px-3 py-2 text-xs text-warn">
+          <p className="status is-warn is-small whitespace-normal">
             Still missing: {missing.join(" and ")}. {missing.includes("the fee") ? "Set the fee in Terms and save, or type it in below." : "Save it above, or type it in below."}
           </p>
         )}
 
         <div>
-          <label className="label" htmlFor={taId}>Text — change anything before you send it</label>
+          <label className="label" htmlFor={taId}>Text (change anything before you send it)</label>
           <textarea
             id={taId}
             rows={14}
@@ -94,11 +85,11 @@ export function PaymentRequest({
           />
         </div>
         <div className="flex flex-wrap gap-2">
-          <CopyButton targetId={taId} label="Copy text" variant="primary" />
+          <CopyButton targetId={taId} label="Copy text" />
           <a href={mailtoHref(to, { subject, body: text[kind] })} className={buttonClass("secondary")}>Email it</a>
         </div>
-        <p className="text-xs text-muted">
-          {to ? `“Email it” opens your mail app to ${to}.` : "No contact email on this deal — “Email it” opens your mail app with the text; add the address there."}{" "}
+        <p className="meta">
+          {to ? `“Email it” opens your mail app to ${to}.` : "No contact email on this deal. “Email it” opens your mail app with the text; add the address there."}{" "}
           Nothing is sent from Nora HQ.{invoiced ? "" : " Once it’s sent, tap “Invoice sent” above."}
         </p>
       </div>
