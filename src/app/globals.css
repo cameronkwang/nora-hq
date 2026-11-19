@@ -270,6 +270,9 @@ html { scroll-padding-bottom: calc(var(--tabbar-h) + 0.75rem); }
 html:has(.sticky-actions, .action-bar, .queue-bar, .ask-bar, [class*="bottom-[var(--tabbar-h)]"], [class*="bottom-[calc(var(--tabbar-h)"]) {
   scroll-padding-bottom: calc(var(--tabbar-h) + 5.5rem);
 }
+/* Sideways strips (tab and chip rows): a focused chip stops one gutter from the edge, not flush against it. The
+   scrolling itself is a small focus helper in the root layout (Chrome leaves a half-visible chip where it is). */
+:where(.overflow-x-auto, .overflow-x-scroll, .board-tabs) { scroll-padding-inline: 1rem; }
 /* Two phone bars are taller than 5.5rem: the send mode bar (two rows of 44px buttons, about 7rem) and the floating
    bulk-select panel on /tasks (about 10.5rem). While one is up, focus stops above its top edge. More specific than the
    rule above, so it wins while the bar is on the page. */
@@ -543,7 +546,7 @@ summary.no-marker::-webkit-details-marker { display: none; }
   .crumb a { text-decoration: none; }
   .crumb a:hover { color: var(--text); }
   @media (max-width: 767px), (pointer: coarse) {   /* a 44px hit area; the negative margins keep the line's height */
-    .crumb a { position: relative; z-index: 1; display: inline-flex; align-items: center; min-height: 44px; margin: -13px 0; }   /* above the title it overlaps */
+    .crumb a { position: relative; z-index: 1; display: inline-flex; align-items: center; justify-content: center; min-height: 44px; min-width: 2.75rem; margin: -13px 0; }   /* above the title it overlaps */
   }
   .head-row { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 4px 24px; }   /* actions wrap under the title when there is no room */
   .head-row > .display { min-width: 0; overflow-wrap: anywhere; }

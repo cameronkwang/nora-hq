@@ -132,21 +132,21 @@ const en = {
   langName: "English",
   htmlLang: "en",
   meta: {
-    title: "Welcome — let's get you set up",
+    title: "Welcome! Let's get you set up",
     description: "A short, private onboarding form from Nora & Cameron.",
   },
   brand: "Nora & Cameron",
   common: {
     optional: "optional",
     required: "needed",
-    skip: "Everything on this page is optional. Skip anything you're not sure about — we'll ask on our call.",
+    skip: "Everything on this page is optional. Skip anything you're not sure about; we'll ask on our call.",
     back: "Back",
     next: "Next",
     submit: "Send my answers",
     sendNow: "Send now",
     sending: "Sending…",
     oneMoreMinute: "Got one more minute?",
-    thatsAll: "That's all we need! Tap “Send now” — or tap Next if you've got one more minute for a few optional questions.",
+    thatsAll: "That's all we need! Tap “Send now”, or tap Next if you've got one more minute for a few optional questions.",
     stepOf: (n: number, total: number) => `Step ${n} of ${total}`,
     /** Sits right before the example itself. English ends with a space; the Chinese full-width colon needs none. */
     example: "Example: ",
@@ -161,7 +161,7 @@ const en = {
   },
   welcome: {
     hi: (business: string) => `Hi ${business}! 👋`,
-    line: "This takes about a minute. Nothing is posted without your OK — and please never send passwords here.",
+    line: "This takes about a minute. Nothing is posted without your OK, and please never send passwords here.",
   },
   /** The "Is this right?" card on page 1: what we found, shown back to the owner. */
   facts: {
@@ -181,7 +181,7 @@ const en = {
   ],
   fields: {
     factsOk: { label: "Is this right?" },
-    factsFix: { label: "What should we fix?", hint: "Tell us in your own words — we'll update it.", placeholder: "We close at 10pm on Fridays; the phone number is old." },
+    factsFix: { label: "What should we fix?", hint: "Tell us in your own words and we'll update it.", placeholder: "We close at 10pm on Fridays; the phone number is old." },
     contactName: { label: "Your name", placeholder: "Lily Chen" },
     contactPhone: { label: "Mobile phone", placeholder: "(804) 555-0123" },
     contactEmail: { label: "Email", hint: "We'll send your monthly report here.", placeholder: "you@example.com" },
@@ -195,7 +195,7 @@ const en = {
     accessMeta: { label: "Instagram + Facebook access" },
     accessGoogle: { label: "Google Business access" },
     mediaLink: {
-      label: "Logo, photos and videos — share a link",
+      label: "Logo, photos and videos: share a link",
       hint: "A Google Drive, Dropbox or iCloud folder works. Set sharing to \"Anyone with the link\" and paste it here.",
       placeholder: "https://drive.google.com/…",
     },
@@ -203,14 +203,14 @@ const en = {
 
     promote: {
       label: "What should we show off?",
-      hint: "Your best dishes or products, deals, events coming up — anything you're proud of.",
+      hint: "Your best dishes or products, deals, events coming up: anything you're proud of.",
       placeholder: "Spicy beef noodle soup and soup dumplings; lunch special Mon–Fri; Lunar New Year menu in February",
     },
     postLangs: { label: "Which language should we post in?" },
     creatorsOk: { label: "Is it OK to invite local food creators to visit and post about you?" },
-    creatorOffer: { label: "What could you offer a creator for a visit?", hint: "Tap any — nothing is promised until you agree." },
+    creatorOffer: { label: "What could you offer a creator for a visit?", hint: "Tap any. Nothing is promised until you agree." },
     complaints: { label: "When someone leaves an unhappy review, we should…" },
-    anythingElse: { label: "Anything else we should know?", placeholder: "Questions, worries, ideas — anything at all." },
+    anythingElse: { label: "Anything else we should know?", placeholder: "Questions, worries, ideas, anything at all." },
   } satisfies Record<IntakeField, FieldCopy>,
   needContact: "Please give us at least a phone number or an email so we can reach you.",
   options: {
@@ -232,7 +232,7 @@ const en = {
     title: "How to give us access",
     intro: "Add Nora as a helper on your accounts. You stay the owner, and you can remove her any time. No passwords needed.",
     emailLabel: "Nora's email to add:",
-    emailFallback: "Nora's email — we'll text it to you",
+    emailFallback: "Nora's email (we'll text it to you)",
     showHow: "Show me how",
     meta: {
       title: "Instagram + Facebook (one place for both)",
@@ -266,18 +266,18 @@ const en = {
     done: (n: number) => (n === 1 ? "1 file added ✓" : `${n} files added ✓`),
     remove: "Remove",
     failed: "That file didn't upload. Try again, or share a link instead.",
-    tooBig: (name: string) => `${name} is over 25 MB — please share it with a link instead.`,
+    tooBig: (name: string) => `${name} is over 25 MB. Please share it with a link instead.`,
     badType: (name: string) => `${name} isn't a photo, video or PDF.`,
   },
   errors: {
     contactName: "Please add your name.",
     contactMethod: "Please add a phone number or an email so we can reach you.",
-    tooLong: "That's a bit long — please shorten it.",
+    tooLong: "That's a bit long. Please shorten it.",
     email: "That email doesn't look quite right.",
     pick: "Please pick one of the options.",
-    secret: "That looks like a password. Please take it out — we never need one.",
-    fix: "Almost there — please check the highlighted answers.",
-    generic: "Sorry, something went wrong on our side. Please try again in a minute — your answers are still here.",
+    secret: "That looks like a password. Please take it out; we never need one.",
+    fix: "Almost there! Please check the highlighted answers.",
+    generic: "Sorry, something went wrong on our side. Please try again in a minute. Your answers are still here.",
     rateLimited: "We got a lot of tries from this connection. Please wait a little and try again.",
   } satisfies Record<IntakeErrorKey | "fix" | "generic" | "rateLimited", string>,
   thanks: {
@@ -286,7 +286,7 @@ const en = {
     nextTitle: "What happens next",
     next: [
       "We'll start planning your first month with what you told us.",
-      "Nora will reach out to set up a short call — we'll fill in anything you skipped.",
+      "Nora will reach out to set up a short call, and we'll fill in anything you skipped.",
       "You'll see every post before it goes live. Nothing is posted without your OK.",
     ],
     foot: "Questions anytime? Just text Nora.",
@@ -298,12 +298,12 @@ const en = {
   },
   expired: {
     title: "This link has expired",
-    body: "No problem — just ask Nora for a new one.",
+    body: "No problem, just ask Nora for a new one.",
   },
   share: {
     label: "English",
     message: (business: string, url: string) =>
-      `Hi! It's Nora 😊 So excited to start working with ${business}. Here's a short welcome form — it takes about a minute. We've already filled in what we could find, so you mostly just check it. It works in English and Chinese.\n\n${url}\n\nPlease don't share this link — it's just for you. Text me anytime with questions!`,
+      `Hi! It's Nora 😊 So excited to start working with ${business}. Here's a short welcome form; it takes about a minute. We've already filled in what we could find, so you mostly just check it. It works in English and Chinese.\n\n${url}\n\nPlease don't share this link, it's just for you. Text me anytime with questions!`,
   },
 };
 

@@ -12,7 +12,8 @@ import { blobEnabled } from "@/lib/uploads";
 import { QuickAsk } from "@/components/quick-ask";
 import { NotifyHomeCard } from "@/components/notify-home-card";
 import { NEW_CLIENT_HREF } from "@/components/onboard-link";
-import { ClientHealth } from "@/components/client-health-strip";
+import { HealthLine, loadClientHealth } from "@/components/client-health-strip";
+import type { ClientHealthRow } from "@/lib/data";
 import { HomeRow, NoraHome } from "@/components/nora-home";
 import { KIND_LABELS } from "@/components/draft-checks";
 import { Card, Count, EmptyState, PageHeader, ProgressBar, Status, Tag, clientLabel, formatNumber, humanize } from "@/components/ui";
@@ -145,7 +146,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<Rec
 
   const openDue = and(ne(schema.tasks.status, "done"), isNotNull(schema.tasks.dueDate), lte(schema.tasks.dueDate, now));
   const clients = await listClients();
-  const [newCollabs, cms, [asksWaiting], [draftCount], [dueCount], pendingDrafts, dueTasks] = await Promise.all([
+  const [newCollabs, cms, [asksWaiting], [draftCount], [dueCount], pendingDrafts, dueTasks, health] = await Promise.all([
     countNewCollabRequests(),
     Promise.all(clients.map((c) => getClientMonth(c.id, month))),
     db.select({ n: sql<number>`count(*)::int` }).from(schema.asks).where(and(eq(schema.asks.status, "new"), ne(schema.asks.kind, "idea"))),
@@ -153,6 +154,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<Rec
     db.select({ n: sql<number>`count(*)::int` }).from(schema.tasks).where(openDue),
     db.select().from(schema.drafts).where(eq(schema.drafts.status, "needs_review")).orderBy(asc(schema.drafts.createdAt)).limit(NEEDS_YOU_MAX),
     db.select().from(schema.tasks).where(openDue).orderBy(asc(schema.tasks.dueDate), asc(schema.tasks.createdAt)).limit(NEEDS_YOU_MAX),
+    loadClientHealth(),
   ]);
 
   const forYou = await getForYou(user.email, me, now);
@@ -173,10 +175,11 @@ export default async function Home({ searchParams }: { searchParams: Promise<Rec
   const hasForYou = forYou.asks.length > 0 || forYou.tasks.length > 0;
   const caughtUp = drafts.length === 0 && tasks.length === 0 && !hasForYou;
 
-  // The asks waiting count (it was a tile) is the quiet action of the first section.
+  // The count of new asks in the Inbox (it was a tile) is the quiet action of the first section. It counts every new
+  // ask, not only the ones for you, so it says where the number comes from.
   const asksLink = asksWaiting.n > 0 ? (
     <Link href="/asks" className="link-quiet">
-      {asksWaiting.n} {asksWaiting.n === 1 ? "ask" : "asks"} waiting →
+      {asksWaiting.n} new in Inbox →
     </Link>
   ) : undefined;
 
@@ -191,8 +194,6 @@ export default async function Home({ searchParams }: { searchParams: Promise<Rec
         {/* One-time "turn on phone alerts" prompt; hides itself once handled. */}
         <NotifyHomeCard />
         {sentNote}
-        {/* One row per business: a coloured dot and its single worst issue (or "All good"). */}
-        <ClientHealth />
       </div>
 
       {/* What is waiting, by kind. Each count sits in its section title (and in the sidebar), not in a tile. */}
@@ -280,7 +281,8 @@ export default async function Home({ searchParams }: { searchParams: Promise<Rec
           </>
         )}
 
-        {/* The month, one row per business: what is waiting there, the plan, open tasks and views. */}
+        {/* The month, one row per business: its health (a dot and its single worst issue, or "All good"), what is
+            waiting there, the plan, open tasks and views. The one list of businesses on Home. */}
         <Card
           title="Businesses"
           className="[&>.sec-head]:flex-wrap"
@@ -304,7 +306,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<Rec
           ) : (
             <ul className="list">
               {months.map((cm) => (
-                <BusinessRow key={cm.client.id} cm={cm} now={now} newCollabs={isCreatorClient(cm.client) ? newCollabs : 0} />
+                <BusinessRow key={cm.client.id} cm={cm} now={now} health={health.get(cm.client.id)} newCollabs={isCreatorClient(cm.client) ? newCollabs : 0} />
               ))}
             </ul>
           )}
@@ -349,19 +351,25 @@ async function getForYou(email: string, me: "cameron" | "nora" | null, now: stri
   return { asks: asks.slice(0, FOR_YOU_MAX), askTotal: asks.length, tasks };
 }
 
-/** One business in the ledger: its name (and what is waiting there), this month's plan, open tasks, latest views. */
-function BusinessRow({ cm, now, newCollabs = 0 }: { cm: ClientMonth; now: string; newCollabs?: number }) {
+/**
+ * One business in the ledger: its name, its health (the single worst issue, or "All good") and the drafts waiting
+ * there, then this month's plan, open tasks and latest views. Unanswered reviews and overdue tasks are health issues,
+ * so they are said once, in the health line. Nora's own workspace has no health line; it shows new collab requests.
+ */
+function BusinessRow({ cm, now, health, newCollabs = 0 }: { cm: ClientMonth; now: string; health?: ClientHealthRow; newCollabs?: number }) {
   const creator = isCreatorClient(cm.client);
   const { done, target } = planProgress(cm);
   const views = latestViews(cm);
   const id = cm.client.id;
-  const overdue = cm.openTasks.filter((t) => isOverdue(t, now)).length;
   const open = cm.openTasks.length;
+  // Without a health line (Nora's workspace, or health failed to load) the review and overdue counts stay as links.
+  const overdue = health ? 0 : cm.openTasks.filter((t) => isOverdue(t, now)).length;
+  const reviews = health ? 0 : cm.unrepliedReviews;
   // What is waiting there, as ink links joined by middle dots (no coloured words).
   const chips = [
     { n: newCollabs, label: newCollabs === 1 ? "new collab request" : "new collab requests", href: "/collabs" },
     { n: cm.pendingDrafts, label: cm.pendingDrafts === 1 ? "draft" : "drafts", href: `/review?client=${id}` },
-    { n: cm.unrepliedReviews, label: cm.unrepliedReviews === 1 ? "review" : "reviews", href: `/reviews?client=${id}` },
+    { n: reviews, label: reviews === 1 ? "review" : "reviews", href: `/reviews?client=${id}` },
     { n: overdue, label: "overdue", href: `/tasks?client=${id}&scope=all` },
   ].filter((c) => c.n > 0);
 
@@ -375,8 +383,13 @@ function BusinessRow({ cm, now, newCollabs = 0 }: { cm: ClientMonth; now: string
           {creator && <Tag>Creator</Tag>}
           {cm.client.location && <span className="meta">{cm.client.location}</span>}
         </span>
-        {chips.length > 0 && (
+        {(health || chips.length > 0) && (
           <span className="ledger-wait">
+            {health && (
+              <span>
+                <HealthLine row={health} />
+              </span>
+            )}
             {chips.map((c) => (
               <span key={c.label}>
                 <Link href={c.href} className="link">

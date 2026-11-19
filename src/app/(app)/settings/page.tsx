@@ -9,7 +9,7 @@ import { appUrl, PROVIDER_LABEL, isOAuthProvider } from "@/lib/integrations/oaut
 import { instagramConfigured } from "@/lib/integrations/instagram";
 import { googleOAuthConfigured } from "@/lib/integrations/google-auth";
 import { listLocations, type GoogleLocation } from "@/lib/integrations/google";
-import { Card, EmptyState, PageHeader, Status, Tag, buttonClass, clientLabel, cx } from "@/components/ui";
+import { Card, EmptyState, PageHeader, Status, buttonClass, clientLabel, cx } from "@/components/ui";
 import { ConfirmButton, SubmitButton } from "@/components/client-form";
 import { CopyButton } from "@/components/copy-button";
 import { SavedRepliesRow } from "@/components/reply-links";
@@ -34,7 +34,7 @@ function Flash({ tone, children }: { tone: "ok" | "warn" | "danger"; children: R
 }
 
 function ConnStatus({ conn }: { conn: ConnectionSummary | undefined }) {
-  if (!conn) return <Tag bare>Not connected</Tag>;
+  if (!conn) return <Status tone="neutral" small>Not connected</Status>;
   if (conn.status === "ok") return <Status tone="ok" small>Connected</Status>;
   if (conn.status === "expired") return <Status tone="warn" small>Expired, reconnect</Status>;
   return <Status tone="danger" small>Problem</Status>;
@@ -377,7 +377,7 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
                   <p className="meta">{e.purpose} · docs/setup.md, {e.doc}</p>
                 </div>
                 <div className="ps-row-end">
-                  {e.set ? <Status tone="ok" small>Set</Status> : e.required ? <Status tone="danger" small>Missing</Status> : <Tag bare>Not set</Tag>}
+                  {e.set ? <Status tone="ok" small>Set</Status> : e.required ? <Status tone="danger" small>Missing</Status> : <Status tone="neutral" small>Not set</Status>}
                 </div>
               </li>
             ))}

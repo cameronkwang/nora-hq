@@ -1,10 +1,10 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { THEME_KEY as KEY } from "@/lib/theme";
 import { cx } from "./ui";
 
 type Theme = "auto" | "light" | "dark";
-const KEY = "nora-hq:theme";
 const OPTIONS: { value: Theme; label: string }[] = [
   { value: "auto", label: "Auto" },
   { value: "light", label: "Light" },
@@ -28,6 +28,7 @@ export function ThemeChoice({ className }: { className?: string }) {
     const root = document.documentElement;
     if (next === "auto") delete root.dataset.theme;
     else root.dataset.theme = next;
+    // The phone's browser and status bar follow data-theme too: the root layout's script watches it.
     try {
       if (next === "auto") localStorage.removeItem(KEY);
       else localStorage.setItem(KEY, next);

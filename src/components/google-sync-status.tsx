@@ -5,7 +5,7 @@ import { relativeTime } from "@/lib/dates";
 import { googleSyncInfo, type GoogleSyncInfo, type GoogleSyncOpts } from "@/lib/google-status";
 import { findConnection } from "@/lib/integrations/connections";
 import type { Client } from "@/lib/schema";
-import { Status, Tag, clientLabel, cx } from "./ui";
+import { Status, clientLabel, cx } from "./ui";
 
 /**
  * Per-business Google review sync status: what the last sync actually found for THIS business
@@ -88,7 +88,7 @@ export async function ClientGoogleSync({ client, ...rest }: { client: SyncClient
  * no Google item in its plan isn't meant to sync, so it is left out of the count.
  */
 export async function GoogleSyncSummaryBadge({ clients, connection }: { clients: SyncClient[]; connection: { status: string } | null | undefined }) {
-  if (!connection) return <Tag bare>Not connected</Tag>;
+  if (!connection) return <Status tone="neutral" small>Not connected</Status>;
   if (connection.status === "expired") return <Status tone="warn" small>Expired: reconnect</Status>;
   if (connection.status !== "ok") return <Status tone="danger" small>Problem</Status>;
   const work = await googleWork();

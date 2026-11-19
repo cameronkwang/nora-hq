@@ -182,7 +182,7 @@ export default async function AsksPage({ searchParams }: { searchParams: Promise
                     {nTasks > 0 && <span className="meta">{nTasks} task{nTasks === 1 ? "" : "s"}</span>}
                     {!simple && nDrafts > 0 && <span className="meta">{nDrafts} draft{nDrafts === 1 ? "" : "s"}</span>}
                     {/* 44px to tap on a phone, without making the line taller. */}
-                    <Link href={`/asks/${ask.id}`} className="link -my-2.5 inline-flex min-h-11 items-center text-sm md:pointer-fine:my-0 md:pointer-fine:min-h-0">
+                    <Link href={`/asks/${ask.id}`} className="link -my-2.5 inline-flex min-h-11 min-w-11 items-center justify-center text-sm md:pointer-fine:my-0 md:pointer-fine:min-h-0 md:pointer-fine:min-w-0">
                       Open
                     </Link>
                   </div>

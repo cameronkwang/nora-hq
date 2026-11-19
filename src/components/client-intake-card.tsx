@@ -113,7 +113,7 @@ function PrefillChecklist({ clientId, check, out }: { clientId: string; check: F
         </p>
       )}
       <p className="meta mt-2">
-        <a href={`/start-preview/${clientId}`} target="_blank" rel="noopener" className="link">Preview what the owner sees</a>
+        <a href={`/start-preview/${clientId}`} target="_blank" rel="noopener" className="link inline-flex min-h-11 items-center md:pointer-fine:min-h-0">Preview what the owner sees</a>
       </p>
     </div>
   );

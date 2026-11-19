@@ -26,15 +26,10 @@
   }
   @media (max-width: 767px) { .composer { margin-bottom: 20px; } }
 
-  /* Notes above the health strip read as rows of the same ruled list: the strip's top hairline closes them. */
+  /* Notes under the greeting read as rows of one ruled list. */
   .home-notes > .notice { border-bottom: 0; }
   .home-notes > .notice + .notice { border-top: var(--rule); }
-  .home-notes > .notice:last-child { border-bottom: var(--rule); }   /* no strip under it (no businesses yet) */
-
-  /* Health strip: one row per business, a dot and words. */
-  .health-row { display: grid; grid-template-columns: 16rem minmax(0, 1fr) 14px; column-gap: 16px; }
-  .health-row .status { white-space: normal; }
-  @media (min-width: 1024px) { .health-row .row-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } }
+  .home-notes > .notice:last-child { border-bottom: var(--rule); }
 
   /* A row on Home (an ask, a draft, a shoot, a reel: HomeRow in nora-home.tsx). For you, To approve and Nora's lists
      share their right-hand columns (business, when) with the task rows (.task-link in calendar-tasks.css), so the lists
@@ -60,6 +55,11 @@
   .ledger-name a.row-title:hover { text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 3px; }
   .ledger-name .meta { margin-left: 8px; }
   .ledger-wait { font-size: var(--text-sm); }
+  /* The health line: a dot and words (ClientHealthRow). A long issue wraps instead of pushing the row sideways. */
+  .ledger-wait .status { white-space: normal; }
+  .ledger-health { text-decoration: none; }
+  .ledger-health > span { text-decoration: underline; text-decoration-color: var(--border-strong); text-decoration-thickness: 1px; text-underline-offset: 3px; }
+  .ledger-health:hover > span { text-decoration-color: var(--text); }
   .ledger-stats { display: contents; }                        /* columns here; one dotted line when the row stacks */
   .ledger-stats b { font-weight: 600; color: var(--text); }
   .ledger-plan { display: inline-flex; align-items: baseline; gap: 8px; min-width: 0; }
@@ -75,13 +75,6 @@
     .ledger-views { text-align: left; }
   }
   @media (max-width: 1023px) {
-    /* Name left, status right while both fit on the line; when they don't (a long name, a small phone), the status
-       drops under the name as the row's second line instead of squeezing the name into a narrow column. */
-    .health-row { display: flex; flex-wrap: wrap; justify-content: space-between; column-gap: 12px; }
-    .health-row .chev { display: none; }
-    .health-row .row-title { flex: 0 1 auto; }
-    .health-row .status { flex: 0 1 auto; min-width: 0; }
-
     .approve-row { grid-template-columns: minmax(0, 1fr) 14px; column-gap: 12px; padding: 10px 0; }
     .approve-row .approve-main { grid-column: 1; }
     .approve-main.is-clamp { display: block; }
@@ -128,6 +121,9 @@
   .ask-facts { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 14px; }
   /* Phones: the facts, then the moves on a line of their own, always in the same place. */
   @media (max-width: 767px) { .ask-foot { flex-direction: column; align-items: flex-start; } }
+  /* Touch: a one-line ask is still a 44px target. The padding grows the hit area and the negative margin gives the
+     room back, so the lines sit where they did. */
+  @media (max-width: 767px), (pointer: coarse) { .ask-body { padding-block: 10px; margin-block: -10px; } }
 
   /* Something quoted (the latest reply, a review, a note): a hairline down its left side, no fill. */
   .ask-quote { display: block; border-left: 2px solid var(--border); padding-left: 12px; text-decoration: none; }

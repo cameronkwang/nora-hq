@@ -64,9 +64,9 @@ export default async function CreatorPage({ params, searchParams }: { params: Pr
                 <li className="py-2.5">
                   <p className="status is-ig is-small text-muted">Instagram</p>
                   <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
-                    <a href={igProfileUrl(c.instagramHandle)} target="_blank" rel="noopener noreferrer" className="link break-all">@{c.instagramHandle} ↗</a>
+                    <a href={igProfileUrl(c.instagramHandle)} target="_blank" rel="noopener noreferrer" className="link tap-target break-all">@{c.instagramHandle} ↗</a>
                     {!c.doNotContact && (
-                      <a href={igDmUrl(c.instagramHandle)} target="_blank" rel="noopener noreferrer" className="link-quiet">Open DM ↗</a>
+                      <a href={igDmUrl(c.instagramHandle)} target="_blank" rel="noopener noreferrer" className="link-quiet tap-target">Open DM ↗</a>
                     )}
                   </div>
                 </li>
@@ -74,7 +74,7 @@ export default async function CreatorPage({ params, searchParams }: { params: Pr
               {c.tiktokHandle ? (
                 <li className="py-2.5">
                   <p className="status is-tt is-small text-muted">TikTok</p>
-                  <a href={ttProfileUrl(c.tiktokHandle)} target="_blank" rel="noopener noreferrer" className="link break-all">@{c.tiktokHandle} ↗</a>
+                  <a href={ttProfileUrl(c.tiktokHandle)} target="_blank" rel="noopener noreferrer" className="link tap-target break-all">@{c.tiktokHandle} ↗</a>
                   {!c.doNotContact && <p className="meta">DM from their profile in the TikTok app.</p>}
                 </li>
               ) : null}

@@ -23,6 +23,9 @@ const ROUTES = ["/", "/asks", "/asks/new", "/tasks", "/tasks?view=list", "/tasks
   "/review?tab=approved", "/review?tab=approved&send=1",
   "/start-preview/snf-kingdom", "/start-preview/snf-kingdom?lang=zh-Hans", "/start-preview/snf-kingdom?lang=zh-Hant", "/start-preview/maxs-virginia-beach",
   ...CLIENT_IDS.flatMap((id) => [`/clients/${id}`, `/clients/${id}/settings`])];
+/** Nora's own HQ (signed in as nora@local): her Home, Inbox and simple ask page, Calendar, workspace and Mine pages. */
+const NORA_ROUTES = ["/", "/asks", "/asks/new", "/tasks", "/calendar", "/calendar?tab=posts", "/contracts", "/collabs", "/stats", "/settings", "/settings/notifications",
+  "/clients/noraeatsgood", "/kit-settings", "/deals"];
 const PUBLIC_ROUTES = ["/collab", "/start/smoke-not-a-real-token", "/start/smoke-not-a-real-token?lang=zh-Hans", "/start/smoke-not-a-real-token?lang=zh-Hant"];
 const VIEWPORTS = [{ name: "desktop", width: 1280, height: 900 }, { name: "mobile", width: 390, height: 844 }];
 
@@ -815,10 +818,24 @@ async function noraFlows(browser) {
     const a = page.locator(`a[href^='/collabs/']`, { hasText: biz }).first();
     await a.waitFor({ timeout: 15000 });
     reqId = (await a.getAttribute("href")).split("/").pop().split("?")[0];
+    // What Nora herself sees (since #25 her HQ has its own, simpler workspace page and Inbox): signed in as Nora.
+    const nora = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+    await login(nora, "nora@local");
+    const np = await nora.newPage();
+    np.setDefaultTimeout(30000);
+    try {
+      await np.goto(`${BASE}/clients/noraeatsgood`, { waitUntil: "networkidle" });
+      if (!(await np.locator(`text=${biz}`).count())) throw new Error("not on Nora's Collab requests card (Nora's view)");
+      await np.goto(`${BASE}/asks?tab=nora`, { waitUntil: "networkidle" });
+      if (!(await np.locator(`text=${biz}`).count())) throw new Error("no ask in For Nora (Nora's view)");
+    } finally {
+      await nora.close();
+    }
+    // Cameron sees them too.
     await page.goto(`${BASE}/clients/noraeatsgood`, { waitUntil: "networkidle" });
-    if (!(await page.locator(`text=${biz}`).count())) throw new Error("not on Nora's Collab requests card");
+    if (!(await page.locator(`text=${biz}`).count())) throw new Error("not on Nora's Collab requests card (Cameron's view)");
     await page.goto(`${BASE}/asks?tab=nora`, { waitUntil: "networkidle" });
-    if (!(await page.locator(`text=${biz}`).count())) throw new Error("no ask in For Nora");
+    if (!(await page.locator(`text=${biz}`).count())) throw new Error("no ask in For Nora (Cameron's view)");
     const r = await tool("get_collab_request", { id: reqId });
     leadId = r.leadId ?? r.request?.leadId ?? "";
     if (!leadId) throw new Error(`no leadId: ${JSON.stringify(r).slice(0, 300)}`);
@@ -835,7 +852,7 @@ async function noraFlows(browser) {
     cp.setDefaultTimeout(30000);
     try {
       await cp.goto(`${BASE}/`, { waitUntil: "networkidle" });
-      // the Businesses list (the Client health strip above it links to businesses too, and leaves Nora's workspace out)
+      // the Businesses list (Nora's workspace first; each business row also carries its health line)
       const grid = cp.locator("main section", { has: cp.locator("h2", { hasText: /^Businesses$/ }) }).last();
       const first = grid.locator("a[href^='/clients/']").filter({ hasNotText: /^New client$/ }).first();
       const href = await first.getAttribute("href");
@@ -3181,39 +3198,42 @@ async function v10Flows(browser) {
   });
   await pub.close();
 
-  /* ── #11 Client health strip on Home ── */
-  await step("#11 Home → Client health: one row per active business with its single worst issue ('Opening in 12 days', 'N reviews unanswered', 'All good'); an overdue task outranks the opening and the row opens the right page; Nora's workspace isn't listed", async () => {
+  /* ── #11 Client health on Home: each business's health line sits in its row of the Businesses ledger ── */
+  await step("#11 Home → Businesses: each active business's row carries its single worst issue ('Opening in 12 days', 'N reviews unanswered', 'All good'); an overdue task outranks the opening and the issue opens the right page; Nora's workspace has no health line", async () => {
     await page.goto(`${BASE}/`, { waitUntil: "networkidle" });
-    const c = card(page, /^Client health$/);
+    const c = card(page, /^Businesses$/);
     await c.waitFor({ timeout: 15000 });
     const active = (await tool("list_clients", {})).filter((x) => x.kind === "business").length;
-    if ((await c.locator("li").count()) !== active) throw new Error(`${await c.locator("li").count()} rows for ${active} active businesses`);
-    if (await c.locator("li", { hasText: "noraeatsgood" }).count()) throw new Error("Nora's own workspace is on the strip");
+    const bizRows = c.locator("li").filter({ hasNotText: "noraeatsgood" });
+    if ((await bizRows.count()) !== active) throw new Error(`${await bizRows.count()} business rows for ${active} active businesses`);
+    if ((await c.locator("li .status").count()) !== active) throw new Error(`${await c.locator("li .status").count()} health lines for ${active} active businesses`);
+    if (await c.locator("li", { hasText: "noraeatsgood" }).locator(".status").count()) throw new Error("Nora's own workspace has a health line");
     const row = (name) => c.locator("li", { hasText: name }).first();
+    const issue = (name) => row(name).locator("a.ledger-health");
     let t = flat(await row(depot).innerText());
     if (!/Heads-up: Opening in 12 days/.test(t) || /more/.test(t)) throw new Error(`pre-launch row: ${t}`);
-    if ((await row(depot).locator("a").getAttribute("href")) !== `/clients/${depotId}`) throw new Error("the opening row doesn't open the business page");
+    if ((await issue(depot).getAttribute("href")) !== `/clients/${depotId}`) throw new Error("the opening line doesn't open the business page");
     if (!/OK: All good/.test(flat(await row(grill).innerText()))) throw new Error(`a business with nothing wrong reads: ${flat(await row(grill).innerText())}`);
-    // Crab O Clock has sample reviews: while any is unanswered, that is its worst issue and the row opens its reviews
+    // Crab O Clock has sample reviews: while any is unanswered, that is its worst issue and the line opens its reviews
     const unanswered = (await tool("list_reviews", { client_id: "crab-o-clock", unreplied_only: true, limit: 50 })).length;
     if (unanswered) {
       const crab = flat(await row("Crab O Clock").innerText());
       if (!new RegExp(`Needs attention: ${unanswered} reviews? unanswered`).test(crab)) throw new Error(`Crab O Clock with ${unanswered} unanswered reviews reads: ${crab}`);
-      if ((await row("Crab O Clock").locator("a").getAttribute("href")) !== "/reviews?client=crab-o-clock") throw new Error("the reviews row doesn't open the reviews");
+      if ((await issue("Crab O Clock").getAttribute("href")) !== "/reviews?client=crab-o-clock") throw new Error("the reviews line doesn't open the reviews");
     }
-    await v10Audit(page, "Home with the health strip (1440)", { touch: false });
+    await v10Audit(page, "Home with the health lines (1440)", { touch: false });
     if (SHOTS) { await toTop(c, 90); await page.screenshot({ path: `${SHOTS}/home-health-1440.png` }); }
     const { ctx, p } = await phonePage();
     await p.goto(`${BASE}/`, { waitUntil: "networkidle" });
-    await v10Audit(p, "Home with the health strip (390)");
-    if (SHOTS) { await toTop(card(p, /^Client health$/), 70); await p.screenshot({ path: `${SHOTS}/home-health-390.png` }); }
+    await v10Audit(p, "Home with the health lines (390)");
+    if (SHOTS) { await toTop(card(p, /^Businesses$/), 70); await p.screenshot({ path: `${SHOTS}/home-health-390.png` }); }
     await ctx.close();
-    // a worse issue takes the row; the opening is counted behind it
+    // a worse issue takes the line; the opening is counted behind it
     const late = await tool("create_task", { client_id: depotId, title: `V10 overdue ${stamp}`, assignee: "nora", due_date: plusDays(today, -2) });
     await page.goto(`${BASE}/`, { waitUntil: "networkidle" });
     t = flat(await row(depot).innerText());
     if (!/Needs attention: 1 task overdue · \+1 more/.test(t)) throw new Error(`with an overdue task: ${t}`);
-    await Promise.all([page.waitForURL(new RegExp(`/tasks\\?client=${depotId}&scope=all`), { timeout: 30000 }), row(depot).locator("a").click()]);
+    await Promise.all([page.waitForURL(new RegExp(`/tasks\\?client=${depotId}&scope=all`), { timeout: 30000 }), issue(depot).click()]);
     await page.waitForLoadState("networkidle");
     if (!(await page.locator("main a", { hasText: `V10 overdue ${stamp}` }).count())) throw new Error("the row didn't open that business's tasks");
     await tool("update_task", { task_id: late.taskId, status: "done" });
@@ -3451,14 +3471,21 @@ async function responsive(browser) {
       viewport: { width: vp.width, height: vp.height }, deviceScaleFactor: 1, colorScheme: scheme,
       isMobile: !!vp.touch, hasTouch: !!vp.touch,
     });
-    await login(context);
-    for (const [ctx, list] of [[context, routes], [pub, [...publicRoutes, ...(kitLive ? ["/kit"] : [])]]]) {
+    // Nora's own HQ too (since #20 and #25 her Home, Calendar, workspace and ask pages differ from Cameron's), and she
+    // is the phone-first user: her pages get the same audit, signed in as her.
+    const noraCtx = await browser.newContext({
+      viewport: { width: vp.width, height: vp.height }, deviceScaleFactor: 1, colorScheme: scheme,
+      isMobile: !!vp.touch, hasTouch: !!vp.touch,
+    });
+    await login(context, "cameron@local");
+    await login(noraCtx, "nora@local");
+    for (const [ctx, list, who] of [[context, routes, "cameron"], [noraCtx, NORA_ROUTES, "nora"], [pub, [...publicRoutes, ...(kitLive ? ["/kit"] : [])], "logged out"]]) {
     const page = await ctx.newPage();
     const errs = [];
     page.on("console", (m) => { if (m.type() === "error") errs.push(m.text().slice(0, 200)); });
     page.on("pageerror", (e) => errs.push(e.message.slice(0, 200)));
     for (const path of list) {
-      const where = `${vp.name}${scheme === "dark" ? "d" : ""}`;
+      const where = `${vp.name}${scheme === "dark" ? "d" : ""} ${who}`;
       let res, a, navErr = null;
       // `next dev` restarts itself when it nears its memory limit; that drops connections mid-run.
       // Wait for it to come back and retry the page instead of reporting a dev-server blip as an app bug.
@@ -3485,12 +3512,13 @@ async function responsive(browser) {
     }
     }
     await context.close();
+    await noraCtx.close();
     await pub.close();
   };
   const queue = [...combos];
   await Promise.all(Array.from({ length: 4 }, async () => { while (queue.length) await runCombo(queue.shift()); }));
   for (const [msg, where] of found) fail(`responsive ${msg} [${[...where].join(",")}]`);
-  console.log(`  checked ${pages} page loads (${routes.length} routes + ${publicRoutes.length} logged-out × ${combos.length} viewport/scheme combos)`);
+  console.log(`  checked ${pages} page loads (${routes.length} routes as Cameron + ${NORA_ROUTES.length} as Nora + ${publicRoutes.length} logged-out × ${combos.length} viewport/scheme combos)`);
 }
 
 const browser = await chromium.launch();

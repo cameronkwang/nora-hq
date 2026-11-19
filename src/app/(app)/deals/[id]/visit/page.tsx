@@ -48,8 +48,11 @@ export default async function VisitPage({ params, searchParams }: { params: Prom
         <div className="mb-8 grid gap-3">
           {maps && (
             <div>
-              <p className="eyebrow">Address · tap for Maps</p>
-              <a href={maps.apple} target="_blank" rel="noreferrer" className="link mt-1 inline-block text-[17px] font-medium leading-6">{deal.address}</a>
+              {/* The label and the address are one target (about 66px tall), the size of main's block: used on a phone at the door. */}
+              <a href={maps.apple} target="_blank" rel="noreferrer" className="block py-1 no-underline">
+                <span className="eyebrow block">Address · tap for Maps</span>
+                <span className="link mt-1 inline-block text-[17px] font-medium leading-6">{deal.address}</span>
+              </a>
               <p>
                 <a href={maps.google} target="_blank" rel="noreferrer" className="link-quiet inline-flex min-h-11 items-center underline underline-offset-[3px] md:pointer-fine:min-h-8">Open in Google Maps instead</a>
               </p>

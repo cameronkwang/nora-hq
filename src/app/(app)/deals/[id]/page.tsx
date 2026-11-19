@@ -334,7 +334,7 @@ function LinkedRow({ label, href, text }: { label: string; href: string | null; 
   return (
     <div>
       <dt>{label}</dt>
-      <dd>{href ? <Link href={href} className="link">{text}</Link> : <span className="text-muted">None</span>}</dd>
+      <dd>{href ? <Link href={href} className="link tap-target">{text}</Link> : <span className="text-muted">None</span>}</dd>
     </div>
   );
 }

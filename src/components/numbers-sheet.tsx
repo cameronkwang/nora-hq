@@ -329,7 +329,7 @@ export function NumbersSheet({
         <ul className="list is-ruled">
           {clients.map((c, i) => (
             <li key={c.id} className="g-numrow">
-              <Link href={`/clients/${c.id}#views`} className="min-w-0 pb-1">
+              <Link href={`/clients/${c.id}#views`} className="flex min-h-11 min-w-0 flex-col justify-center pb-1">
                 <b className="block truncate">{c.name}</b>
                 {c.location && <span className="meta block truncate">{c.location}</span>}
               </Link>

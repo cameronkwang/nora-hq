@@ -141,7 +141,7 @@ export default async function ReviewsPage({ searchParams }: { searchParams: Prom
                     <span className="font-medium">{r.reviewer ?? "Google user"}</span>
                     <span className="meta">{r.createTime ? formatDate(r.createTime) : ""}</span>
                   </div>
-                  <Link href={`/clients/${r.clientId}`} className="link-quiet">
+                  <Link href={`/clients/${r.clientId}`} className="link-quiet tap-target">
                     {clientLocation ? `${clientName} · ${clientLocation}` : clientName}
                   </Link>
                 </div>

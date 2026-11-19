@@ -127,13 +127,13 @@ Email to Myah the Beauty   S&F Massage…   5h ago  ›
 - A section brings its own 40px top margin, except inside a parent that already spaces its children
   (a grid, a flex column, a `space-y-*` stack): give that parent `gap-10`.
 - A list is `.list` (a `ul` of `li`): hairline between rows, none above the first or below the
-  last. A list with no title of its own (the health strip) adds `.is-ruled` for a hairline top and
-  bottom.
+  last. A list with no title of its own adds `.is-ruled` for a hairline top and bottom.
 - A row is `.row`: baseline-aligned flex or grid, 44 / 48px tall. Wide: one line, with fixed
   right-hand columns so lists line up (business 168px, when 76px, chevron 14px, 16px gaps). Narrow
   (under 1024px): two lines, the title and then one `.row-meta` line whose facts are joined by "·".
 - Group labels inside a list (schedule days) are `.eyebrow` with a hairline under them; "Today" is
-  the same label in `--accent`, right-aligned.
+  the same label in ink (600), right-aligned; the schedule's one red letter is today's numeral in the
+  month grid.
 - Hover on a row underlines its title. No hover fills inside lists.
 - A warning or a note that used to be a soft-coloured box is `.notice`: one row between two
   hairlines, a `.status.is-warn` and then the action as an ink `.link`.
@@ -292,7 +292,8 @@ Email to Myah the Beauty   S&F Massage…   5h ago  ›
 - No text under 12px, no tap target under 44px on touch, no input under 16px on a phone, no sideways
   scroll at 390 or 320, no focus hidden under the tab bar or a bar that stays in reach.
 - No duplicate content: one list per thing on a page (no second list of the same businesses, no
-  plan shown twice, no filter chip that repeats a section tab).
+  plan shown twice, no filter chip that repeats a section tab). On Home, a business's health (a dot
+  and its single worst issue, or "All good") is a line in its row of the Businesses ledger.
 - No money on Nora's schedule: there is no slot for an amount in a schedule row, a day group or the
   agenda.
 - No webfont requests to a third party, and no second webfont.

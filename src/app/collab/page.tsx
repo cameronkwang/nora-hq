@@ -48,7 +48,7 @@ export default async function CollabPage() {
             <div className="notice mt-6">
               {rate.rateLine && <p className="min-w-0 font-medium">{rate.rateLine}</p>}
               {rate.kitLive && (
-                <a href="/kit" className="link">
+                <a href="/kit" className="link inline-flex min-h-11 items-center md:pointer-fine:min-h-0">
                   {C.mediaKitLink} →
                 </a>
               )}

@@ -241,7 +241,7 @@ function LinkRow({ label, href, text }: { label: string; href: string; text: str
   return (
     <div>
       <dt>{label}</dt>
-      <dd><a href={href} target="_blank" rel="noopener noreferrer" className="link">{text} ↗</a></dd>
+      <dd><a href={href} target="_blank" rel="noopener noreferrer" className="link tap-target">{text} ↗</a></dd>
     </div>
   );
 }
