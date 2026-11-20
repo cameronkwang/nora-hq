@@ -10,7 +10,7 @@ import { sectionOf, type SectionKey } from "./section-tabs";
 
 type NavClient = { id: string; name: string; location: string | null; kind?: string | null };
 type User = { name: string; email: string };
-type Counts = { newAsks: number; needsReview: number; tasksDue: number; reelsOwed: number };
+type Counts = { newAsks: number; needsReview: number; tasksDue: number; reelsOwed: number; delivered: number };
 /** Nora tracks her schedule, so her phone tab is Calendar; Cameron works the checklists, so his is Tasks. */
 type PhoneTab = "calendar" | "tasks";
 type NavProps = { user: User; creator: NavClient | null; businesses: NavClient[]; inactiveCount: number; counts: Counts; phoneTab: PhoneTab };
@@ -22,7 +22,7 @@ type Item = { href: string; label: string; icon?: IconName; section?: SectionKey
 
 /** Everyday places. Inbox, Outreach and Insights are sections: their tabs live at the top of each member page. */
 const HOME: Item = { href: "/", label: "Home", icon: "home" };
-const INBOX: Item = { href: "/asks", label: "Inbox", icon: "inbox", section: "inbox", badge: (c) => c.newAsks + c.needsReview, badgeWord: "waiting" };
+const INBOX: Item = { href: "/asks", label: "Inbox", icon: "inbox", section: "inbox", badge: (c) => c.newAsks + c.needsReview + c.delivered, badgeWord: "waiting" };
 const TASKS: Item = { href: "/tasks", label: "Tasks", icon: "list", badge: (c) => c.tasksDue, badgeWord: "due" };
 const CALENDAR: Item = { href: "/calendar", label: "Calendar", icon: "calendar", badge: (c) => c.reelsOwed, badgeWord: "reels to post" };
 const OUTREACH: Item = { href: "/creators", label: "Outreach", section: "outreach" };

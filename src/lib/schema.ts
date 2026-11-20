@@ -875,3 +875,32 @@ export const contracts = pgTable(
   (t) => [index("contracts_created_idx").on(t.createdAt)],
 );
 export type ContractRow = typeof contracts.$inferSelect;
+
+/* ───────────────────────── Delivered: finished work handed to Nora (or Cameron) ───────────────────────── */
+
+/** Who a delivery is for. Nora is the usual one; Cameron can get one back the same way. */
+export const DELIVERY_RECIPIENTS = ["nora", "cameron"] as const;
+export type DeliveryRecipient = (typeof DELIVERY_RECIPIENTS)[number];
+
+/**
+ * Finished work handed to a person: a new flyer, a caption she asked for, edited photos. It lands in their
+ * "Delivered" tab (Inbox) and on Nora's Home until they open it (`seenAt`). `askId` links it to the ask it answers.
+ * `createdBy` is a user email or "claude". Files are ours (Blob or /uploads), never a link from outside.
+ */
+export const deliveries = pgTable(
+  "deliveries",
+  {
+    id: text("id").primaryKey(),
+    recipient: text("recipient").$type<DeliveryRecipient>().notNull().default("nora"),
+    title: text("title").notNull(),
+    note: text("note"),
+    attachments: jsonb("attachments").$type<Attachment[]>().notNull().default([]),
+    askId: text("ask_id").references(() => asks.id, { onDelete: "set null" }),
+    clientId: text("client_id").references(() => clients.id, { onDelete: "set null" }),
+    createdBy: text("created_by").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    seenAt: timestamp("seen_at", { withTimezone: true }),
+  },
+  (t) => [index("deliveries_recipient_idx").on(t.recipient, t.seenAt), index("deliveries_ask_idx").on(t.askId)],
+);
+export type Delivery = typeof deliveries.$inferSelect;

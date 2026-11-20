@@ -9,7 +9,7 @@ export const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
 
 /** Client-side check so people hear about a bad file before they hit send. */
 export function checkFile(f: File): string | null {
-  if (!(f.type.startsWith("image/") || f.type.startsWith("video/"))) return `${f.name} isn't a photo or video.`;
+  if (!(f.type.startsWith("image/") || f.type.startsWith("video/") || f.type === "application/pdf")) return `${f.name} isn't a photo, video or PDF.`;
   if (f.size > MAX_UPLOAD_BYTES) return `${f.name} is over 25MB.`;
   return null;
 }
@@ -51,11 +51,14 @@ export function UploadPicker({
   onChange,
   disabled,
   label = "Add photos or videos",
+  accept = "image/*,video/*",
 }: {
   files: File[];
   onChange: (files: File[]) => void;
   disabled?: boolean;
   label?: string;
+  /** What the file chooser offers. Deliveries add PDFs (a flyer often is one). */
+  accept?: string;
 }) {
   const id = useId();
   const input = useRef<HTMLInputElement>(null);
@@ -68,7 +71,7 @@ export function UploadPicker({
         ref={input}
         id={id}
         type="file"
-        accept="image/*,video/*"
+        accept={accept}
         multiple
         disabled={disabled}
         className="sr-only"

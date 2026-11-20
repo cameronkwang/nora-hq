@@ -18,22 +18,27 @@ import { KIND_LABELS } from "@/components/draft-checks";
 import { Button, Card, EmptyState, PageHeader, Status, StatusBadge, clientLabel, humanize } from "@/components/ui";
 import { setAskClient, setAskStatus } from "../actions";
 import { actorName } from "../../activity/actor";
+import { deliveriesForAsks } from "@/lib/ops-deliveries";
+import { DeliveryRow } from "@/components/nora-home";
 
 export const dynamic = "force-dynamic";
 
-export default async function AskPage({ params }: { params: Promise<{ id: string }> }) {
+export default async function AskPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const user = await requireUser();
   const { id } = await params;
+  const justDelivered = (await searchParams).delivered === "1";
   const db = await getDb();
   const [ask] = await db.select().from(schema.asks).where(eq(schema.asks.id, id));
   if (!ask) notFound();
 
-  const [clients, tasks, drafts, messages] = await Promise.all([
+  const [clients, tasks, drafts, messages, delivered] = await Promise.all([
     listClients({ includeArchived: true }),
     db.select().from(schema.tasks).where(eq(schema.tasks.askId, id)).orderBy(asc(schema.tasks.dueDate), asc(schema.tasks.createdAt)),
     db.select().from(schema.drafts).where(eq(schema.drafts.askId, id)).orderBy(desc(schema.drafts.createdAt)),
     listAskMessages(id),
+    deliveriesForAsks([id]),
   ]);
+  const viewer = personKey(assigneeFor(user));
   const names = new Map(clients.map((c) => [c.id, clientLabel(c)]));
   const client = clients.find((c) => c.id === ask.clientId) ?? null;
   const activeClients = clients.filter((c) => !c.archived || c.id === ask.clientId);
@@ -83,6 +88,17 @@ export default async function AskPage({ params }: { params: Promise<{ id: string
               </div>
             )}
           </div>
+
+          {delivered.length > 0 && (
+            <div className="border-t border-border pt-3">
+              <p className="eyebrow mb-1">Delivered</p>
+              <ul className="list">
+                {delivered.map((d) => (
+                  <DeliveryRow key={d.id} d={d} viewer={viewer} when={relativeTime(d.createdAt)} />
+                ))}
+              </ul>
+            </div>
+          )}
 
           <div className="border-t border-border">
             <AskThread items={thread} empty="Sent. Cameron and Claude will pick it up; replies show up here." />
@@ -239,6 +255,25 @@ export default async function AskPage({ params }: { params: Promise<{ id: string
             )}
           </Card>
           )}
+
+          <Card
+            title={<>Delivered{delivered.length > 0 && <span className="meta">{delivered.length}</span>}</>}
+            actions={<Link href={`/delivered/new?ask=${ask.id}`} className="link-quiet">Deliver to Nora →</Link>}
+            padded={false}
+          >
+            {justDelivered && (
+              <p role="status" className="sec-note"><Status tone="ok">Delivered. It’s in Nora’s Delivered tab.</Status></p>
+            )}
+            {delivered.length ? (
+              <ul className="list">
+                {delivered.map((d) => (
+                  <DeliveryRow key={d.id} d={d} viewer={viewer} when={relativeTime(d.createdAt)} />
+                ))}
+              </ul>
+            ) : (
+              <p className="sec-note">Finished the work? Deliver the files here and they land in Nora’s Delivered tab and on her Home.</p>
+            )}
+          </Card>
         </div>
       </div>
     </div>

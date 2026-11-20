@@ -7,10 +7,12 @@ import { askThreadState, listAskMessagesFor } from "@/lib/ops";
 import { reelsToPost, scheduleOn } from "@/lib/ops-schedule";
 import { dealsOwed } from "@/lib/ops-deals";
 import { CHECKLIST_TOTAL, checklistDone } from "@/lib/shoot-checklist";
-import { Card, Count, EmptyState, Status, Tag } from "./ui";
+import type { Delivery } from "@/lib/schema";
+import { listDeliveries } from "@/lib/ops-deliveries";
+import { Card, Count, EmptyState, Status, Tag, clientLabel } from "./ui";
 
 /**
- * Nora's Home: her day, not the agency view. What she's shooting today and tomorrow (each job opens its
+ * Nora's Home: her day, not the agency view. Anything newly delivered to her (a flyer, edited photos) on top, what she's shooting today and tomorrow (each job opens its
  * shoot checklist), the reels she still owes, whether collabs are paid (never amounts here), and the asks
  * she sent with whether Cameron or Claude answered. Cameron's Home is unchanged.
  */
@@ -60,10 +62,46 @@ export function HomeRow({ href, title, note, where, when, clamp }: { href: strin
   );
 }
 
+/**
+ * One delivery in a list (the Delivered tab, Nora's Home, an ask). For the person it's for: "New" until they open it.
+ * For the sender: "Opened" or "Not opened yet".
+ */
+export function DeliveryRow({
+  d,
+  client,
+  viewer,
+  when,
+}: {
+  d: Delivery;
+  client?: { name: string; location: string | null } | null;
+  viewer: "nora" | "cameron" | null;
+  when?: string;
+}) {
+  const mine = d.recipient === viewer;
+  const n = d.attachments.length;
+  const note = mine
+    ? !d.seenAt && <Status tone="info" small>New</Status>
+    : d.seenAt
+      ? <Status tone="ok" small>Opened</Status>
+      : <Status tone="neutral" small>Not opened yet</Status>;
+  const files = n ? `${n} file${n === 1 ? "" : "s"}` : "Note";
+  return (
+    <HomeRow
+      href={`/delivered/${d.id}`}
+      title={d.title}
+      clamp
+      note={note || undefined}
+      where={client ? `${clientLabel(client)} · ${files}` : files}
+      when={when}
+    />
+  );
+}
+
 export async function NoraHome({ email, name, now, skipAskIds = [] }: { email: string; name: string; now: string; skipAskIds?: string[] }) {
   const db = await getDb();
   const tomorrow = addDays(now, 1);
-  const [todayJobs, tomorrowJobs, owedReels, owed, myAsks] = await Promise.all([
+  const [delivered, todayJobs, tomorrowJobs, owedReels, owed, myAsks] = await Promise.all([
+    listDeliveries({ recipient: "nora", unseenFirst: true, limit: 20 }),
     scheduleOn(now),
     scheduleOn(tomorrow),
     reelsToPost(now),
@@ -79,9 +117,25 @@ export async function NoraHome({ email, name, now, skipAskIds = [] }: { email: s
   const skip = new Set(skipAskIds);
   const mine = myAsks.filter((a) => !skip.has(a.id));
   const threads = await listAskMessagesFor(mine.map((a) => a.id));
+  // Delivered: shown only while something is unopened, so Home stays calm once she's picked everything up.
+  const newDeliveries = delivered.filter((r) => !r.delivery.seenAt);
 
   return (
     <>
+      {newDeliveries.length > 0 && (
+        <Card
+          title={<>Delivered to you<Count n={newDeliveries.length} label={`${newDeliveries.length} new`} /></>}
+          actions={<Link href="/delivered" className="link-quiet">All →</Link>}
+          padded={false}
+        >
+          <ul className="list">
+            {newDeliveries.slice(0, 5).map(({ delivery: d, client }) => (
+              <DeliveryRow key={d.id} d={d} client={client} viewer="nora" when={relativeTime(d.createdAt)} />
+            ))}
+          </ul>
+        </Card>
+      )}
+
       <Card title="Shoots" actions={<Link href="/calendar" className="link-quiet">Schedule →</Link>} padded={false}>
         {todayJobs.length + tomorrowJobs.length === 0 ? (
           <EmptyState title="Nothing booked today or tomorrow.">

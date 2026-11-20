@@ -4,19 +4,22 @@ import { Sidebar } from "@/components/sidebar";
 import { SectionTabs } from "@/components/section-tabs";
 import { LiveRefresh } from "@/components/live-refresh";
 import { reelsToPostCount } from "@/lib/ops-schedule";
+import { unseenDeliveries } from "@/lib/ops-deliveries";
+import { personKey } from "@/components/ask-route";
 
 export const dynamic = "force-dynamic";
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const user = await requireUser();
-  const [everyone, baseCounts, reelsOwed] = await Promise.all([
+  const [everyone, baseCounts, reelsOwed, delivered] = await Promise.all([
     listClients({ includeArchived: true }),
     navCounts({ assignee: assigneeFor(user) }),
     reelsToPostCount(),
+    unseenDeliveries(personKey(assigneeFor(user))),
   ]);
   const drafts = seesDrafts(user);
-  // Nora never sees the review queue, so her Inbox badge counts asks only.
-  const counts = { ...baseCounts, needsReview: drafts ? baseCounts.needsReview : 0, reelsOwed };
+  // Nora never sees the review queue, so her Inbox badge counts asks (and anything newly delivered to her) only.
+  const counts = { ...baseCounts, needsReview: drafts ? baseCounts.needsReview : 0, reelsOwed, delivered };
   // Nora's workspace is always pinned (even if it was archived); the business list shows active businesses only.
   const creator = everyone.find(isCreatorClient) ?? null;
   const businesses = everyone.filter((c) => !isCreatorClient(c));
@@ -38,7 +41,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       <main className="shell-main">
         <div className="shell-page">
           {/* Inbox / Outreach / Insights tabs on their member pages (renders nothing elsewhere). */}
-          <SectionTabs counts={{ newAsks: counts.newAsks, needsReview: counts.needsReview }} hideReview={!drafts} />
+          <SectionTabs counts={{ newAsks: counts.newAsks, needsReview: counts.needsReview, delivered: counts.delivered }} hideReview={!drafts} />
           {children}
         </div>
       </main>
