@@ -9,7 +9,7 @@ import { Suspense } from "react";
  * the layout renders these tabs at the top of each member page so you can hop between them.
  */
 export type SectionKey = "inbox" | "outreach" | "insights";
-type CountKey = "newAsks" | "needsReview";
+type CountKey = "newAsks" | "needsReview" | "delivered";
 type SectionTab = { key: string; label: string; href: string; path: string; count?: CountKey };
 
 export const SECTIONS: Record<SectionKey, { label: string; tabs: SectionTab[] }> = {
@@ -18,6 +18,7 @@ export const SECTIONS: Record<SectionKey, { label: string; tabs: SectionTab[] }>
     tabs: [
       { key: "todo", label: "To do", href: "/asks", path: "/asks", count: "newAsks" },
       { key: "approve", label: "To approve", href: "/review", path: "/review", count: "needsReview" },
+      { key: "delivered", label: "Delivered", href: "/delivered", path: "/delivered", count: "delivered" },
       { key: "ideas", label: "Ideas", href: "/asks?tab=ideas", path: "/asks" },
       { key: "done", label: "Done", href: "/asks?tab=done", path: "/asks" },
     ],
@@ -41,8 +42,8 @@ export const SECTIONS: Record<SectionKey, { label: string; tabs: SectionTab[] }>
   },
 };
 
-/** The tabs Nora sees: her asks, plus her own collab requests and stats. */
-const NORA_TABS = new Set(["todo", "ideas", "done", "collabs", "stats"]);
+/** The tabs Nora sees: her asks, what was delivered to her, plus her own collab requests and stats. */
+const NORA_TABS = new Set(["todo", "delivered", "ideas", "done", "collabs", "stats"]);
 
 const under = (path: string, base: string) => path === base || path.startsWith(`${base}/`);
 

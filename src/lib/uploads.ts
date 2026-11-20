@@ -12,7 +12,7 @@ import type { Attachment } from "./schema";
  */
 
 export const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
-export const ALLOWED_UPLOAD_TYPES = ["image/*", "video/*"];
+export const ALLOWED_UPLOAD_TYPES = ["image/*", "video/*", "application/pdf"];
 
 export class UploadError extends Error {}
 
@@ -44,8 +44,28 @@ export function isOwnBlobUrl(url: unknown, folder: string): url is string {
     && u.pathname.startsWith(`/${folder}`) && !/(^|\/)\.\.?(\/|$)|%2e%2e|%2f|%5c/i.test(u.pathname);
 }
 
+/** Photos, videos and PDFs (a flyer or a menu often comes as a PDF). */
 export function isAllowedType(contentType: string | null | undefined): boolean {
-  return !!contentType && (contentType.startsWith("image/") || contentType.startsWith("video/"));
+  return !!contentType && (contentType.startsWith("image/") || contentType.startsWith("video/") || contentType === "application/pdf");
+}
+
+/**
+ * True for a file stored by Nora HQ itself: our own Blob store, or /uploads in local dev. Used where a URL comes from
+ * outside the browser form (Claude's deliver_to_nora), so nothing from another site is shown to Nora as a delivery.
+ */
+export function isAppFileUrl(url: unknown): url is string {
+  if (typeof url !== "string" || url.length > 1000) return false;
+  if (url.startsWith("/uploads/")) return /^\/uploads\/[A-Za-z0-9._-]+$/.test(url) && !url.includes("..");
+  const host = ownBlobHost();
+  if (!host) return false;
+  let u: URL;
+  try {
+    u = new URL(url);
+  } catch {
+    return false;
+  }
+  return u.protocol === "https:" && u.host.toLowerCase() === host && !u.username && !u.password && !u.port
+    && !/(^|\/)\.\.?(\/|$)|%2e%2e|%2f|%5c/i.test(u.pathname);
 }
 
 export function safeName(name: string): string {
@@ -62,7 +82,7 @@ export function safeName(name: string): string {
 export function validateUpload(file: { name: string; size: number; type: string }) {
   if (!file.size) throw new UploadError(`${file.name || "File"} is empty.`);
   if (file.size > MAX_UPLOAD_BYTES) throw new UploadError(`${file.name} is over 25MB.`);
-  if (!isAllowedType(file.type)) throw new UploadError(`${file.name} isn't a photo or video.`);
+  if (!isAllowedType(file.type)) throw new UploadError(`${file.name} isn't a photo, video or PDF.`);
 }
 
 export async function saveUpload(file: File): Promise<Required<Attachment>> {

@@ -315,3 +315,22 @@ export function notifyDraftCreated(d: { id: string; title: string }, actor: stri
   });
 }
 
+
+/**
+ * Something was delivered (lib/ops-deliveries) → the person it's for. Uses the "Asks for me" topic so every device
+ * that already gets asks gets these too, without anyone re-picking topics. Never notifies the sender themself, and
+ * nothing reaches Nora while her notifications are paused (sendToUser checks).
+ */
+export function notifyDelivery(d: { id: string; recipient: "nora" | "cameron"; title: string; attachments: unknown[] }, actor: string) {
+  defer("delivered", async () => {
+    const target = personEmail(d.recipient);
+    if (!target || target === actor.trim().toLowerCase()) return;
+    const n = d.attachments.length;
+    await sendToUser(target, "ask_for_me", {
+      title: `${nameOf(actor)} delivered: ${d.title}`,
+      body: n ? `${n} file${n === 1 ? "" : "s"} ready for you. Tap to open.` : "Ready for you. Tap to open.",
+      url: `/delivered/${d.id}`,
+      tag: `delivery-${d.id}`,
+    });
+  });
+}
