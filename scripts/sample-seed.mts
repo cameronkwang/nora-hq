@@ -125,5 +125,76 @@ await db.insert(schema.asks).values([
 ]).onConflictDoNothing();
 await db.insert(schema.askMessages).values({ id: "sample-askmsg-1", askId: "sample-ask-1", author: "claude", body: "Which pie should the caption lead with? (fake)" }).onConflictDoNothing();
 
+// Invoicing (docs/invoicing.md): fake customers, one invoice in each state, payments and two retainers.
+// Customer links work locally: /i/<SAMPLE_INVOICE_TOKENS.x> (tokens are fixed so builders can bookmark them; the
+// encrypted copy uses the same dev-only key as lib/crypto when TOKEN_ENC_KEY is unset).
+{
+  const { createCipheriv, createHash, randomBytes } = await import("node:crypto");
+  const { sql } = await import("drizzle-orm");
+  const today = ny(new Date(now));
+  const month = today.slice(0, 7);
+  const dayOf = (offset: number) => ny(new Date(now + offset * day));
+  const encKey = Buffer.from(process.env.TOKEN_ENC_KEY ?? Buffer.alloc(32, "nora-hq-dev-only").toString("base64"), "base64");
+  const enc = (value: unknown) => {
+    const iv = randomBytes(12);
+    const c = createCipheriv("aes-256-gcm", encKey, iv);
+    const ct = Buffer.concat([c.update(JSON.stringify(value), "utf8"), c.final()]);
+    return ["v1", iv.toString("base64url"), c.getAuthTag().toString("base64url"), ct.toString("base64url")].join(".");
+  };
+  const token = (name: string) => `sample-invoice-${name}-`.padEnd(43, "0");
+  const link = (name: string) => ({ tokenHash: createHash("sha256").update(token(name), "utf8").digest("hex"), tokenEnc: enc({ t: token(name) }) });
+  const number = (issueDate: string) => sql`'INV-' || ${issueDate.slice(0, 4)} || '-' || lpad(nextval('invoice_number_seq')::text, 4, '0')`;
+  const [{ n: have }] = await db.select({ n: sql<number>`count(*)::int` }).from(schema.invoices);
+  if (have === 0) {
+    await db.insert(schema.customers).values([
+      { id: "sample-cus-crab", name: "Crab O Clock", nameKey: "crab o clock", clientId: "crab-o-clock", contactName: "SAMPLE Owner", email: "owner@example.com", source: "client", createdBy: "sample" },
+      { id: "sample-cus-snf", name: "SNF Kingdom", nameKey: "snf kingdom", clientId: "snf-kingdom", contactName: "SAMPLE Manager", source: "client", createdBy: "sample" },
+      { id: "sample-cus-taco", name: "SAMPLE Taco Spot", nameKey: "sample taco spot", contactName: "Sam Sample", email: "sam@sample-taco.test", phone: "555-0101", billingAddress: "SAMPLE 1 Example Ave\nSampleton, VA 23000", source: "manual", createdBy: "sample" },
+      { id: "sample-cus-bakery", name: "SAMPLE Bakery 小点心", nameKey: "sample bakery 小点心", contactName: "Lin Sample", email: "lin@sample-bakery.test", lang: "zh-Hans", source: "deal", createdBy: "sample" },
+    ]);
+    await db.insert(schema.retainers).values([
+      { id: "sample-ret-crab", customerId: "sample-cus-crab", description: "Social media management", amountCents: 80000, dayOfMonth: 1, lastRunMonth: month, createdBy: "sample" },
+      { id: "sample-ret-snf", customerId: "sample-cus-snf", description: "Google reviews and Instagram", amountCents: 60000, dayOfMonth: 28, createdBy: "sample" },
+    ]);
+    await db.insert(schema.deals).values({
+      id: "sample-deal-bakery", businessName: "SAMPLE Bakery 小点心", contactName: "Lin Sample", contactEmail: "lin@sample-bakery.test", compType: "paid", amountCents: 50000,
+      visitAt: new Date(now - 20 * day), status: "posted", paymentStatus: "requested", paymentDueDate: dayOf(-6), createdBy: "sample",
+    }).onConflictDoNothing();
+    const reel = (cents: number) => [{ description: "Instagram Reel (SAMPLE)", quantity: 1, unitCents: cents }];
+    // paid (oldest, so it takes the first number), overdue + partly paid, sent, a void one, then a draft
+    await db.insert(schema.invoices).values({
+      id: "sample-inv-paid", number: number(dayOf(-25)), customerId: "sample-cus-taco", status: "paid", issueDate: dayOf(-25), dueDate: dayOf(-11),
+      items: reel(35000), subtotalCents: 35000, totalCents: 35000, paidCents: 35000, notes: "Thank you! (SAMPLE)", lang: "en", ...link("paid"),
+      sentAt: new Date(now - 25 * day), sentBy: "nora@local", viewedAt: new Date(now - 24 * day), paidAt: new Date(now - 12 * day), createdBy: "nora@local",
+    });
+    await db.insert(schema.invoices).values({
+      id: "sample-inv-overdue", number: number(dayOf(-20)), customerId: "sample-cus-bakery", status: "partially_paid", issueDate: dayOf(-20), dueDate: dayOf(-6),
+      items: [...reel(45000), { description: "Stories (SAMPLE)", quantity: 2, unitCents: 2500 }], subtotalCents: 50000, totalCents: 50000, paidCents: 20000,
+      dealId: "sample-deal-bakery", source: "deal", lang: "zh-Hans", ...link("overdue"),
+      sentAt: new Date(now - 20 * day), sentBy: "nora@local", viewedAt: new Date(now - 19 * day), createdBy: "nora@local",
+    });
+    await db.insert(schema.invoices).values({
+      id: "sample-inv-open", number: number(dayOf(-4)), customerId: "sample-cus-crab", status: "sent", issueDate: dayOf(-4), dueDate: dayOf(10),
+      items: [{ description: `Social media management (SAMPLE ${month})`, quantity: 1, unitCents: 80000 }], subtotalCents: 80000, totalCents: 80000,
+      retainerId: "sample-ret-crab", retainerMonth: month, source: "retainer", lang: "en", ...link("open"),
+      sentAt: new Date(now - 4 * day), sentBy: "cameron@local", createdBy: "system",
+    });
+    await db.insert(schema.invoices).values({
+      id: "sample-inv-void", number: number(dayOf(-15)), customerId: "sample-cus-taco", status: "void", issueDate: dayOf(-15), dueDate: dayOf(-1),
+      items: reel(20000), subtotalCents: 20000, totalCents: 20000, ...link("void"), sentAt: new Date(now - 15 * day), sentBy: "nora@local",
+      voidedAt: new Date(now - 14 * day), voidedBy: "nora@local", voidReason: "Sent twice (SAMPLE)", createdBy: "nora@local",
+    });
+    await db.insert(schema.invoices).values({
+      id: "sample-inv-draft", customerId: "sample-cus-taco", status: "draft", termsDays: 14,
+      items: [...reel(45000), { description: "Stories (SAMPLE)", quantity: 3, unitCents: 5000 }], subtotalCents: 60000, discountCents: 5000, discountLabel: "Repeat customer", totalCents: 55000,
+      notes: "Thank you! (SAMPLE)", privateNotes: "Waiting on the reel link before sending (SAMPLE)", createdBy: "nora@local",
+    });
+    await db.insert(schema.invoicePayments).values([
+      { id: "sample-pay-1", invoiceId: "sample-inv-paid", amountCents: 35000, paidOn: dayOf(-12), method: "check", reference: "Check #1043 (SAMPLE)", recordedBy: "nora@local" },
+      { id: "sample-pay-2", invoiceId: "sample-inv-overdue", amountCents: 20000, paidOn: dayOf(-8), method: "zelle", reference: "SAMPLE", recordedBy: "nora@local" },
+    ]);
+  }
+}
+
 await client.close();
 console.log("sample data ready");

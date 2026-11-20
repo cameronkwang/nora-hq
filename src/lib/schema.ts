@@ -8,8 +8,10 @@ import {
   real,
   uniqueIndex,
   index,
+  pgSequence,
 } from "drizzle-orm/pg-core";
 import type { PublicInfo } from "./business-facts";
+import type { CheckoutStatus, CustomerSource, InvoiceItem, InvoiceSource, InvoiceStatus, PaymentMethod, StripePaymentMethod } from "./invoices-types";
 
 /**
  * Single source of truth for the data model.
@@ -717,7 +719,10 @@ export const clientReports = pgTable(
 
 /**
  * Small settings blobs, e.g. "media_kit" → { enabled, rateLine, showRates, showPastCollabs, pastCollabs, bio };
- * NORA_PAYMENT_KEY → { line } = how Nora gets paid, as printed on payment requests (e.g. "Zelle: …"). Never a password.
+ * NORA_PAYMENT_KEY → { line, …InvoiceSettings } = how Nora gets paid: `line` is printed on a deal's payment request
+ * (e.g. "Zelle: …"); the other keys are the invoice settings (lib/invoices-types InvoiceSettings: From, Zelle, check,
+ * Venmo, PayPal, Pay online on/off, default terms). Writers MERGE into the value (jsonb ||), never replace it.
+ * Never a password, a card or bank account number, or a Stripe key (those are env vars only).
  */
 export const NORA_PAYMENT_KEY = "nora_payment";
 export const appSettings = pgTable("app_settings", {
@@ -875,3 +880,196 @@ export const contracts = pgTable(
   (t) => [index("contracts_created_idx").on(t.createdAt)],
 );
 export type ContractRow = typeof contracts.$inferSelect;
+
+/* ───────────────────────── Invoicing (customers, invoices, payments, retainers, Stripe) ───────────────────────── */
+
+/**
+ * Nora's own invoicing (docs/invoicing.md). Nora HQ makes the invoices itself (no monthly fee); Stripe is used only to
+ * take a payment online (Checkout: bank transfer / card) when STRIPE_SECRET_KEY is set. Money is integer cents, USD.
+ * Writes go through lib/ops-invoices (people only, except a DRAFT Claude makes when a person asked, and the payment
+ * the Stripe webhook records as "system"). Nothing here is on Nora's schedule, and no card or bank detail, and no
+ * Stripe key, is ever stored.
+ */
+
+/**
+ * Invoice numbers: INV-<issue year>-<nextval, 4+ digits>. Taken in the same UPDATE that first sends the invoice, so
+ * drafts never burn a number and two sends can't share one. It keeps counting across years.
+ */
+export const invoiceNumberSeq = pgSequence("invoice_number_seq", { startWith: 1, increment: 1, minValue: 1 });
+
+/**
+ * Who gets billed: a managed business (clientId set, at most one customer per client) or a collab business with no
+ * clients row (made from a deal, by hand or by the Skynova import). Balance and history are derived from invoices.
+ * nameKey = invoices-types customerNameKey(name), for matching imports and deals. lang = the pay page's language.
+ */
+export const customers = pgTable(
+  "customers",
+  {
+    id: text("id").primaryKey(), // "cus_…"
+    name: text("name").notNull(),
+    nameKey: text("name_key").notNull(),
+    contactName: text("contact_name"),
+    email: text("email"),
+    phone: text("phone"),
+    billingAddress: text("billing_address"), // multi-line
+    notes: text("notes"), // team only
+    clientId: text("client_id").references(() => clients.id, { onDelete: "set null" }),
+    lang: text("lang").$type<IntakeLang>(),
+    archived: boolean("archived").notNull().default(false),
+    source: text("source").$type<CustomerSource>().notNull().default("manual"),
+    createdBy: text("created_by").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("customers_client_uq").on(t.clientId), index("customers_name_key_idx").on(t.nameKey)],
+);
+
+/**
+ * A monthly retainer: on dayOfMonth (1 to 28) the daily reminders cron makes ONE draft invoice for the month (a person
+ * sends it). lastRunMonth ("YYYY-MM") is claimed with one conditional UPDATE before the draft is made, so a deleted
+ * draft is not made again that month; invoices (retainer_id, retainer_month) is unique as a second guard.
+ */
+export const retainers = pgTable(
+  "retainers",
+  {
+    id: text("id").primaryKey(), // "ret_…"
+    customerId: text("customer_id").notNull().references(() => customers.id, { onDelete: "cascade" }),
+    description: text("description").notNull(), // "Social media management"
+    amountCents: integer("amount_cents").notNull(),
+    dayOfMonth: integer("day_of_month").notNull().default(1),
+    startMonth: text("start_month"), // "YYYY-MM": first month to bill; null = from now
+    active: boolean("active").notNull().default(true),
+    lastRunMonth: text("last_run_month"), // "YYYY-MM" the draft was made for
+    createdBy: text("created_by").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("retainers_customer_idx").on(t.customerId)],
+);
+
+/**
+ * One invoice. status: draft · sent · partially_paid · paid · void ("overdue" is derived from dueDate, never stored).
+ * number is null until first sent (invoiceNumberSeq); an imported Skynova invoice keeps its own number.
+ * items = the lines in order (InvoiceItem: description, quantity, unitCents); subtotal / discount / total are written
+ * with them in the same UPDATE. paidCents = sum of invoice_payments, recomputed from them in ONE UPDATE after every
+ * payment change (with status and paidAt). A draft may leave issueDate / dueDate empty ("when sent" / + termsDays).
+ * The customer link (/i/<token>) works like the drop link: tokenHash (sha256) for lookup, tokenEnc (lib/crypto) to
+ * re-copy it; made on first send. lang = the language the customer's page opens in.
+ */
+export const invoices = pgTable(
+  "invoices",
+  {
+    id: text("id").primaryKey(), // "inv_…"
+    number: text("number").unique(),
+    customerId: text("customer_id").notNull().references(() => customers.id, { onDelete: "restrict" }),
+    status: text("status").$type<InvoiceStatus>().notNull().default("draft"),
+    issueDate: text("issue_date"), // "YYYY-MM-DD"
+    dueDate: text("due_date"), // "YYYY-MM-DD"
+    termsDays: integer("terms_days").notNull().default(14),
+    items: jsonb("items").$type<InvoiceItem[]>().notNull().default([]),
+    subtotalCents: integer("subtotal_cents").notNull().default(0),
+    discountCents: integer("discount_cents").notNull().default(0),
+    discountLabel: text("discount_label"),
+    totalCents: integer("total_cents").notNull().default(0),
+    paidCents: integer("paid_cents").notNull().default(0),
+    currency: text("currency").notNull().default("usd"),
+    notes: text("notes"), // printed on the invoice (the customer sees it)
+    privateNotes: text("private_notes"), // team only
+    dealId: text("deal_id").references(() => deals.id, { onDelete: "set null" }),
+    retainerId: text("retainer_id").references(() => retainers.id, { onDelete: "set null" }),
+    retainerMonth: text("retainer_month"), // "YYYY-MM"
+    tokenHash: text("token_hash").unique(),
+    tokenEnc: text("token_enc"),
+    lang: text("lang").$type<IntakeLang>(),
+    source: text("source").$type<InvoiceSource>().notNull().default("manual"),
+    importRef: text("import_ref"), // the Skynova invoice it was imported from
+    sentAt: timestamp("sent_at", { withTimezone: true }),
+    sentBy: text("sent_by"),
+    viewedAt: timestamp("viewed_at", { withTimezone: true }), // first time the customer opened the link
+    lastViewedAt: timestamp("last_viewed_at", { withTimezone: true }),
+    paidAt: timestamp("paid_at", { withTimezone: true }), // when it became paid in full
+    lastRemindedAt: timestamp("last_reminded_at", { withTimezone: true }),
+    reminderCount: integer("reminder_count").notNull().default(0),
+    voidedAt: timestamp("voided_at", { withTimezone: true }),
+    voidedBy: text("voided_by"),
+    voidReason: text("void_reason"),
+    createdBy: text("created_by").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("invoices_status_idx").on(t.status),
+    index("invoices_customer_idx").on(t.customerId),
+    index("invoices_deal_idx").on(t.dealId),
+    index("invoices_due_idx").on(t.dueDate),
+    uniqueIndex("invoices_retainer_month_uq").on(t.retainerId, t.retainerMonth),
+  ],
+);
+
+/**
+ * Money received against an invoice: many per invoice (partial payments). A person records Zelle / check / cash /
+ * PayPal / Venmo / other; the Stripe webhook records stripe_ach / stripe_card as "system", once per Checkout Session
+ * (stripeSessionId is unique). reference = a check number or a confirmation code, never a card or bank number.
+ * feeCents = Stripe's fee when known (for taxes). Refunds are not modelled yet.
+ */
+export const invoicePayments = pgTable(
+  "invoice_payments",
+  {
+    id: text("id").primaryKey(), // "pay_…"
+    invoiceId: text("invoice_id").notNull().references(() => invoices.id, { onDelete: "restrict" }),
+    amountCents: integer("amount_cents").notNull(),
+    paidOn: text("paid_on").notNull(), // "YYYY-MM-DD"
+    method: text("method").$type<PaymentMethod>().notNull(),
+    reference: text("reference"),
+    note: text("note"),
+    stripeSessionId: text("stripe_session_id").unique(),
+    stripePaymentIntentId: text("stripe_payment_intent_id"),
+    feeCents: integer("fee_cents"),
+    recordedBy: text("recorded_by").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("invoice_payments_invoice_idx").on(t.invoiceId), index("invoice_payments_paid_on_idx").on(t.paidOn)],
+);
+
+/**
+ * Stripe Checkout Sessions started from a pay page ("Pay online"). An open one younger than its expiry is reused
+ * instead of making another; "processing" = a bank transfer is clearing (the page and the invoice say so). The
+ * payment itself is an invoice_payments row once Stripe says it succeeded. No card or bank detail is kept.
+ */
+export const invoiceCheckouts = pgTable(
+  "invoice_checkouts",
+  {
+    id: text("id").primaryKey(), // "chk_…"
+    invoiceId: text("invoice_id").notNull().references(() => invoices.id, { onDelete: "cascade" }),
+    sessionId: text("session_id").notNull().unique(), // Stripe "cs_…"
+    url: text("url"), // Stripe-hosted checkout page (reused while open)
+    amountCents: integer("amount_cents").notNull(),
+    status: text("status").$type<CheckoutStatus>().notNull().default("open"),
+    method: text("method").$type<StripePaymentMethod>(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("invoice_checkouts_invoice_idx").on(t.invoiceId, t.createdAt)],
+);
+
+/**
+ * Stripe webhook events already handled (idempotent on Stripe's event id). Claimed with one INSERT … ON CONFLICT
+ * DO UPDATE … WHERE processed_at IS NULL RETURNING, so a replay of a processed event is a no-op and a failed one is
+ * retried. Only the id, type and a short error are kept: never the payload.
+ */
+export const stripeEvents = pgTable("stripe_events", {
+  id: text("id").primaryKey(), // Stripe "evt_…"
+  type: text("type").notNull(),
+  attempts: integer("attempts").notNull().default(1),
+  error: text("error"),
+  receivedAt: timestamp("received_at", { withTimezone: true }).notNull().defaultNow(),
+  processedAt: timestamp("processed_at", { withTimezone: true }),
+});
+
+export type Customer = typeof customers.$inferSelect;
+export type Retainer = typeof retainers.$inferSelect;
+export type Invoice = typeof invoices.$inferSelect;
+export type InvoicePayment = typeof invoicePayments.$inferSelect;
+export type InvoiceCheckout = typeof invoiceCheckouts.$inferSelect;
+export type StripeEvent = typeof stripeEvents.$inferSelect;
