@@ -16,6 +16,9 @@ import { SavedRepliesRow } from "@/components/reply-links";
 import { GoogleSyncList, GoogleSyncSummaryBadge } from "@/components/google-sync-status";
 import { PaymentLineForm } from "@/components/payment-line-form";
 import { getPaymentLine } from "@/lib/ops-payment";
+import { getInvoiceSettings, nextInvoiceNumber } from "@/lib/ops-invoices";
+import { stripeConfigured, stripeTestMode, stripeWebhookConfigured } from "@/lib/stripe";
+import { InvoiceSettingsCard } from "@/components/invoice-settings-card";
 import {
   checkRepliesAction, disconnectAction, refreshInstagramTokensAction, saveLocationsAction, syncInstagramViewsAction, syncReviewsAction,
 } from "./actions";
@@ -101,7 +104,14 @@ function LinkRow({ href, title, note }: { href: string; title: string; note: str
 export default async function SettingsPage({ searchParams }: { searchParams: Promise<SP> }) {
   await requireUser();
   const sp = await searchParams;
-  const [clients, connections, paymentLine] = await Promise.all([listClients(), listConnectionSummaries(), getPaymentLine()]);
+  const [clients, connections, paymentLine, invoiceSettings, nextNumber] = await Promise.all([
+    listClients(),
+    listConnectionSummaries(),
+    getPaymentLine(),
+    // Invoicing (docs/invoicing.md): read-only here; a failure must never take the rest of Settings down.
+    getInvoiceSettings().catch(() => null),
+    nextInvoiceNumber().catch(() => null),
+  ]);
   const env = envStatus();
   const igReady = instagramConfigured();
   const googleReady = googleOAuthConfigured();
@@ -132,7 +142,7 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
 
   return (
     <>
-      <PageHeader title="Settings" subtitle="Connected accounts, automation and the Claude connector." />
+      <PageHeader title="Settings" subtitle="Connected accounts, invoices and payments, automation and the Claude connector." />
 
       <div className="mb-10 empty:hidden max-md:mb-8">
         {connected && isOAuthProvider(connected) && (
@@ -222,6 +232,21 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
             <PaymentLineForm line={paymentLine} />
           </div>
         </Card>
+
+        {/* Invoices and payments: both of them. How Nora gets paid on every invoice, the saved lines, the numbers. */}
+        <div id="invoicing" className="scroll-mt-4">
+          <Card className="!mt-0" title="Invoices and payments" actions={<Link href="/invoices" className="link-quiet">Invoices →</Link>}>
+            {invoiceSettings ? (
+              <InvoiceSettingsCard
+                settings={invoiceSettings}
+                nextNumber={nextNumber}
+                stripe={{ configured: stripeConfigured(), testMode: stripeTestMode(), webhook: stripeWebhookConfigured(), webhookUrl: `${base ?? "https://<your APP_URL>"}/api/stripe/webhook` }}
+              />
+            ) : (
+              <SetupHint>Invoice settings aren&apos;t available right now. Try again in a moment.</SetupHint>
+            )}
+          </Card>
+        </div>
 
         <div className="grid gap-10 max-md:gap-8 min-[1200px]:grid-cols-2 min-[1200px]:gap-x-16">
           {/* Google Business Profile */}

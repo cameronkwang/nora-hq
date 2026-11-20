@@ -845,6 +845,12 @@ export type InvoicePrefill = {
   source: "blank" | "contract" | "deal" | "customer" | "draft";
   /** One quiet line saying where the prefill came from: "From the Sample Bistro contract (Nov 20)". */
   note: string | null;
+  /** A draft's "More" fields (opened with ?draft=), so Make PDF keeps them. Absent on other prefills. */
+  discountCents?: number;
+  discountLabel?: string | null;
+  privateNotes?: string | null;
+  /** The prefilled customer's last invoice ("Same as last time" without another round trip); null when none. */
+  last?: LastInvoice | null;
 };
 
 /** The customer's last invoice, for "Same as last time" (lines through sameAsLastTime: Food Stipend left empty). */
@@ -1273,7 +1279,8 @@ export type PublicInvoice = {
   display: InvoiceDisplayStatus;
   issueDate: string;
   dueDate: string;
-  lang: IntakeLang;
+  /** The invoice's language, else its customer's; null when neither is set (the page then reads Accept-Language). */
+  lang: IntakeLang | null;
   from: { name: string | null; email: string | null; phone: string | null; address: string | null };
   billTo: { name: string; contactName: string | null; address: string | null };
   lines: InvoiceLine[];
@@ -1296,7 +1303,7 @@ export type PublicInvoice = {
  */
 export type PublicInvoiceState =
   | { state: "unknown" }
-  | { state: "void"; lang: IntakeLang }
+  | { state: "void"; lang: IntakeLang | null }
   | { state: "open"; invoice: PublicInvoice; options: PayOption[] };
 
 /* ───────────────────────── Stripe → payment ───────────────────────── */

@@ -12,8 +12,11 @@ import {
   type ContractFields,
   type ContractKind,
 } from "@/lib/contract";
+import { contractFeeCents, type ContractInvoiceRef, type NextStep } from "@/lib/invoices-types";
 import { deleteContractAction, saveContractAction } from "@/app/(app)/contracts/actions";
-import { Button, Card, Status, cx } from "./ui";
+import { ContractInvoiceLinks, NextSteps } from "./invoice-bits";
+import { MonthlyInvoicesButton } from "./invoice-contract-bits";
+import { Button, Card, LinkButton, Status, cx } from "./ui";
 
 /** A past contract as the page hands it over (dates as strings so it crosses the server/client line). */
 export type PastContract = {
@@ -26,7 +29,13 @@ export type PastContract = {
   createdBy: string;
   createdAt: string;
   fields: ContractFields;
+  /** Its invoices ("0000170 · Paid") and the one-tap next step ("Make invoice", "Invoice the rest"…), from invoicing. */
+  invoices?: ContractInvoiceRef[];
+  nextSteps?: NextStep[];
 };
+
+/** What the builder offers once a contract downloaded and saved (docs/invoicing.md "Contract to invoice"). */
+type Saved = { id: string; kind: ContractKind; fee: number; business: string };
 
 async function downloadPdf(fields: ContractFields) {
   const { contractPdf } = await import("@/lib/contract-pdf");
@@ -50,12 +59,15 @@ export function ContractBuilder({
   businesses,
   initial,
   dealId,
+  invoiceId,
   history,
 }: {
   today: string;
   businesses: string[];
   initial?: Partial<ContractFields>;
   dealId?: string | null;
+  /** Made from this invoice (/contracts?invoice=<id>): the saved contract links back to it. */
+  invoiceId?: string | null;
   history: PastContract[];
 }) {
   const [f, setF] = useState<ContractFields>(() => ({ ...defaultFields(today), ...initial }));
@@ -64,6 +76,7 @@ export function ContractBuilder({
   const [showPreview, setShowPreview] = useState(false);
   const [error, setError] = useState("");
   const [note, setNote] = useState("");
+  const [saved, setSaved] = useState<Saved | null>(null);
 
   useEffect(() => {
     try {
@@ -98,9 +111,11 @@ export function ContractBuilder({
         /* ignore */
       }
       // Save first so history matches what she sends; a failed save still lets her download.
-      const saved = await saveContractAction({ ...f }, dealId ?? null).catch(() => ({ ok: false as const, error: "Couldn't save it to history." }));
+      setSaved(null);
+      const res = await saveContractAction({ ...f }, dealId ?? null, invoiceId ?? null).catch(() => ({ ok: false as const, error: "Couldn't save it to history." }));
       await downloadPdf(f);
-      setNote(saved.ok ? "Downloaded and saved to Past contracts." : `Downloaded. ${saved.error}`);
+      setNote(res.ok ? (invoiceId ? "Downloaded, saved to Past contracts and linked to the invoice." : "Downloaded and saved to Past contracts.") : `Downloaded. ${res.error}`);
+      if (res.ok) setSaved({ id: res.id, kind: f.kind, fee: contractFeeCents(f.fee), business: f.clientBusiness.trim() });
     } catch (e) {
       setError(e instanceof Error ? e.message : "Couldn't make the PDF.");
     } finally {
@@ -262,11 +277,25 @@ export function ContractBuilder({
           {missing.length > 0 && <p><Status tone="warn" small className="whitespace-normal">Still blank: {missing.join(", ")}. The PDF shows [brackets] there.</Status></p>}
           {error && <p role="alert"><Status tone="danger" small className="whitespace-normal">{error}</Status></p>}
           {note && <p role="status"><Status tone="ok" small className="whitespace-normal">{note}</Status></p>}
+          {/* The next step, one tap: the invoice this contract asks for (and monthly invoices for a monthly one). */}
+          {saved && invoiceId && (
+            <div className="inv-steps">
+              <LinkButton href={`/invoices/${encodeURIComponent(invoiceId)}`} size="sm">Back to the invoice</LinkButton>
+            </div>
+          )}
+          {saved && !invoiceId && saved.fee > 0 && (
+            <div className="inv-steps">
+              <LinkButton href={`/invoices/new?contract=${encodeURIComponent(saved.id)}`}>Make the invoice</LinkButton>
+              {saved.kind === "monthly" && <MonthlyInvoicesButton contractId={saved.id} size="md" />}
+            </div>
+          )}
           <p className="meta">This is a plain-English starting template, not legal advice. Have a lawyer look it over once before you use it widely.</p>
         </div>
       </div>
 
-      {/* Live preview: the same text the PDF uses. */}
+      {/* Live preview: the same text the PDF uses. The wrapper is the sticky box's containing block on a wide screen,
+          so the preview never slides over Past contracts (and its buttons) below it; on a phone it is no box at all. */}
+      <div className="min-w-0 max-[1199px]:contents">
       <section
         id="contract-preview"
         aria-label="Preview"
@@ -308,6 +337,7 @@ export function ContractBuilder({
           ))}
         </div>
       </section>
+      </div>
 
       <PastContracts history={history} onStartFrom={startFrom} />
 
@@ -364,6 +394,13 @@ function PastContracts({ history, onStartFrom }: { history: PastContract[]; onSt
               <li key={c.id} className="flex flex-col gap-x-6 gap-y-2 py-3 sm:flex-row sm:items-center sm:justify-between">
                 <div className="min-w-0">
                   <p className="font-medium [overflow-wrap:anywhere]">{c.clientBusiness}</p>
+                  {/* Its invoices ("0000170 · Paid"), or the one-tap next step. */}
+                  {(c.invoices?.length || c.nextSteps?.length) ? (
+                    <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
+                      {c.invoices && c.invoices.length > 0 && <ContractInvoiceLinks invoices={c.invoices} />}
+                      {c.nextSteps && c.nextSteps.length > 0 && <NextSteps steps={c.nextSteps} />}
+                    </div>
+                  ) : null}
                   <p className="meta">
                     {[
                       c.kind === "monthly" ? "Monthly" : "Collab",

@@ -7,8 +7,9 @@
  */
 import assert from "node:assert/strict";
 import * as T from "../src/lib/invoices-types";
-import { defaultFields, type ContractFields } from "../src/lib/contract";
+import { defaultFields, readContractFields, type ContractFields } from "../src/lib/contract";
 import { invoiceCopy } from "../src/lib/invoice-copy";
+import { buildInvoiceMessages, formatInvoiceAmount, mailtoHref } from "../src/lib/payment-request";
 
 /* totals, status */
 assert.equal(T.lineCents({ quantity: 1.15, unitCents: 10000 }), 11500);
@@ -197,5 +198,26 @@ assert.equal(invoiceCopy("en").share.pdfMessage({ ...msg, zelle: null, dueOnRece
 assert.match(invoiceCopy("zh-Hans").share.pdfMessage(msg), /^Sample Bistro，您好！附上账单 0000170（PDF），金额 \$625\.10，收到即付。\n\nZelle：\(555\) 010-0100，备注请写 0000170。\n\n谢谢！$/);
 assert.match(invoiceCopy("zh-Hant").share.pdfMessage(msg), /帳單 0000170.*備註請寫 0000170/s);
 for (const lang of ["en", "zh-Hans", "zh-Hant"] as const) assert.doesNotMatch(invoiceCopy(lang).share.pdfMessage({ ...msg, url: "https://x" }), /\u2014|fee|surcharge|手续费|手續費/i);
+
+/* the contract's fields as invoicing reads them (lib/contract readContractFields, used by ops-contracts too) */
+const rf = readContractFields({ kind: "monthly", fee: "800", clientBusiness: "Sample Bistro", extra: "x", depositPercent: 30 });
+assert.equal(rf.kind, "monthly"); assert.equal(rf.fee, "800"); assert.equal(rf.depositPercent, "", "non-strings become empty");
+assert.equal((rf as Record<string, string>).extra, undefined); assert.equal(readContractFields(null).kind, "collab"); assert.equal(readContractFields({ kind: "weird" }).kind, "collab");
+assert.deepEqual(Object.keys(readContractFields({})).sort(), Object.keys(defaultFields(today)).sort());
+
+/* the email and reminder that go with the PDF (lib/payment-request buildInvoiceMessages), with the Zelle memo line */
+assert.equal(formatInvoiceAmount(60000), "$600.00");
+const em = buildInvoiceMessages({ businessName: "Sample Bistro", contactName: "Sam Sample", number: "0000170", totalCents: 62510, balanceCents: 62510, issueDate: today, dueDate: today, today, fromName: "Nora Chen", payLines: doc.paymentLines });
+assert.equal(em.email.subject, "Invoice 0000170 from Nora Chen");
+assert.equal(em.email.body, "Hi Sam,\n\nHere is invoice 0000170 for Sample Bistro: $625.10, due on receipt. The PDF is attached.\n\nHow to pay:\n(555) 010-0100 [Zelle]\nPut invoice 0000170 in the Zelle memo\n\nThank you so much!\nNora");
+assert.deepEqual(em.missing, []);
+const late = buildInvoiceMessages({ businessName: "Sample Bistro", contactName: null, number: "0000170", totalCents: 62510, balanceCents: 42510, issueDate: "2026-11-01", dueDate: "2026-11-15", today, fromName: "Nora Chen", payLines: doc.paymentLines });
+assert.equal(late.reminder.subject, "Friendly reminder: invoice 0000170 from Nora Chen");
+assert.match(late.reminder.body, /^Hi there,\n\nHope you're doing well! Just a friendly reminder about invoice 0000170 for Sample Bistro: \$425\.10, which was due Nov 15, 2026\./);
+assert.match(late.reminder.body, /Put invoice 0000170 in the Zelle memo/);
+assert.match(buildInvoiceMessages({ businessName: "B", number: "0000171", totalCents: 100, balanceCents: 100, issueDate: today, dueDate: "2026-12-05", today, fromName: "", payLines: [] }).email.body, /due Dec 5, 2026\.[\s\S]*How to pay: \[how you'd like to be paid\]/);
+assert.deepEqual(buildInvoiceMessages({ businessName: "B", number: "1", totalCents: 1, balanceCents: 1, issueDate: today, dueDate: today, today, fromName: "N", payLines: [] }).missing, ["how you get paid"]);
+assert.match(mailtoHref("sam@sample.test", em.email), /^mailto:sam@sample\.test\?subject=Invoice%200000170%20from%20Nora%20Chen&body=Hi%20Sam%2C%0D%0A/);
+for (const t of [em.email.body, late.reminder.body]) assert.doesNotMatch(t, /\u2014|fee|surcharge/i);
 
 console.log("invoices-types helpers: ok");

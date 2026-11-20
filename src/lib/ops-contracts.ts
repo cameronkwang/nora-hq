@@ -1,33 +1,24 @@
 import "server-only";
-import { desc, eq } from "drizzle-orm";
+import { desc, eq, inArray } from "drizzle-orm";
 import { z } from "zod";
 import { getDb, schema } from "./db";
 import { newId } from "./ids";
 import { logActivity } from "./activity";
-import { defaultFields, type ContractFields } from "./contract";
-import { linkContractToInvoice } from "./ops-invoices";
+import { readContractFields, type ContractFields } from "./contract";
+import { getSavedItems, invoicesForContracts, linkContractToInvoice } from "./ops-invoices";
+import { contractNextSteps, type ContractInvoiceRef, type NextStep } from "./invoices-types";
+import { today as todayNY } from "./dates";
 
 /**
  * Contract history: every contract Nora downloads is kept here so she can see who got what and re-download it.
  * People only — there is deliberately no Claude (MCP) tool for these, since they hold fees.
  * Linked to invoicing both ways (docs/invoicing.md "Contracts"): a contract made from an invoice ("Make contract",
  * /contracts?invoice=<id>) is saved with invoiceId and links back (lib/ops-invoices linkContractToInvoice); an invoice
- * made from a contract carries contractId. Past contracts rows read their invoices with invoicesForContracts.
+ * made from a contract carries contractId. Past contracts rows read their invoices and next step with
+ * listContractsWithInvoices (or invoicesForContracts + invoices-types contractNextSteps).
  */
 
-const FIELD_KEYS = Object.keys(defaultFields("2000-01-01")) as (keyof ContractFields)[];
-
-const Fields = z
-  .record(z.string(), z.unknown())
-  .transform((raw) => {
-    const out = {} as Record<keyof ContractFields, string>;
-    for (const k of FIELD_KEYS) {
-      const v = raw[k];
-      out[k] = typeof v === "string" ? v.slice(0, 5000) : "";
-    }
-    if (out.kind !== "monthly") out.kind = "collab";
-    return out as ContractFields;
-  });
+const Fields = z.record(z.string(), z.unknown()).transform((raw) => readContractFields(raw));
 
 function feeCents(fee: string): number | null {
   const n = Number(String(fee).replace(/[$,\s]/g, ""));
@@ -62,7 +53,7 @@ export async function saveContract(input: { fields: unknown; dealId?: string | n
   return id;
 }
 
-export type ContractListItem = Pick<schema.ContractRow, "id" | "kind" | "clientBusiness" | "clientContact" | "agreementDate" | "feeCents" | "dealId" | "createdBy" | "createdAt"> & {
+export type ContractListItem = Pick<schema.ContractRow, "id" | "kind" | "clientBusiness" | "clientContact" | "agreementDate" | "feeCents" | "dealId" | "customerId" | "createdBy" | "createdAt"> & {
   fields: ContractFields;
 };
 
@@ -70,6 +61,30 @@ export async function listContracts(limit = 50): Promise<ContractListItem[]> {
   const db = await getDb();
   const rows = await db.select().from(schema.contracts).orderBy(desc(schema.contracts.createdAt)).limit(limit);
   return rows.map((r) => ({ ...r, fields: Fields.parse(r.fields) }));
+}
+
+/**
+ * Past contracts rows with what invoicing knows about each: its invoices ("0000170 · Paid", oldest first), whether it
+ * already bills monthly (a retainer), and its one-tap next step ("Make invoice", "Make deposit invoice", "Invoice the
+ * rest", "Invoice this month", "Set up monthly invoices"). Three reads, in parallel after the first.
+ */
+export async function listContractsWithInvoices(limit = 50, opts: { today?: string } = {}): Promise<Array<ContractListItem & { invoices: ContractInvoiceRef[]; hasRetainer: boolean; nextSteps: NextStep[] }>> {
+  const t = opts.today ?? todayNY();
+  const list = await listContracts(limit);
+  if (!list.length) return [];
+  const ids = list.map((c) => c.id);
+  const db = await getDb();
+  const [byContract, retainers, savedItems] = await Promise.all([
+    invoicesForContracts(ids, { today: t }),
+    db.select({ contractId: schema.retainers.contractId }).from(schema.retainers).where(inArray(schema.retainers.contractId, ids)),
+    getSavedItems(),
+  ]);
+  const withRetainer = new Set(retainers.map((r) => r.contractId));
+  return list.map((c) => {
+    const invoices = byContract[c.id] ?? [];
+    const hasRetainer = withRetainer.has(c.id);
+    return { ...c, invoices, hasRetainer, nextSteps: contractNextSteps({ id: c.id, kind: c.kind, fields: c.fields }, invoices, { hasRetainer, savedItems, today: t }) };
+  });
 }
 
 export async function deleteContract(id: string, actor: string): Promise<void> {

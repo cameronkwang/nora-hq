@@ -428,8 +428,9 @@ Only for invoices whose ways include `bank` or `card`.
   `expires_at` (1 hour). No surcharge line, ever.
 - **Starting it** (`lib/ops-stripe startCheckout`, public): POST from the pay page. Refused for a draft, void, paid
   invoice, an invoice without an online way, or while a bank payment is clearing ("A bank payment is on its way").
-  An `open` session for the same amount that hasn't expired is reused instead of making another; at most a handful
-  of new sessions per invoice per hour (count in `invoice_checkouts`). The amount is always the balance at that
+  An `open` session for the same amount that hasn't expired is reused instead of making another; at most 6 new
+  sessions per invoice per hour and 20 per day (an atomic counter in `app_settings`, key
+  `stripe.checkout_rate.<invoice id>`). The amount is always the balance at that
   moment, read on the server.
 - **Webhook** `POST /api/stripe/webhook` (public prefix; it checks the signature itself). Read the raw body with
   `await req.text()`. Verify `Stripe-Signature` (`t=…,v1=…`): HMAC-SHA256 of `${t}.${rawBody}` with
@@ -449,23 +450,15 @@ Only for invoices whose ways include `bank` or `card`.
 - Setup steps for Nora (account, turning on ACH Direct Debit, the webhook endpoint and events, test mode): in
   `docs/stripe-setup.md`.
 
-### Stripe bank reuse (to research)
+### Stripe bank reuse (researched: not used)
 
 Bank transfer through Checkout verifies the customer's bank instantly (Financial Connections), which Stripe charges
-for (about $1.50 per verification). A client who pays every month would pay for that every time unless Checkout can
-show their already-verified bank again. The public_stripe builder researches Stripe's own docs and decides:
-
-- Can a `mode=payment` Checkout Session with `customer=cus_…` (a Stripe Customer made once per Nora HQ customer, or
-  `customer_creation=always` on the first session) and `payment_intent_data[setup_future_usage]` (or
-  `saved_payment_method_options[payment_method_save]`) save a `us_bank_account` payment method, and does a later
-  session for the same Customer **offer that saved bank account** without a new instant verification?
-- Is the verification fee charged again when a saved, already-verified bank account is reused? Does a saved bank
-  account need a mandate that Checkout records for us (the customer accepts it on Stripe's page)?
-- If yes to both: store only the Stripe Customer id (`customers.stripeCustomerId`, from the session's `customer` in
-  the webhook, `StripePaymentRecord.stripeCustomerId`), pass it as `customer` on the next session
-  (`CreateCheckoutInput.stripeCustomerId`), and never store anything else (no payment method id needed if Checkout
-  shows saved methods itself). If no, or unclear: don't; leave the column empty and report what the docs say (with
-  links) in the builder's report and in `docs/stripe-setup.md`.
+for (about $1.50 per verification). Stripe's docs say Checkout can show a returning Customer's saved, verified bank
+account (with `customer` and `saved_payment_method_options[allow_redisplay_filters]`), but not plainly whether the
+customer can opt in to saving it on the hosted page or whether reusing it skips the fee, and none of it could be tried
+in test mode from the build machine. Unclear, so not used: no session sets `customer`, `customer_creation`,
+`setup_future_usage` or `saved_payment_method_options`, and `customers.stripeCustomerId` stays empty. Findings, links
+and the test-mode steps to turn it on later: `docs/stripe-setup.md` "Saved bank accounts".
 
 ## Contracts and invoices, linked both ways
 
@@ -574,7 +567,8 @@ page, or a CSV someone typed) in two steps:
    amount", "card or bank number in the text"). Nothing is written.
 2. **Save** (`saveSkynovaImport(text, kind, actor)`): re-parses the same text on the server (never trusts the
    browser's rows). Customers are matched by name key, never duplicated. Invoices are saved as `sent` with Skynova's
-   number, source `import`, Zelle as their way, one line "Imported from Skynova (invoice 0000169)", and an `other`
+   number, source `import`, Zelle as their way, one line (the pasted Skynova description when there is one, so "Same
+   as last time" can reuse it, else "Imported from Skynova (invoice 0000169)"), and an `other`
    payment ("Skynova") for any amount already paid, so the status comes out right. Then ONE `setval` moves the
    sequence past every number used (`ImportResult.nextNumber` says what's next). Rows with issues are skipped and
    listed.
@@ -620,7 +614,8 @@ Public (middleware: add `"/i"` to `PUBLIC_PAGES`, `"/api/stripe/webhook"` to `PU
 - **Lookup** `getInvoiceByToken`: never a link → 404; void → "This invoice was cancelled. Questions? Contact <from
   name>." with no amounts; otherwise the invoice and exactly its ways (`PayOption[]`, Zelle first). `noindex`,
   `referrer: no-referrer`, `Cache-Control: no-store`.
-- **Language**: `?lang=` → the invoice's `lang` → the customer's → Accept-Language. The switch at the top
+- **Language**: `?lang=` → the invoice's `lang` → the customer's → Accept-Language (`PublicInvoice.lang` is null when
+  neither the invoice nor the customer has one). The switch at the top
   (English / 简体中文 / 繁體中文), as on `/drop`. Copy: `lib/invoice-copy.ts` (no em dashes, typed dictionaries).
 - **What it shows**, phone first: who it's from (name, address); "Invoice 0000170"; the status line ("Due on
   receipt", "Due Dec 4", "Overdue since Dec 4", "Paid, thank you", "A bank payment of $600.00 is on its way"); Bill to
@@ -655,7 +650,7 @@ the smoke's `ROUTES` and `NORA_ROUTES`.
 | Route | What |
 |---|---|
 | `/invoices` | Figures (Outstanding, Overdue, Paid this month, Paid this year); filter chips Open · Overdue · Drafts · Paid · All; one list: number, customer, due, amount due, status, and a **one-tap PDF download on every row** (`invoicePdfPath(id, { download: true })`). Head actions: **New invoice** (the focal button), Import, Export payments (CSV). `?status=`, `?customer=` |
-| `/invoices/new` | **The fast creator** (above), with its done state. `?customer=`, `?client=`, `?deal=`, `?contract=` (+`&part=rest`), `?draft=` pre-fill |
+| `/invoices/new` | **The fast creator** (above), with its done state. `?customer=`, `?client=`, `?deal=`, `?contract=` (+`&part=rest` or `&part=full`), `?draft=` pre-fill. `?done=<id>` shows the done state again after a reload (Make PDF replaces the URL with it). `?edit=<id>` edits a finalized, unpaid invoice in the same screen: customer locked, the button reads "Save changes", saved through `updateInvoice` |
 | `/invoices/[id]` | The invoice as the PDF shows it (`InvoiceDetail.document`), plus the team's bits: status line, viewed, deal link, **its contract** ("Contract Nov 20 · Download again" or "Make contract"), private note, payments list, a bank payment clearing. Actions: **Make PDF** (the focal button on a draft), Edit (opens the creator with `?draft=`), Preview PDF, Delete draft; once finalized: Share PDF / Download PDF / Copy message (the done state's buttons), Copy link, Record payment (the focal button once finalized), Remind, New link, Void |
 | `/invoices/[id]/pdf` | Signed-in PDF route (`invoicePdf(id)`); `inline`, or `attachment` with `?download=1`; drafts print "DRAFT"; `Cache-Control: private, no-store` |
 | `/invoices/customers`, `/invoices/customers/new`, `/invoices/customers/[id]` | Customers with outstanding / overdue; a customer's contact, invoices, payments, retainers (add, edit, pause), **contracts** (each with its invoices and next step), balance; "New invoice for them" (`/invoices/new?customer=`) |
@@ -876,12 +871,14 @@ steps), and so are `stripeConfigured()`, `stripeTestMode()`, `stripeWebhookConfi
 
 `rm -rf .data && npm run dev:sample-data` loads fake payment settings (From "Nora Chen", "100 Sample St, Sampleton, VA
 23000", Zelle "(555) 010-0100", check, Venmo, bank transfer on, card off, the two saved lines), fake customers,
-retainers, two contracts and one invoice in each state: an imported Skynova invoice `0000169` (paid), `0000170`
-(overdue and partly paid, from the sample deal "SAMPLE Bakery 小点心", page language 简体), `0000171` (this month's
-retainer, due on receipt today), `0000172` (void), `0000173` (from the SAMPLE Taco Spot contract: the package and a
-Food Stipend, Zelle or check), and a draft. The Sample Pizzeria contract (from its deal, 30% deposit) has no invoice
-yet, for trying "Make deposit invoice". The creator's next number is `0000174`. Customer links (each token is 43
-characters): `/i/sample-invoice-open-00000000000000000000000`, `/i/sample-invoice-overdue-00000000000000000000`,
+retainers, two contracts and one invoice in each state, all numbered from before Nora HQ so the sequence is untouched:
+an imported Skynova invoice `0000165` (paid), `0000166` (overdue and partly paid, from the sample deal "SAMPLE Bakery
+小点心", page language 简体), `0000167` (void), `0000168` (from the SAMPLE Taco Spot contract: the package and a Food
+Stipend, Zelle or check), `0000169` (this month's retainer, due on receipt today, Zelle or bank transfer online: without
+`STRIPE_SECRET_KEY` it offers Zelle only), and a draft. The Sample Pizzeria contract (from its deal, 30% deposit) has
+no invoice yet, for trying "Make deposit invoice". **The creator's next number is `0000170`**, as on Nora's first day
+(the smoke test checks it on fresh sample data). Customer links (each token is 43 characters):
+`/i/sample-invoice-open-00000000000000000000000`, `/i/sample-invoice-overdue-00000000000000000000`,
 `/i/sample-invoice-paid-00000000000000000000000`, `/i/sample-invoice-void-00000000000000000000000`,
 `/i/sample-invoice-contract-0000000000000000000`. The sample deal "Sample Pizzeria" has no invoice, for trying Make
 invoice. To try the creator's one-time ask, clear From and Zelle in Settings. Use Stripe test keys (`sk_test_…`) and

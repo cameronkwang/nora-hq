@@ -3,7 +3,8 @@
  * a throwaway PGlite: a fresh migrate + seed (first number 0000170), upgrades from 0016 with data, and the finalize
  * UPDATE / create-and-finalize INSERT / import bump / "Next invoice number" statements. Run from the repo root:
  *   npx tsx scripts/test-invoice-numbers.mts
- * Written by the design step; core keeps these statements in lib/ops-invoices and may fold this into its ops tests.
+ * Written by the design step. lib/ops-invoices runs these same statements (TAKE, the finalize UPDATE, the create-and-finalize
+ * INSERT, the import bump, "Next invoice number", the peek); scripts/test-invoices-ops.ts proves them again through the ops.
  */
 import { PGlite } from "@electric-sql/pglite";
 import { drizzle } from "drizzle-orm/pglite";

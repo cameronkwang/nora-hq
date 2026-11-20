@@ -28,15 +28,17 @@ const CALENDAR: Item = { href: "/calendar", label: "Calendar", icon: "calendar",
 const OUTREACH: Item = { href: "/creators", label: "Outreach", section: "outreach" };
 const INSIGHTS: Item = { href: "/numbers", label: "Insights", section: "insights" };
 const CONTRACTS: Item = { href: "/contracts", label: "Contracts" };
+/** Invoicing is Nora's money and both of them use it: in Cameron's Grow and in Nora's Mine (and both phone More sheets). */
+const INVOICES: Item = { href: "/invoices", label: "Invoices", section: "invoices" };
 const SETTINGS: Item = { href: "/settings", label: "Settings" };
 const ACTIVITY: Item = { href: "/activity", label: "Activity" };
 
 const MAIN = [HOME, INBOX, TASKS, CALENDAR];
-const GROW = [OUTREACH, INSIGHTS, CONTRACTS];
+const GROW = [OUTREACH, INSIGHTS, INVOICES, CONTRACTS];
 /** Nora's own pages (her HQ): no back-end tools, no list of businesses. */
 const MY_STATS: Item = { href: "/stats", label: "My stats" };
 const COLLABS: Item = { href: "/collabs", label: "Collab requests" };
-const NORA_MORE = [CONTRACTS, COLLABS, MY_STATS];
+const NORA_MORE = [INVOICES, CONTRACTS, COLLABS, MY_STATS];
 const INACTIVE_HREF = "/clients?inactive=1";
 
 function useIsActive() {
@@ -187,7 +189,7 @@ function SideLink({ item, active, count = 0 }: { item: Item; active: boolean; co
 
 function MobileNav({ user, creator, businesses, inactiveCount, counts, phoneTab }: NavProps) {
   const tabItem = phoneTab === "tasks" ? TASKS : CALENDAR;
-  // Nora: her own pages only (Tasks, Contracts, Collab requests, My stats). Cameron: the back-end tools.
+  // Nora: her own pages only (Tasks, Invoices, Contracts, Collab requests, My stats). Cameron: the back-end tools.
   const sheetItems = phoneTab === "tasks" ? [CALENDAR, ...GROW] : [TASKS, ...NORA_MORE];
   const nora = phoneTab === "calendar";
   const active = useIsActive();
