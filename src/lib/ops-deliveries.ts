@@ -12,11 +12,44 @@ import { isAppFileUrl } from "./uploads";
  * "Delivered": finished work handed to Nora (or Cameron). Same conventions as lib/ops: zod-validated input,
  * `actor` is a user email or "claude", one activity entry per call.
  *
- *  - deliver(): a person in the app (/delivered/new) or Claude (deliver_to_nora) hands over a finished thing:
- *    a title, an optional note, and files that are already in Nora HQ. It lands unread in the recipient's
- *    Delivered tab and on Nora's Home, and pushes a notification (unless her notifications are paused).
+ *  - deliver(): a person in the app (/delivered/new) hands over a finished thing: a title, an optional note,
+ *    and files that are already in Nora HQ. It lands unread in the recipient's Delivered tab and on Nora's Home,
+ *    and pushes a notification (unless her notifications are paused).
  *  - markSeen(): the recipient opened it. Only the recipient's own view marks it seen.
+ *
+ * Nora's Delivered inbox is for finished deliverables (a flyer, edited photos, a caption). Creator outreach (DMs or
+ * emails to creators) never goes there: it stays in Outreach and Review. deliver() refuses it for Nora, and the
+ * "Deliver to Nora" pickers and links leave out asks that are creator outreach.
  */
+
+/** Draft kinds that are messages to creators. An ask with one of these linked is creator outreach. */
+const CREATOR_OUTREACH_DRAFTS = ["outreach_email", "outreach_dm"] as const;
+
+/** Text that is plainly about messaging creators: "DM these creators", "creator outreach", "pitch the influencers". */
+const CREATOR_WORD = String.raw`(?:creators?|influencers?|ugc)`;
+const DM_WORD = String.raw`(?:dms?|dm'?ing|direct messages?|outreach|reach(?:ing)? out|pitch(?:es|ing)?|cold messages?)`;
+const CREATOR_DM_RE = new RegExp(String.raw`\b${CREATOR_WORD}\b[\s\S]{0,60}\b${DM_WORD}\b|\b${DM_WORD}\b[\s\S]{0,60}\b${CREATOR_WORD}\b`, "i");
+
+export function isCreatorOutreachText(...texts: (string | null | undefined)[]): boolean {
+  return texts.some((t) => !!t && CREATOR_DM_RE.test(t));
+}
+
+/** Of these asks, the ones that are creator outreach: a creator DM/email draft is linked, or the ask itself is about DMing creators. */
+export async function creatorOutreachAskIds(askIds: string[]): Promise<Set<string>> {
+  const out = new Set<string>();
+  if (!askIds.length) return out;
+  const db = await getDb();
+  const [drafts, asks] = await Promise.all([
+    db.select({ askId: schema.drafts.askId }).from(schema.drafts)
+      .where(and(inArray(schema.drafts.askId, askIds), inArray(schema.drafts.kind, [...CREATOR_OUTREACH_DRAFTS]))),
+    db.select({ id: schema.asks.id, body: schema.asks.body }).from(schema.asks).where(inArray(schema.asks.id, askIds)),
+  ]);
+  for (const d of drafts) if (d.askId) out.add(d.askId);
+  for (const a of asks) if (isCreatorOutreachText(a.body)) out.add(a.id);
+  return out;
+}
+
+const NOT_FOR_NORA = "Creator outreach doesn't go in Nora's Delivered inbox. It stays in Outreach and Review.";
 
 const MAX_FILES = 20;
 
@@ -39,6 +72,10 @@ export async function deliver(input: z.input<typeof DeliveryInput>, actor: strin
   if (!v.note && v.attachments.length === 0) throw new OpsError("Add a file or a note: there's nothing to deliver yet.");
   const bad = v.attachments.find((a) => !isAppFileUrl(a.url));
   if (bad) throw new OpsError(`"${bad.name}" isn't a file stored in Nora HQ. Upload it in the app first.`);
+  if (v.recipient === "nora") {
+    if (isCreatorOutreachText(v.title, v.note)) throw new OpsError(NOT_FOR_NORA);
+    if (v.askId && (await creatorOutreachAskIds([v.askId])).size) throw new OpsError(NOT_FOR_NORA);
+  }
 
   const db = await getDb();
   let clientId = v.clientId || null;

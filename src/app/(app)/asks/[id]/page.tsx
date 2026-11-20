@@ -18,7 +18,7 @@ import { KIND_LABELS } from "@/components/draft-checks";
 import { Button, Card, EmptyState, PageHeader, Status, StatusBadge, clientLabel, humanize } from "@/components/ui";
 import { setAskClient, setAskStatus } from "../actions";
 import { actorName } from "../../activity/actor";
-import { deliveriesForAsks } from "@/lib/ops-deliveries";
+import { deliveriesForAsks, isCreatorOutreachText } from "@/lib/ops-deliveries";
 import { DeliveryRow } from "@/components/nora-home";
 
 export const dynamic = "force-dynamic";
@@ -39,6 +39,8 @@ export default async function AskPage({ params, searchParams }: { params: Promis
     deliveriesForAsks([id]),
   ]);
   const viewer = personKey(assigneeFor(user));
+  // Creator outreach (DMs or emails to creators) never goes to Nora's Delivered inbox, so it gets no "Deliver to Nora".
+  const creatorOutreach = drafts.some((d) => d.kind === "outreach_dm" || d.kind === "outreach_email") || isCreatorOutreachText(ask.body);
   const names = new Map(clients.map((c) => [c.id, clientLabel(c)]));
   const client = clients.find((c) => c.id === ask.clientId) ?? null;
   const activeClients = clients.filter((c) => !c.archived || c.id === ask.clientId);
@@ -256,9 +258,10 @@ export default async function AskPage({ params, searchParams }: { params: Promis
           </Card>
           )}
 
+          {(!creatorOutreach || delivered.length > 0) && (
           <Card
             title={<>Delivered{delivered.length > 0 && <span className="meta">{delivered.length}</span>}</>}
-            actions={<Link href={`/delivered/new?ask=${ask.id}`} className="link-quiet">Deliver to Nora →</Link>}
+            actions={creatorOutreach ? undefined : <Link href={`/delivered/new?ask=${ask.id}`} className="link-quiet">Deliver to Nora →</Link>}
             padded={false}
           >
             {justDelivered && (
@@ -274,6 +277,7 @@ export default async function AskPage({ params, searchParams }: { params: Promis
               <p className="sec-note">Finished the work? Deliver the files here and they land in Nora’s Delivered tab and on her Home.</p>
             )}
           </Card>
+          )}
         </div>
       </div>
     </div>

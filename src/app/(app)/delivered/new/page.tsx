@@ -5,6 +5,7 @@ import { listClients } from "@/lib/data";
 import { blobEnabled } from "@/lib/uploads";
 import { personKey } from "@/components/ask-route";
 import { DeliveryForm } from "@/components/delivery-form";
+import { creatorOutreachAskIds } from "@/lib/ops-deliveries";
 import { PageHeader, clientLabel } from "@/components/ui";
 
 export const dynamic = "force-dynamic";
@@ -38,6 +39,11 @@ export default async function NewDeliveryPage({ searchParams }: { searchParams: 
   if (pre && !asks.some((a) => a.id === pre)) {
     const [extra] = await db.select({ id: schema.asks.id, body: schema.asks.body, clientId: schema.asks.clientId }).from(schema.asks).where(eq(schema.asks.id, pre));
     if (extra) options = [extra, ...asks];
+  }
+  // Creator outreach never goes to Nora's Delivered inbox, so those asks aren't offered.
+  if (to === "Nora") {
+    const outreach = await creatorOutreachAskIds(options.map((a) => a.id));
+    options = options.filter((a) => !outreach.has(a.id));
   }
   const label = (body: string) => {
     const line = body.split("\n").map((l) => l.trim()).find(Boolean) ?? "Ask";
