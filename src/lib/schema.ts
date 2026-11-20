@@ -9,9 +9,10 @@ import {
   uniqueIndex,
   index,
   pgSequence,
+  type AnyPgColumn,
 } from "drizzle-orm/pg-core";
 import type { PublicInfo } from "./business-facts";
-import type { CheckoutStatus, CustomerSource, InvoiceItem, InvoiceSource, InvoiceStatus, PaymentMethod, StripePaymentMethod } from "./invoices-types";
+import type { CheckoutStatus, CustomerSource, InvoiceItem, InvoiceSource, InvoiceStatus, PaymentMethod, PayWay, StripePaymentMethod } from "./invoices-types";
 
 /**
  * Single source of truth for the data model.
@@ -862,6 +863,9 @@ export type DropLink = typeof dropLinks.$inferSelect;
 /**
  * A contract Nora downloaded from /contracts. `fields` is the whole form (lib/contract ContractFields),
  * so a past contract re-downloads word for word or starts a new one. People only: no Claude tool reads these.
+ * Linked to invoicing both ways (docs/invoicing.md "Contracts"): an invoice points at its contract
+ * (invoices.contractId, many invoices per contract: a deposit and the rest, or each month); customerId is the
+ * invoicing customer, set when the contract is made from an invoice or an invoice is made from it.
  */
 export const contracts = pgTable(
   "contracts",
@@ -873,11 +877,16 @@ export const contracts = pgTable(
     agreementDate: text("agreement_date"), // "YYYY-MM-DD"
     feeCents: integer("fee_cents"), // null = no fee (gifted)
     dealId: text("deal_id").references(() => deals.id, { onDelete: "set null" }),
+    customerId: text("customer_id").references((): AnyPgColumn => customers.id, { onDelete: "set null" }),
     fields: jsonb("fields").$type<Record<string, string>>().notNull(),
     createdBy: text("created_by").notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [index("contracts_created_idx").on(t.createdAt)],
+  (t) => [
+    index("contracts_created_idx").on(t.createdAt),
+    index("contracts_deal_idx").on(t.dealId),
+    index("contracts_customer_idx").on(t.customerId),
+  ],
 );
 export type ContractRow = typeof contracts.$inferSelect;
 
@@ -892,10 +901,13 @@ export type ContractRow = typeof contracts.$inferSelect;
  */
 
 /**
- * Invoice numbers: INV-<issue year>-<nextval, 4+ digits>. Taken in the same UPDATE that first sends the invoice, so
- * drafts never burn a number and two sends can't share one. It keeps counting across years.
+ * Invoice numbers continue Nora's Skynova sequence: 7 digits, zero padded, no prefix ("0000170"). The first Nora HQ
+ * invoice is 0000170 unless a person sets "Next invoice number" in Settings. Taken in the same statement that
+ * finalizes the invoice (skipping any number already on an invoice), so drafts never burn a number and two
+ * invoices can't share one. An import or a person setting the next number moves the sequence past every number
+ * already used (setval). Migration 0017 moves an existing sequence to 170 (or past the highest number used).
  */
-export const invoiceNumberSeq = pgSequence("invoice_number_seq", { startWith: 1, increment: 1, minValue: 1 });
+export const invoiceNumberSeq = pgSequence("invoice_number_seq", { startWith: 170, increment: 1, minValue: 1 });
 
 /**
  * Who gets billed: a managed business (clientId set, at most one customer per client) or a collab business with no
@@ -917,6 +929,9 @@ export const customers = pgTable(
     lang: text("lang").$type<IntakeLang>(),
     archived: boolean("archived").notNull().default(false),
     source: text("source").$type<CustomerSource>().notNull().default("manual"),
+    // Stripe's Customer id ("cus_…"), only if Checkout can reuse a verified bank for this customer (docs/invoicing.md
+    // "Stripe bank reuse"). An id, never a card or bank detail.
+    stripeCustomerId: text("stripe_customer_id"),
     createdBy: text("created_by").notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
@@ -940,16 +955,20 @@ export const retainers = pgTable(
     startMonth: text("start_month"), // "YYYY-MM": first month to bill; null = from now
     active: boolean("active").notNull().default(true),
     lastRunMonth: text("last_run_month"), // "YYYY-MM" the draft was made for
+    contractId: text("contract_id").references(() => contracts.id, { onDelete: "set null" }), // "Set up monthly invoices" from a monthly contract; its drafts carry it too
     createdBy: text("created_by").notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [index("retainers_customer_idx").on(t.customerId)],
+  (t) => [index("retainers_customer_idx").on(t.customerId), uniqueIndex("retainers_contract_uq").on(t.contractId)], // one retainer per contract
 );
 
 /**
  * One invoice. status: draft · sent · partially_paid · paid · void ("overdue" is derived from dueDate, never stored).
- * number is null until first sent (invoiceNumberSeq); an imported Skynova invoice keeps its own number.
+ * number is null until finalized ("Make PDF": invoiceNumberSeq, "0000170"); an imported Skynova invoice keeps its own.
+ * Dates default to today and due the same day ("Due on receipt", termsDays 0). payWays = how this invoice asks to be
+ * paid, in any order (shown Zelle first): Zelle unless a person chose otherwise; payNote = the "custom" way's line.
+ * contractId = the contract it bills (lib/contract), many invoices per contract.
  * items = the lines in order (InvoiceItem: description, quantity, unitCents); subtotal / discount / total are written
  * with them in the same UPDATE. paidCents = sum of invoice_payments, recomputed from them in ONE UPDATE after every
  * payment change (with status and paidAt). A draft may leave issueDate / dueDate empty ("when sent" / + termsDays).
@@ -965,7 +984,7 @@ export const invoices = pgTable(
     status: text("status").$type<InvoiceStatus>().notNull().default("draft"),
     issueDate: text("issue_date"), // "YYYY-MM-DD"
     dueDate: text("due_date"), // "YYYY-MM-DD"
-    termsDays: integer("terms_days").notNull().default(14),
+    termsDays: integer("terms_days").notNull().default(0), // 0 = due on receipt (the same day)
     items: jsonb("items").$type<InvoiceItem[]>().notNull().default([]),
     subtotalCents: integer("subtotal_cents").notNull().default(0),
     discountCents: integer("discount_cents").notNull().default(0),
@@ -976,8 +995,11 @@ export const invoices = pgTable(
     notes: text("notes"), // printed on the invoice (the customer sees it)
     privateNotes: text("private_notes"), // team only
     dealId: text("deal_id").references(() => deals.id, { onDelete: "set null" }),
+    contractId: text("contract_id").references(() => contracts.id, { onDelete: "set null" }),
     retainerId: text("retainer_id").references(() => retainers.id, { onDelete: "set null" }),
     retainerMonth: text("retainer_month"), // "YYYY-MM"
+    payWays: jsonb("pay_ways").$type<PayWay[]>().notNull().default(["zelle"]),
+    payNote: text("pay_note"), // the "custom" way's line ("Cash at the shoot is fine")
     tokenHash: text("token_hash").unique(),
     tokenEnc: text("token_enc"),
     lang: text("lang").$type<IntakeLang>(),
@@ -1001,6 +1023,7 @@ export const invoices = pgTable(
     index("invoices_status_idx").on(t.status),
     index("invoices_customer_idx").on(t.customerId),
     index("invoices_deal_idx").on(t.dealId),
+    index("invoices_contract_idx").on(t.contractId),
     index("invoices_due_idx").on(t.dueDate),
     uniqueIndex("invoices_retainer_month_uq").on(t.retainerId, t.retainerMonth),
   ],

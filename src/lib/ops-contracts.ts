@@ -5,10 +5,14 @@ import { getDb, schema } from "./db";
 import { newId } from "./ids";
 import { logActivity } from "./activity";
 import { defaultFields, type ContractFields } from "./contract";
+import { linkContractToInvoice } from "./ops-invoices";
 
 /**
  * Contract history: every contract Nora downloads is kept here so she can see who got what and re-download it.
  * People only — there is deliberately no Claude (MCP) tool for these, since they hold fees.
+ * Linked to invoicing both ways (docs/invoicing.md "Contracts"): a contract made from an invoice ("Make contract",
+ * /contracts?invoice=<id>) is saved with invoiceId and links back (lib/ops-invoices linkContractToInvoice); an invoice
+ * made from a contract carries contractId. Past contracts rows read their invoices with invoicesForContracts.
  */
 
 const FIELD_KEYS = Object.keys(defaultFields("2000-01-01")) as (keyof ContractFields)[];
@@ -30,7 +34,7 @@ function feeCents(fee: string): number | null {
   return Number.isFinite(n) && n > 0 ? Math.round(n * 100) : null;
 }
 
-export async function saveContract(input: { fields: unknown; dealId?: string | null }, actor: string): Promise<string> {
+export async function saveContract(input: { fields: unknown; dealId?: string | null; invoiceId?: string | null }, actor: string): Promise<string> {
   const fields = Fields.parse(input.fields);
   const db = await getDb();
   let dealId: string | null = null;
@@ -53,6 +57,8 @@ export async function saveContract(input: { fields: unknown; dealId?: string | n
   });
   // No amount in the activity log: it's visible to everyone and to Claude's briefing.
   await logActivity({ actor, action: "contract.downloaded", entityType: "contract", entityId: id, summary: `Made a contract for ${business}` });
+  // Made from an invoice: the invoice now shows this contract, and the contract the invoice's customer.
+  if (input.invoiceId) await linkContractToInvoice(id, input.invoiceId, actor);
   return id;
 }
 

@@ -7,7 +7,12 @@ import "server-only";
  *   STRIPE_SECRET_KEY     sk_live_… / sk_test_… (or a restricted key: Checkout Sessions write, PaymentIntents read)
  *   STRIPE_WEBHOOK_SECRET whsec_… for POST /api/stripe/webhook
  * Without STRIPE_SECRET_KEY, invoices simply show no "Pay online" (Zelle and check still work). See docs/invoicing.md
- * and docs/stripe-setup.md.
+ * and docs/stripe-setup.md. Pay online is offered only on invoices whose ways include "bank" (bank transfer, the
+ * online option) or "card" (off unless turned on in Settings). Never a surcharge or fee added for either.
+ *
+ * Bank reuse (to research, docs/invoicing.md "Stripe bank reuse"): if Checkout with a Stripe Customer can show a
+ * client's already-verified bank account again, so the instant-verification fee isn't charged twice, the builder
+ * passes `stripeCustomerId` (stored on customers.stripe_customer_id, an id only) and reads the session's customer.
  *
  * STATUS: interface only (design and schema step). stripeConfigured is real; the rest throw until the public_stripe
  * builder fills them in. Webhook events, idempotency and the invoice_checkouts rows live in lib/ops-stripe (theirs).
@@ -36,7 +41,7 @@ export type CheckoutMethod = "us_bank_account" | "card";
 
 export type CreateCheckoutInput = {
   invoiceId: string;
-  /** "INV-2026-0007": the product name the customer sees on Stripe's page. */
+  /** "0000170": the product name the customer sees on Stripe's page is "Invoice 0000170". */
   number: string;
   /** What is still owed, in cents (USD). */
   amountCents: number;
@@ -46,9 +51,12 @@ export type CreateCheckoutInput = {
   cancelUrl: string;
   /** Stripe Checkout's page language: "en" | "zh" | "zh-TW". */
   locale: "en" | "zh" | "zh-TW";
+  /** Only if bank reuse works (to research): the customer's saved Stripe Customer id ("cus_…"), or null. */
+  stripeCustomerId?: string | null;
 };
 
-export type CheckoutSession = { id: string; url: string; expiresAt: Date };
+/** customerId: Stripe's Customer on the session, when bank reuse made or used one (else null). */
+export type CheckoutSession = { id: string; url: string; expiresAt: Date; customerId?: string | null };
 
 /** POST /v1/checkout/sessions (mode payment, metadata.invoice_id, client_reference_id = invoiceId). */
 export async function createCheckoutSession(input: CreateCheckoutInput): Promise<CheckoutSession> {
