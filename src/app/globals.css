@@ -818,3 +818,16 @@ summary.no-marker::-webkit-details-marker { display: none; }
 @media (prefers-reduced-motion: reduce) {
   .switch-track, .switch-track::after { transition: none; }
 }
+
+/* Nora's list: swipe a task row sideways to mark it done (components/swipe-done.tsx). The tick still works. */
+.swipe { position: relative; overflow: hidden; }
+.swipe-under {
+  position: absolute; inset: 0; display: flex; align-items: center; padding: 0 16px;
+  background: var(--ok-soft); color: var(--ok); font-size: var(--text-sm); font-weight: 600; pointer-events: none;
+}
+.swipe-row { position: relative; background: var(--bg); touch-action: pan-y; transition: transform 180ms ease; }
+.swipe.is-gone { max-height: 0; transition: max-height 200ms ease 160ms; }
+.swipe:not(.is-gone) { max-height: 12rem; }
+@media (prefers-reduced-motion: reduce) {
+  .swipe-row, .swipe.is-gone { transition: none; }
+}

@@ -3,13 +3,15 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { eq } from "drizzle-orm";
-import { requireUser } from "@/lib/auth";
+import { assigneeFor, requireUser } from "@/lib/auth";
+import { reminderDue } from "@/lib/nora-list";
+import { personKey } from "@/components/ask-route";
 import { getDb, schema } from "@/lib/db";
 import { createTask, deleteTask, updateTask } from "@/lib/ops";
 import { bulkDeleteTasks, bulkUpdateTasks } from "@/lib/ops-tasks";
 import { listClients } from "@/lib/data";
 import { buildImportPreview, type ImportPreview } from "./csv";
-import { isMonth } from "@/lib/dates";
+import { isMonth, today } from "@/lib/dates";
 import type { Assignee, Platform, TaskStatus } from "@/lib/schema";
 
 const str = (v: FormDataEntryValue | null) => (typeof v === "string" ? v.trim() : "");
@@ -216,4 +218,17 @@ export async function importTasks(csv: string): Promise<ActionResult> {
   }
   refresh();
   return { ok: true, count };
+}
+
+/** "Add a reminder" on Nora's Home: a task for the person adding it, due today, this week (Sunday) or with no date. */
+export async function addReminder(formData: FormData) {
+  const user = await requireUser();
+  const title = str(formData.get("title"));
+  if (!title) return;
+  const assignee = personKey(assigneeFor(user)) ?? "nora";
+  await createTask(
+    { title: title.slice(0, 200), assignee, dueDate: reminderDue(str(formData.get("when")), today()) },
+    user.email,
+  );
+  refresh();
 }

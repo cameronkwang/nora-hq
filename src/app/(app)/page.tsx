@@ -16,7 +16,7 @@ import { HealthLine, loadClientHealth } from "@/components/client-health-strip";
 import type { ClientHealthRow } from "@/lib/data";
 import { HomeRow, NoraHome } from "@/components/nora-home";
 import { KIND_LABELS } from "@/components/draft-checks";
-import { Card, Count, EmptyState, PageHeader, ProgressBar, Status, Tag, clientLabel, formatNumber, humanize } from "@/components/ui";
+import { Card, Count, EmptyState, LinkButton, PageHeader, ProgressBar, Status, Tag, clientLabel, formatNumber, humanize } from "@/components/ui";
 
 export const dynamic = "force-dynamic";
 
@@ -100,46 +100,28 @@ export default async function Home({ searchParams }: { searchParams: Promise<Rec
     </p>
   );
 
-  // Nora's Home is her day (shoots, reels, payments, her asks), not the agency dashboard.
+  // Nora's Home is her list (her tasks and reminders by when they're due), not the agency dashboard.
   if (me === "nora") {
     const [forYou, clients] = await Promise.all([getForYou(user.email, me, now), listClients()]);
     const names = new Map(clients.map((c) => [c.id, clientLabel(c)]));
     return (
       <div>
-        <PageHeader title={`${greeting()}, ${user.name.split(" ")[0]}`} subtitle={todayLabel()} />
-        <QuickAsk me={me} directUpload={blobEnabled()} />
+        <PageHeader
+          title={`${greeting()}, ${user.name.split(" ")[0]}`}
+          subtitle={todayLabel()}
+          actions={<LinkButton href="/asks/new" variant="secondary">New ask</LinkButton>}
+        />
         <div className="home-notes">
           <NotifyHomeCard />
           {sentNote}
         </div>
-        {(forYou.asks.length > 0 || forYou.tasks.length > 0) && (
-          <Card title="For you" padded={false}>
-            <div className="approve-stack">
-              {forYou.asks.length > 0 && (
-                <ul className="list">
-                  {forYou.asks.map((a) => (
-                    <HomeRow
-                      key={a.id}
-                      href={`/asks/${a.id}`}
-                      title={a.title}
-                      clamp
-                      note={a.claudeAsked ? <Status tone="warn" small>Claude asked a question</Status> : <Status tone="info" small>Ask for you</Status>}
-                      when={relativeTime(a.at)}
-                    />
-                  ))}
-                </ul>
-              )}
-              {forYou.tasks.length > 0 && (
-                <TaskList>
-                  {forYou.tasks.map((t) => (
-                    <TaskRow key={t.id} task={t} clientName={t.clientId ? names.get(t.clientId) : null} />
-                  ))}
-                </TaskList>
-              )}
-            </div>
-          </Card>
-        )}
-        <NoraHome email={user.email} name={user.name} now={now} skipAskIds={forYou.asks.map((a) => a.id)} />
+        <NoraHome
+          email={user.email}
+          name={user.name}
+          now={now}
+          names={names}
+          asks={forYou.asks.map((a) => ({ id: a.id, title: a.title, at: a.at, claudeAsked: a.claudeAsked }))}
+        />
       </div>
     );
   }
