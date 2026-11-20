@@ -2229,6 +2229,8 @@ async function v8Flows(browser) {
     const box = page.locator("main input[type='checkbox'][aria-label^='Reel to post for Issho']").first();
     await box.check();
     await page.locator("main input[type='checkbox'][aria-label^='Reel posted for Issho']").first().waitFor({ timeout: 20000 });
+    // The tick shows at once (optimistic); reload only once its save finished, or the reload can read the old row.
+    await page.waitForFunction(() => !document.querySelector("main .reel-check.is-busy"), null, { timeout: 20000 });
     await page.reload({ waitUntil: "networkidle" });
     const after = Number((await page.locator("main").innerText()).match(/(\d+) reels? to post/)[1]);
     if (after !== before - 1) throw new Error(`reels to post ${before} → ${after}`);
