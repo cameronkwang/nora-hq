@@ -216,6 +216,11 @@
   .mgrid-add:hover { background: var(--surface-2); color: var(--text); }
   @media (pointer: coarse) {                          /* no hover on a touch tablet: the + is always there, and finger-sized */
     .mgrid-add { opacity: 1; width: 44px; height: 44px; margin: -12px -8px -12px 0; }
+    /* ...and so is every name in a day (an iPad shows the grid): each one is its own 44px row. One line of 18px
+       (a visit on the Schedule, stacked with no gap) or two (a post), padded up to 44px. */
+    .mgrid-items { gap: 0; }
+    .mgrid-item { padding-block: 13px; }
+    .mgrid-item.mgrid-post { padding-block: 4px; }
   }
   .cal-legend { display: flex; flex-wrap: wrap; gap: 4px 16px; margin-top: 12px; }
 

@@ -12,6 +12,10 @@
 // cameron@local and nora@local can exist, and a blank DATABASE_URL so it only ever opens the embedded sample database).
 // The sign-in form of a production build checks the real password's hash, so there the test signs itself in with a
 // session cookie (scripts/test-login.mjs); on `next dev` it uses the form. Stop the server with `pkill -f next-server`.
+// Run the flow sections on that fresh sample data each time: v8 and v10 fail when run a second time on the same
+// database (the schedule is already pasted and its reel ticked, and the duplicate-task guard answers the second
+// "real task"). Stop the server, make the sample data again, start it (no new build needed). The page crawls
+// (crawl, responsive) can run again on a used database.
 // The page crawls (crawl, responsive) run in DARK MODE ONLY, at the sizes in DEVICE_SIZES below: every distinct iPhone
 // screen size from the iPhone 14 on, the iPad Pro 11-inch (2021) and a 1080p desktop. SMOKE_FULL=1 brings back the old
 // full matrix as well (the generic 375 to 1920 widths, and light as well as dark at every size).
