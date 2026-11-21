@@ -224,8 +224,8 @@ const tokens = (s: string) => scheduleNameKey(s).split(" ").filter((t) => t && !
 const compact = (s: string) => scheduleNameKey(s).replace(/\s+/g, "");
 
 /**
- * Finds the business a schedule name refers to. "Crab O’Clock" ↔ "Crab O Clock" (same letters);
- * "Massage Kingdom" ↔ "SNF Massage Kingdom" at Richmond (every word of one is in the other).
+ * Finds the business a schedule name refers to. "Noodle O’Clock" ↔ "Noodle O Clock" (same letters);
+ * "Lotus Spa" ↔ "ABC Lotus Spa" at Sampleton (every word of one is in the other).
  * Returns null when nothing — or more than one business equally — matches.
  */
 export function matchBusiness<T extends { id: string; name: string; location?: string | null }>(name: string, clients: T[]): T | null {
@@ -241,7 +241,7 @@ export function matchBusiness<T extends { id: string; name: string; location?: s
     const theirs = tokens(`${x.name} ${x.location ?? ""}`);
     const nameOnly = tokens(x.name);
     const [small, big] = mine.length <= nameOnly.length ? [mine, theirs] : [nameOnly, mine];
-    if (!small.length || small.join("").length < 5) continue; // "NUE" alone is too short to guess from
+    if (!small.length || small.join("").length < 5) continue; // "ZAO" alone is too short to guess from
     if (small.every((t) => big.includes(t))) scored.push({ client: x, extra: Math.abs(big.length - small.length) });
   }
   if (!scored.length) return null;
