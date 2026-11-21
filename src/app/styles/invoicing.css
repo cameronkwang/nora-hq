@@ -270,6 +270,14 @@
     .inv-saved-moves { grid-column: 1 / -1; justify-content: flex-end; }
   }
   .inv-fees { width: 100%; max-width: 28rem; }
+
+  /* ───────────────────────── Settings: her own bank account (the ACH way) ───────────────────────── */
+  /* A group between two hairlines, no box. The saved account shows masked (••••6789), never the number. */
+  .inv-bank { display: grid; gap: 12px; padding: 16px 0; border-block: var(--rule); }
+  .inv-bank-saved { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 8px 24px; }
+  .inv-bank-facts { display: flex; flex-wrap: wrap; gap: 6px 32px; }
+  .inv-bank-facts dt { font-size: var(--text-sm); line-height: 1.25rem; color: var(--muted); }
+  .inv-bank-facts dd { font-weight: 500; letter-spacing: 0.02em; }
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -121,7 +121,9 @@ export function InvoiceRows({ rows, showCustomer = true, empty }: { rows: Invoic
 /**
  * The invoice as its PDF prints it (InvoiceDocument: every word already formatted), on a hairline sheet. The PDF has
  * English letters only, so the text is shown the way it is drawn (invoices-types pdfText: the same rule as lib/invoice-pdf),
- * and anything it leaves out (Chinese) is said above the sheet instead of being shown as if it printed.
+ * and anything it leaves out (Chinese) is said above the sheet instead of being shown as if it printed. One thing
+ * differs from the PDF on purpose: her bank account number is masked here (ops-invoices getInvoice builds the
+ * document from masked details), and a line under the block says so.
  */
 export function InvoicePaper({ doc }: { doc: InvoiceDocument }) {
   const total = doc.totals[doc.totals.length - 1];
@@ -188,10 +190,12 @@ export function InvoicePaper({ doc }: { doc: InvoiceDocument }) {
           <p><u>NOTES:</u> {doc.paymentHeading}</p>
         )}
         {doc.paymentLines.length ? (
-          doc.paymentLines.map((l, i) => <p key={i} className="[overflow-wrap:anywhere]">{pdfText(l)}</p>)
+          // "" is the blank line between two ways (her bank account, Zelle, checks).
+          doc.paymentLines.map((l, i) => (l ? <p key={i} className="[overflow-wrap:anywhere]">{pdfText(l)}</p> : <p key={i} aria-hidden className="h-3" />))
         ) : (
           <p className="status is-warn is-small is-wrap">No way to pay prints yet. Add your Zelle number in Settings.</p>
         )}
+        {doc.paymentMasked && <p className="meta mt-3 whitespace-normal">Shown masked here. The PDF and the customer&apos;s page print the full account number.</p>}
       </div>
       <dl className="inv-totals">
         {doc.totals.map((t) => (

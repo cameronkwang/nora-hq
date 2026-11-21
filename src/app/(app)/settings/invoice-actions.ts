@@ -65,7 +65,9 @@ export async function saveInvoiceSettingsAction(_prev: ActionFormState, fd: Form
   } catch (e) {
     const m = message(e);
     if (m) return { error: m, at: Date.now() };
-    throw e;
+    // Never the error's own text: it could quote the query, and the form carries her bank account.
+    console.error("[settings] saving the invoice settings failed", e instanceof Error ? e.name : "error");
+    return { error: "Couldn't save. Nothing changed. Try again.", at: Date.now() };
   }
   refresh();
   return { ok: true, message: "Saved. New invoices use this.", at: Date.now() };
