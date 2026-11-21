@@ -7,21 +7,21 @@
  * Two kinds of match:
  *  - "labelled": a credential label followed by a value — "password: x", "pw hunter2", "pass=…", "login: …", "密码：…".
  *  - "token": one 8+ character word with letters AND digits AND a password-style symbol (!@#$%^&*…), that isn't an
- *    email, URL, @handle, #hashtag, phone number, price, date or opening hours ("Tanklin1991!!", "5006688@Fff").
+ *    email, URL, @handle, #hashtag, phone number, price, date or opening hours ("Wokstar2020!!", "8112233@Ggg").
  *
  * `looksLikeSecret` is deliberately jumpy: it guards notes the team (or Claude) saves, where a false alarm costs a
  * reword, and `redactSecrets` uses it to mask what Claude and phones read (owner-typed answers included).
  * `looksLikeTypedSecret` is the calmer check for text an owner types on the public forms, where a false alarm stops
  * a busy person from sending. It refuses:
- *  - a label followed by a value shaped like a password ("password: hunter2", "密码是Tanklin1991!!");
+ *  - a label followed by a value shaped like a password ("password: hunter2", "密码是Wokstar2020!!");
  *  - a password label, a colon (or "is", 是) and ONE word that ends the line, whatever it looks like
  *    ("ig password: goldenwok", "ig password is goldenwok", "密码：woaini") — but not someone talking
  *    ("password: can you help", "the password is wrong", "Password: Google");
  *  - in the deal / anything-else boxes and the drop note (`tokens: false`, where a bare "Buy1Get1!" is fine): a
- *    password-shaped word right after a user name ("login: name / Tanklin1991!!", "账号 name Tanklin1991!!",
- *    "name@mail.com Tanklin1991!!", "IG: name / Wok2020!"), right after "pass" or a platform's account ("pass
+ *    password-shaped word right after a user name ("login: name / Wokstar2020!!", "账号 name Wokstar2020!!",
+ *    "name@mail.com Wokstar2020!!", "IG: name / Wok2020!"), right after "pass" or a platform's account ("pass
  *    Wok2020!", "IG account: Wok2020!"), or anywhere after the word "password" on the same line ("the password to
- *    our IG is Tanklin1991!!"). A deal that mentions an account or a slash is still a deal ("Loyalty account:
+ *    our IG is Wokstar2020!!"). A deal that mentions an account or a slash is still a deal ("Loyalty account:
  *    buy10get1!", "会员账户每周二 Buy1Get1!", "BOGO / Buy1Get1!").
  *
  * Full-width characters from a Chinese keyboard ("密码：１２３４５６") are read as their plain forms, and Chinese
@@ -37,7 +37,7 @@ export type SecretMatch = {
   kind: "labelled" | "token";
   /** The raw matched value. Internal only — never display or log it. */
   text: string;
-  /** Safe to show: the label (if any) plus a masked value, e.g. "password: T•••••••!". */
+  /** Safe to show: the label (if any) plus a masked value, e.g. "password: W•••••••!". */
   hint: string;
 };
 
@@ -52,7 +52,7 @@ const CJK_RE = /(账号密码|帳號密碼|密码|密碼|口令)(\s*(?:[:=：]|�
 const WEAK_RE = new RegExp(`(?:^|[^\\p{L}\\p{N}])(${WEAK})(\\s*[:=：]\\s*)([^\\s,;]+)`, "giu");
 /** Labels that can only mean a password ("pass" may be a lunch pass, "login" a username). */
 const PASSWORD_LABEL = new RegExp(`^(?:${STRONG}|账号密码|帳號密碼)$`, "i");
-/** Words that say an account follows: the next word or two may be its password ("login: name / Tanklin1991!!"). */
+/** Words that say an account follows: the next word or two may be its password ("login: name / Wokstar2020!!"). */
 const CUE_RE = new RegExp(
   `(?:^|[^\\p{L}\\p{N}])(${STRONG}|${WEAK}|log\\s?in|sign\\s?in|user\\s?name|user\\s?id|account|acct)(?![\\p{L}\\p{N}])|(账号|帐号|帳號|账户|帐户|帳戶|用户名|用戶名|登录|登錄|登入|密码|密碼|口令)`,
   "giu",
@@ -63,7 +63,7 @@ const NAME_SLASH = /(?:^|[\s:=])[A-Za-z0-9._@+-]{3,}\s*\/(?!\/)/g;
 /** "name /" only counts on a line about an account ("IG: goldenwok / …"), not in a deal ("BOGO / Buy1Get1!"). */
 const ACCOUNT_WORD =
   /(?:^|[^\p{L}\p{N}])(?:ig|insta(?:gram)?|fb|facebook|tik\s?tok|tt|gmail|e-?mail|log\s?in|sign\s?in|user\s?name|user\s?id|account|acct|wechat)(?![\p{L}\p{N}])|账号|帐号|帳號|账户|帐户|帳戶|用户名|用戶名|登录|登錄|登入|微信/iu;
-/** A word that reads as a user name ("goldenwok", "是pokebros", "name@mail.com"): after an account word, the next word may be its password. */
+/** A word that reads as a user name ("goldenwok", "是pokeplace", "name@mail.com"): after an account word, the next word may be its password. */
 const USERNAME = /^(?:是|为|為)?[A-Za-z0-9._@+-]{3,}[,.;:]?$/;
 
 /** Words that follow "password" in ordinary sentences ("password manager", "password reset"). */
@@ -93,7 +93,7 @@ const URLISH = /^(?:[a-z][a-z0-9+.-]*:\/\/|www\.)|^[a-z0-9-]+(?:\.[a-z0-9-]+)+(?
 /** Words that make a token a time/date/quantity rather than a secret once removed ("11am–9pm", "Mon–Fri", "3x/week"). */
 const BENIGN_WORDS = /(am|pm|st|nd|rd|th|k|x|mon|tue|tues|wed|thu|thur|thurs|fri|sat|sun|jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec|min|mins|hr|hrs|h|lb|lbs|oz|ft|pcs|pc|off|ea|each|week|wk|mo|yr|day|days|per)/gi;
 
-/** "Tanklin1991!!" → "T•••••••!" — enough to recognise, not enough to use. */
+/** "Wokstar2020!!" → "W•••••••!" — enough to recognise, not enough to use. */
 export function maskSecret(v: string): string {
   const s = [...v];
   if (s.length <= 2) return "•".repeat(s.length);
@@ -136,13 +136,13 @@ function valueLooksSecret(label: string, value: string, separated: boolean): boo
   if (/^[$€£¥]\d[\d,.]*$/.test(v)) return false; // a plain price: "Lunch pass: $50 a month"
   if (EMAIL.test(v) && /^(login|log-in|signin|sign-in)$/i.test(label)) return true; // "login: owner@x.com" — a login, still not for here
   if (separated) return [...v].length >= 3;
-  // No colon ("pw hunter2", "password is Tanklin1991"): the value has to look like one.
+  // No colon ("pw hunter2", "password is Wokstar2020"): the value has to look like one.
   return [...v].length >= 4 && (/\d/.test(v) || PASSWORD_SYMBOL.test(v) || (/[a-z]/.test(v) && /[A-Z]/.test(v)));
 }
 
 const CJK = "\\p{Script=Han}\\p{Script=Hiragana}\\p{Script=Katakana}\\p{Script=Hangul}";
 const CJK_CHAR = new RegExp(`[${CJK}]`, "u");
-/** A stretch with no Chinese in it. Chinese has no spaces ("密码是Tanklin1991!!谢谢" is one word): a password is such a stretch. */
+/** A stretch with no Chinese in it. Chinese has no spaces ("密码是Wokstar2020!!谢谢" is one word): a password is such a stretch. */
 const LATIN_RUN = new RegExp(`[^${CJK}]+`, "gu");
 
 /**
@@ -153,7 +153,7 @@ const foldWidth = (s: string) => s.replace(/[\u3000\uFF01-\uFF5E]/g, (c) => c.no
 
 /**
  * The calmer rule for owner-typed text: after a label, only a value shaped like a password counts — a digit, a
- * symbol or a capital inside the word ("Tanklin1991!!", "hunter2", "sunShine"). Ordinary words ("password: can you
+ * symbol or a capital inside the word ("Wokstar2020!!", "hunter2", "sunShine"). Ordinary words ("password: can you
  * help"), handles, emails, links and prices don't. `glued` = Chinese follows straight on, where a capital inside
  * the word is usually a brand ("密码是iPhone自动保存的").
  */
@@ -208,7 +208,7 @@ function scan(text: string | null | undefined, mode: { typed: boolean; tokens: b
       const cjkAt = raw.search(CJK_CHAR);
       const run = cjkAt < 0 ? raw : raw.slice(0, cjkAt);
       if (cjkAt >= 0 && !mode.typed) {
-        // The jumpy check also takes numbers further into the sentence ("密码是我的生日19880808").
+        // The jumpy check also takes numbers further into the sentence ("密码是我的生日19850505").
         for (const r of raw.slice(cjkAt).matchAll(LATIN_RUN)) {
           const t = trimToken(r[0]);
           if ([...t].length >= 4 && /\d/.test(t) && !plainlyNotSecret(t)) push("labelled", end - raw.length + cjkAt + r.index + r[0].indexOf(t), t.length, label);
@@ -265,7 +265,7 @@ function scan(text: string | null | undefined, mode: { typed: boolean; tokens: b
     };
     for (const c of line.matchAll(CUE_RE)) {
       const cue = c[1] ?? c[2];
-      // After the word "password" itself, anywhere further on the line ("the password to our IG is Tanklin1991!!").
+      // After the word "password" itself, anywhere further on the line ("the password to our IG is Wokstar2020!!").
       if (PASSWORD_LABEL.test(cue)) after(c.index + c[0].length, Infinity);
       else afterAccount(c.index + c[0].length, /^pass$/i.test(cue) ? "pass" : ACCOUNT_WORD.test(line.slice(0, c.index)) ? "platform" : "account");
     }
