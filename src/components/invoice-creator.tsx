@@ -46,7 +46,7 @@ import { Status, buttonClass, cx } from "./ui";
 /**
  * The fast creator (/invoices/new, docs/invoicing.md "The fast creator"): one screen, phone first. Bill to (a
  * typeahead over customers, managed businesses and deal businesses), saved lines as one-tap chips, a custom line,
- * live totals, the defaults as one quiet line ("Due on receipt · Zelle · #0000170", each part tappable), More, and
+ * live totals, the defaults as one quiet line ("Due on receipt · Zelle, check · #0000170", each part tappable), More, and
  * ONE focal button: Make PDF (Cmd/Ctrl+Enter). It saves and finalizes in one server action and turns into the done
  * state. Plain React and the pure helpers only: no date, form or PDF library is loaded here (the PDF is made on the
  * server), so the page is interactive as soon as it paints.
@@ -88,7 +88,7 @@ const LANG_OPTIONS: Array<{ value: "" | IntakeLang; label: string }> = [
   { value: "zh-Hant", label: "繁體中文" },
 ];
 
-/** A blank creator (after "New invoice" in the done state): today, due on receipt, the ways ticked in Settings (Zelle unless she chose others), no lines. */
+/** A blank creator (after "New invoice" in the done state): today, due on receipt, the ways ticked in Settings (Zelle and check unless she chose others), no lines. */
 export function blankPrefill(ctx: Pick<InvoiceCreatorContext, "today" | "settings" | "defaultPayWays">): InvoicePrefill {
   return {
     billTo: null, newCustomer: null, lines: [], issueDate: ctx.today, dueDate: addDaysYmd(ctx.today, ctx.settings.termsDays), payWays: [...ctx.defaultPayWays],
@@ -327,7 +327,12 @@ export function InvoiceCreator({ ctx, edit, initialDone }: { ctx: InvoiceCreator
 
   const setupMissing = edit ? [] : ctx.setupMissing;
   const zelleTyped = setupMissing.includes("zelle") && !!setup.zelle.trim();
-  const availNow = useMemo(() => (zelleTyped ? { ...avail, zelle: { ok: true, why: null } } : avail), [avail, zelleTyped]);
+  // A check is made out to her name: the first time, the name typed in the one-time ask is enough.
+  const nameTyped = setupMissing.includes("fromName") && !!setup.fromName.trim();
+  const availNow = useMemo(
+    () => ({ ...avail, ...(zelleTyped ? { zelle: { ok: true, why: null } } : {}), ...(nameTyped ? { check: { ok: true, why: null } } : {}) }),
+    [avail, zelleTyped, nameTyped],
+  );
   const defaults = creatorDefaultsLine({ issueDate, dueDate, payWays, nextNumber: edit ? edit.number : nextNumber });
 
   /* ───────── Bill to ───────── */

@@ -9,9 +9,9 @@ Stripe is used only to take a payment online when an invoice asks for that, thro
 
 | Way to pay | What Nora pays | Notes |
 |---|---|---|
-| **Zelle** (the default) | nothing | Every invoice, unless a person chose otherwise. The PDF prints "Please send payment via Zelle to 5550100100." and "Put invoice 0000170 in the Zelle memo" |
+| **Zelle** (a default) | nothing | Every invoice, unless a person chose otherwise. The PDF prints "Please send payment via Zelle to 5550100100." and "Put invoice 0000170 in the Zelle memo" |
 | **Bank transfer (ACH)** to her own account (`ach`) | nothing | The customer sends it from their bank. The PDF prints her bank label, "ACH to ACCT#:" and "ROUTING:". Her account, typed once in Settings and stored encrypted (see "Her own bank account"). Nothing is connected |
-| Check | nothing | "Checks Payable to Nora Chen", and "Mail to ..." when a mailing address is saved |
+| **Check by mail** (a default) | nothing | Every invoice, under Zelle, unless a person chose otherwise. "Checks Payable to Nora Chen" (the payee in Settings, else the name the invoice is from) and "Mail to the address above" (her address at the top of the invoice; a different address saved for checks is spelled out instead) |
 | Venmo, PayPal | their own fees, if any | Plain instructions (a handle or a paypal.me link). Nothing is connected |
 | Other (custom) | | One line typed on that invoice ("Cash at the shoot is fine") |
 | Bank transfer online (ACH through Stripe, `bank`) | 0.8%, capped at $5 (plus instant verification, see "Stripe bank reuse") | The online option. Clears in about 4 business days. Not the same thing as the row above: this one goes through Stripe's page |
@@ -41,7 +41,9 @@ can easily follow up with 1 or the other". So, compared with the first design:
 
 - Numbers continue her Skynova sequence (`0000170`, 7 digits, no prefix) instead of `INV-YYYY-NNNN`.
 - Invoice date today, **due on receipt** (same day) instead of net 14.
-- Each invoice chooses its **ways to pay** (`payWays`); Zelle by default. Card is off by default. No surcharges.
+- Each invoice chooses its **ways to pay** (`payWays`); Zelle and a check by mail by default (Nov 21: "it only says
+  the info for zelle and check by mail. only add ach when requested"). A bank transfer (ACH) goes on an invoice only
+  when the customer asks for it. Card is off by default. No surcharges.
 - Saved lines as one-tap chips ("Standard Content Creation Package" $550.00, "Food Stipend" typed each time).
 - The PDF keeps her Skynova layout and wording (Ink style, no Item column).
 - `/invoices/new` is a **fast one-screen creator** whose one button, **Make PDF**, saves and finalizes in one step
@@ -181,7 +183,7 @@ and holds the invoice settings (`InvoiceSettings` in `invoices-types`, defaults 
 | `checkPayee`, `checkAddress`, `venmo`, `paypal` | empty | A way is offered in the creator only when its details are set |
 | `ownBankLabel` | empty | Bank transfer (ACH): the free-text line above the numbers ("Sample Bank Checking") |
 | `ownBankEnc` | none | Her own account and routing numbers, **encrypted** (`lib/crypto`, `TOKEN_ENC_KEY`): `encryptJson({ a, r })`. Never in plain text, not even the last digits. See "Her own bank account" |
-| `payDefaults` | `[]` (= Zelle) | The ways ticked for new invoices. Read through `defaultPayWays`: only the ticked ways that are available, and Zelle when none is left |
+| `payDefaults` | `[]` (= Zelle and check, `NEW_INVOICE_PAY_WAYS`) | The ways ticked for new invoices. Read through `defaultPayWays`: only the ticked ways (none ticked: Zelle and check) that are available, and Zelle when none is left |
 | `achEnabled` | on | Bank transfer ONLINE through Stripe (needs `STRIPE_SECRET_KEY`). The name is older than the `ach` way and has nothing to do with it |
 | `cardEnabled` | **off** | Card online (needs `STRIPE_SECRET_KEY` and this on) |
 | `termsDays` | 0 | Due on receipt |
@@ -318,13 +320,14 @@ The main way to make an invoice. One screen, phone first, great on desktop. Serv
   or a line would print EMPTY (Chinese only): "Add the name in English for the PDF (you can keep both)". The ops
   refuse the same (`createAndFinalizeInvoice`, `finalizeInvoice`), so no PDF ever says "Customer" or has a blank row.
   One rule for all of it: `invoices-types pdfText / pdfUnprintable / pdfPrintsEmpty`.
-- **Defaults** show as one quiet line, `creatorDefaultsLine`: "Due on receipt · Zelle · #0000170" (with her three
+- **Defaults** show as one quiet line, `creatorDefaultsLine`: "Due on receipt · Zelle, check · #0000170" (with her three
   ways ticked in Settings: "Due on receipt · Zelle, bank transfer (ACH), check · #0000170"). Each part is tappable:
   the due date (a date field, plus "Due on receipt"), the ways to pay (a checklist from `availablePayWays`: Zelle,
   Bank transfer (ACH), Check, Venmo, PayPal, Other, Bank transfer online, Card online; each unavailable one saying
   why, e.g. "Add your bank account and routing numbers in Settings." or "Card is off. Turn it on in Settings first.";
   "Other" asks for its line) and the number ("Next invoice number"). A blank invoice starts with
-  `InvoiceCreatorContext.defaultPayWays`: the ways ticked in Settings, Zelle when none is.
+  `InvoiceCreatorContext.defaultPayWays`: the ways ticked in Settings, Zelle and check when none is. The very first
+  invoice starts the same way: a way that only waits for the one-time ask (her name, her Zelle number) counts as there.
 - **More** (folded): discount (dollars or %), notes, language (English / 简体中文 / 繁體中文), private note.
 - **The one-time ask**: when `setupMissing` is not empty (no From name, address or Zelle number in Settings), a short
   block above Make PDF asks for them once ("Your name", prefilled "Nora Chen"; "Your address"; "Zelle number") and
@@ -440,7 +443,10 @@ clients see a familiar document, in the clean Ink style:
      space after the colons, as she writes them.
   2. `Please send payment via Zelle to <the Zelle value exactly as typed in Settings>.` and under it
      `Put invoice 0000170 in the Zelle memo` (then `Zelle shows <name>` only when "Name Zelle shows" is set).
-  3. `Checks Payable to <payee>` and, only when a mailing address is saved for checks, `Mail to <address on one line>`.
+  3. `Checks Payable to <payee>` (the payee in Settings, else the name the invoice is from, `checkPayee`) and
+     `Mail to the address above`: her own address is printed at the top of the invoice. When a different address is
+     saved for checks, `Mail to <address on one line>` instead. The pay page and the messages always spell the address
+     out (they have no "above"). No address anywhere: no Mail to line.
   Then, each its own block: `@handle [Venmo]`; `… [PayPal]`; the custom line; `Pay online by bank transfer: <link>`
   (only with an online way and a link). The older "<number> [Zelle]" and "Check payable to …, mail to …" wording is
   gone everywhere. Only the chosen ways print, and a way whose details are missing prints nothing.
@@ -518,7 +524,8 @@ text, not a status.
   bank to Nora's own account, using the numbers the invoice prints. Free, nothing connected, recorded by a person
   (payment method `ach`). `bank` = "Bank transfer online": the customer pays on Stripe's page; Stripe records it.
 - **What a new invoice starts with** (`defaultPayWays`): the ways ticked under "New invoices" in Settings
-  (`payDefaults`), and Zelle when nothing is ticked: **the built-in default stays Zelle only**. The same for a
+  (`payDefaults`), and **Zelle and a check by mail when nothing is ticked** (`NEW_INVOICE_PAY_WAYS`). A bank transfer
+  (ACH) is never a built-in default: it is added on the invoice whose customer asked for it. The same for a
   retainer's monthly draft and for a draft Claude makes without `pay_ways`. A ticked way that has lost its details
   (or an online way while Stripe is off) is skipped, and if none is left the invoice is Zelle. "Other" can't be a
   default (its line is typed per invoice).
@@ -761,7 +768,7 @@ payment-reminder text from the deal, don't draft those"):
 > Invoices (list_invoices, get_invoice, list_customers, create_draft_invoice): you may read them, and make a DRAFT
 > invoice only when Nora or Cameron asked for one, in chat or in an ask. Use the customer, business or deal they
 > named and the amounts they gave you; never invent a price, a discount or a due date. A draft takes the ways to pay
-> Nora ticked in Settings (Zelle unless she chose others): set pay_ways only when they said how this invoice should
+> Nora ticked in Settings (Zelle and check unless she chose others): set pay_ways only when they said how this invoice should
 > be paid, and never add a fee or surcharge for any way to pay. A person reviews the draft and presses Make PDF; you
 > never finalize or send an invoice, record or delete a payment, mark one paid, void or delete one, share its link,
 > or change how Nora gets paid. Nora's bank account and routing numbers are never in your tools (the PDF prints them
@@ -1081,7 +1088,7 @@ steps), and so are `stripeConfigured()`, `stripeTestMode()`, `stripeWebhookConfi
 `rm -rf .data && npm run dev:sample-data` loads fake payment settings (From "Nora Chen", "100 Sample St, Sampleton, VA
 23000", Zelle "5550100100", her bank account for a transfer: "Sample Bank Checking", account 000123456789, routing
 000000000, stored encrypted like the real thing; check, Venmo, bank transfer online on, card off, the two saved lines,
-and no way ticked for new invoices: the built-in default, Zelle), fake customers,
+and no way ticked for new invoices: the built-in default, Zelle and check), fake customers,
 retainers, two contracts and one invoice in each state, all numbered from before Nora HQ so the sequence is untouched:
 an imported Skynova invoice `0000165` (paid), `0000166` (overdue and partly paid, from the sample deal "SAMPLE Bakery
 小点心", page language 简体), `0000167` (void), `0000168` (from the SAMPLE Taco Spot contract: the package and a Food

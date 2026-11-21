@@ -367,8 +367,14 @@ export function retainerItemDescription(description: string, month: string): str
  */
 export const PAY_WAYS = ["zelle", "ach", "check", "venmo", "paypal", "custom", "bank", "card"] as const;
 export type PayWay = (typeof PAY_WAYS)[number];
-/** The built-in default for a new invoice, until a person ticks other ways in Settings (InvoiceSettings.payDefaults). */
+/** What an invoice falls back to when it has no known way at all (sortPayWays): Zelle. */
 export const DEFAULT_PAY_WAYS: readonly PayWay[] = ["zelle"];
+/**
+ * What a NEW invoice starts with until a person ticks other ways in Settings (InvoiceSettings.payDefaults): Zelle and
+ * a check by mail, each only once its details are there. A bank transfer (ACH) is never a built-in default: it goes
+ * on an invoice when the customer asks for it (picked on that invoice, or ticked in Settings).
+ */
+export const NEW_INVOICE_PAY_WAYS: readonly PayWay[] = ["zelle", "check"];
 /**
  * The order the PDF's PAYMENT INFORMATION block, the pay page and the messages print the chosen ways in, as Nora
  * writes her invoices: her bank account first, then Zelle, then checks; then the rest as before.
@@ -444,7 +450,7 @@ export function availablePayWays(s: InvoiceSettings, stripeReady: boolean): PayW
   return {
     zelle: need(!!s.zelle, "Add your Zelle number in Settings."),
     ach: need(!!s.ownBankLast4 && !!s.ownBankRouting, s.ownBankUnreadable ? "Type your bank account and routing numbers again in Settings." : "Add your bank account and routing numbers in Settings."),
-    check: need(!!s.checkPayee, "Add who checks are made out to in Settings."),
+    check: need(!!checkPayee(s), "Add your name (or who checks are made out to) in Settings."),
     venmo: need(!!s.venmo, "Add your Venmo in Settings."),
     paypal: need(!!s.paypal, "Add your PayPal in Settings."),
     custom: { ok: true, why: null },
@@ -467,11 +473,20 @@ export function zelleMemo(number: string | null): string {
 }
 
 /**
- * Ways ticked in Settings for new invoices, as a new invoice may use them right now: the saved ticks that are still
- * available, in the pickers' order. None saved, or none left → the built-in default, Zelle only.
+ * Who a check is made out to: the payee typed in Settings, else the name the invoice is from (her legal name), so a
+ * check works with nothing extra to set up.
+ */
+export function checkPayee(s: Pick<InvoiceSettings, "checkPayee" | "fromName">): string | null {
+  return s.checkPayee?.trim() || s.fromName?.trim() || null;
+}
+
+/**
+ * The ways a new invoice starts with right now: the ways ticked in Settings (none ticked → the built-in default,
+ * Zelle and check), keeping only those whose details are there, in the pickers' order. None left → Zelle.
  */
 export function defaultPayWays(s: Pick<InvoiceSettings, "payDefaults">, avail: PayWayAvailability): PayWay[] {
-  const ways = DEFAULTABLE_PAY_WAYS.filter((w) => s.payDefaults.includes(w) && avail[w].ok);
+  const wanted = s.payDefaults.length ? s.payDefaults : NEW_INVOICE_PAY_WAYS;
+  const ways = DEFAULTABLE_PAY_WAYS.filter((w) => wanted.includes(w) && avail[w].ok);
   return ways.length ? ways : [...DEFAULT_PAY_WAYS];
 }
 
@@ -488,7 +503,12 @@ export type PayOption =
   | { way: "zelle"; to: string; name: string | null; memo: string }
   /** `account` is the full number only on the PDF and the customer's page; everywhere else it is masked ("••••6789"). */
   | { way: "ach"; label: string | null; account: string; routing: string }
-  | { way: "check"; payee: string; address: string | null }
+  /**
+   * `address` is where to mail it: the address saved for checks, else the address the invoice is from. `addressAbove`
+   * is true in the second case: the PDF already prints that address at the top, so its check line points there
+   * ("Mail to the address above") instead of repeating it. The pay page and messages spell the address out.
+   */
+  | { way: "check"; payee: string; address: string | null; addressAbove: boolean }
   | { way: "venmo"; handle: string }
   | { way: "paypal"; handle: string }
   | { way: "custom"; text: string }
@@ -506,7 +526,7 @@ export function payOptions(s: InvoiceSettings, inv: { number: string | null; pay
   for (const w of printPayWays(inv.payWays)) {
     if (w === "zelle" && s.zelle) out.push({ way: "zelle", to: s.zelle, name: s.zelleName, memo: zelleMemo(inv.number) });
     else if (w === "ach" && bank) out.push({ way: "ach", label: s.ownBankLabel, account: bank.account, routing: bank.routing });
-    else if (w === "check" && s.checkPayee) out.push({ way: "check", payee: s.checkPayee, address: s.checkAddress });
+    else if (w === "check" && checkPayee(s)) out.push({ way: "check", payee: checkPayee(s)!, address: s.checkAddress?.trim() || s.fromAddress?.trim() || null, addressAbove: !s.checkAddress?.trim() && !!s.fromAddress?.trim() });
     else if (w === "venmo" && s.venmo) out.push({ way: "venmo", handle: s.venmo });
     else if (w === "paypal" && s.paypal) out.push({ way: "paypal", handle: s.paypal });
     else if (w === "custom" && inv.payNote?.trim()) out.push({ way: "custom", text: inv.payNote.trim() });
@@ -531,22 +551,24 @@ export function noPayOptions(o: readonly PayOption[]): boolean {
  *   Please send payment via Zelle to 5550100100.     (the Zelle value exactly as typed in Settings)
  *   Put invoice 0000170 in the Zelle memo            ("Zelle shows <name>" under it only when that name is set)
  *
- *   Checks Payable to Nora Chen
- *   Mail to 100 Sample St, Sampleton, VA 23000       (only when a mailing address is saved for checks)
+ *   Checks Payable to Nora Chen                      (the payee in Settings, else the name the invoice is from)
+ *   Mail to the address above                        (her address at the top of the invoice; when a different
+ *                                                     address is saved for checks: "Mail to 9 Other St, Town, VA 23000")
  *
  * then "@nora [Venmo]", "paypal.me/nora [PayPal]", the custom line and "Pay online by bank transfer: <link>", each
  * its own block. The online line needs the customer link (payUrl); without one it is left out.
- * `ach: "pointer"` is for a message a person sends WITH the PDF: the bank transfer is named, the account and routing
- * numbers are not repeated (the PDF carries them).
+ * `to: "message"` is for a message a person sends WITH the PDF: the bank transfer is named but the account and routing
+ * numbers are not repeated (the PDF carries them), and a check's mailing address is spelled out (a message has no
+ * "address above").
  */
-function paymentBlocks(options: readonly PayOption[], payUrl: string | null, ach: "numbers" | "pointer"): string[][] {
+function paymentBlocks(options: readonly PayOption[], payUrl: string | null, to: "pdf" | "message"): string[][] {
   const out: string[][] = [];
   const bank = options.some((o) => o.way === "bank");
   const card = options.some((o) => o.way === "card");
   for (const o of options) {
-    if (o.way === "ach") out.push(ach === "pointer" ? ["Bank transfer (ACH): the account details are on the PDF."] : [...(o.label ? [o.label] : []), `ACH to ACCT#:${o.account}`, `ROUTING:${o.routing}`]);
+    if (o.way === "ach") out.push(to === "message" ? ["Bank transfer (ACH): the account details are on the PDF."] : [...(o.label ? [o.label] : []), `ACH to ACCT#:${o.account}`, `ROUTING:${o.routing}`]);
     else if (o.way === "zelle") out.push([`Please send payment via Zelle to ${o.to}.`, o.memo, ...(o.name ? [`Zelle shows ${o.name}`] : [])]);
-    else if (o.way === "check") out.push([`Checks Payable to ${o.payee}`, ...(o.address ? [`Mail to ${oneLineAddress(o.address)}`] : [])]);
+    else if (o.way === "check") out.push([`Checks Payable to ${o.payee}`, ...(o.address ? [o.addressAbove && to === "pdf" ? "Mail to the address above" : `Mail to ${oneLineAddress(o.address)}`] : [])]);
     else if (o.way === "venmo") out.push([`${o.handle} [Venmo]`]);
     else if (o.way === "paypal") out.push([`${o.handle} [PayPal]`]);
     else if (o.way === "custom") out.push([o.text]);
@@ -561,7 +583,7 @@ function paymentBlocks(options: readonly PayOption[], payUrl: string | null, ach
  * is built from masked details). Never put it in a message, a log or MCP output: use paymentMessageLines there.
  */
 export function paymentInfoLines(options: readonly PayOption[], payUrl: string | null): string[] {
-  return paymentBlocks(options, payUrl, "numbers").flatMap((block, i) => (i ? ["", ...block] : block));
+  return paymentBlocks(options, payUrl, "pdf").flatMap((block, i) => (i ? ["", ...block] : block));
 }
 
 /**
@@ -569,7 +591,7 @@ export function paymentInfoLines(options: readonly PayOption[], payUrl: string |
  * after the other, but a bank transfer only points at the PDF. Never an account or routing number.
  */
 export function paymentMessageLines(options: readonly PayOption[], payUrl: string | null): string[] {
-  return paymentBlocks(options, payUrl, "pointer").flat();
+  return paymentBlocks(options, payUrl, "message").flat();
 }
 
 /* ───────────────────────── Saved line items (one-tap chips) ───────────────────────── */
@@ -671,7 +693,7 @@ export type InvoiceSettings = {
   /** Pay online (Stripe Checkout). Only matters when STRIPE_SECRET_KEY is set. Bank transfer on, card OFF by default. */
   achEnabled: boolean;
   cardEnabled: boolean;
-  /** The ways ticked for new invoices, in the pickers' order. Empty = the built-in default, Zelle (defaultPayWays). */
+  /** The ways ticked for new invoices, in the pickers' order. Empty = the built-in default, Zelle and check (defaultPayWays). */
   payDefaults: PayWay[];
   /** Default days until due for new invoices: 0 = due on receipt. */
   termsDays: number;
@@ -1143,7 +1165,7 @@ export type InvoiceCreatorContext = {
   setupMissing: InvoiceSetupField[];
   savedItems: SavedItem[];
   payWays: PayWayAvailability;
-  /** What a new, blank invoice starts with: the ways ticked in Settings that are available (defaultPayWays), else Zelle. */
+  /** What a new, blank invoice starts with: the ways ticked in Settings (else Zelle and check) that are available (defaultPayWays). */
   defaultPayWays: PayWay[];
   stripeReady: boolean;
   billTo: BillToOption[];

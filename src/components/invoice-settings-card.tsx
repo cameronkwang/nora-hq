@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { DEFAULTABLE_PAY_WAYS, PAY_WAY_LABEL, centsToDollarsInput, maskAccountNumber, parseDollars, type InvoiceSettings, type PayWay, type SavedItem } from "@/lib/invoices-types";
+import { DEFAULTABLE_PAY_WAYS, NEW_INVOICE_PAY_WAYS, PAY_WAY_LABEL, centsToDollarsInput, maskAccountNumber, parseDollars, type InvoiceSettings, type PayWay, type SavedItem } from "@/lib/invoices-types";
 import { removeBankDetailsAction, saveInvoiceSettingsAction, saveSavedItemsAction } from "@/app/(app)/settings/invoice-actions";
 import { setNextNumberAction } from "@/app/(app)/invoices/actions";
 import { ActionForm, SubmitButton } from "./client-form";
@@ -25,6 +25,7 @@ export function InvoiceSettingsCard({ settings, nextNumber, stripe }: { settings
   const s = settings;
   // What decides whether a way can be ticked for new invoices: its details, as typed right now.
   const [zelle, setZelle] = useState(s.zelle ?? "");
+  const [fromName, setFromName] = useState(s.fromName ?? "");
   const [checkPayee, setCheckPayee] = useState(s.checkPayee ?? "");
   const [venmo, setVenmo] = useState(s.venmo ?? "");
   const [paypal, setPaypal] = useState(s.paypal ?? "");
@@ -36,8 +37,8 @@ export function InvoiceSettingsCard({ settings, nextNumber, stripe }: { settings
   const [replacing, setReplacing] = useState(false);
   const [removing, setRemoving] = useState(false);
   const [bankMsg, setBankMsg] = useState<{ ok: boolean; text: string } | null>(null);
-  // Nothing ticked yet is the built-in default: Zelle.
-  const [ticked, setTicked] = useState<PayWay[]>(s.payDefaults.length ? s.payDefaults : ["zelle"]);
+  // Nothing ticked yet is the built-in default: Zelle and check (a bank transfer only when a customer asks for it).
+  const [ticked, setTicked] = useState<PayWay[]>(s.payDefaults.length ? s.payDefaults : [...NEW_INVOICE_PAY_WAYS]);
 
   const bankSaved = !!s.ownBankLast4;
   const typingBank = !bankSaved || replacing;
@@ -45,7 +46,7 @@ export function InvoiceSettingsCard({ settings, nextNumber, stripe }: { settings
   const ready: Record<(typeof DEFAULTABLE_PAY_WAYS)[number], string | null> = {
     zelle: zelle.trim() ? null : "Add your Zelle number above first.",
     ach: bankSaved || (account.trim() && routing.trim()) ? null : "Add your account and routing numbers above first.",
-    check: checkPayee.trim() ? null : "Add who checks are payable to above first.",
+    check: checkPayee.trim() || fromName.trim() ? null : "Add your name above first.",
     venmo: venmo.trim() ? null : "Add your Venmo above first.",
     paypal: paypal.trim() ? null : "Add your PayPal above first.",
     bank: !stripe.configured ? stripeWhy : bankOnline ? null : "Turn on Bank transfer online above first.",
@@ -84,7 +85,7 @@ export function InvoiceSettingsCard({ settings, nextNumber, stripe }: { settings
           <legend className="eyebrow mb-2">From (top left of every invoice)</legend>
           <div className="inv-pair">
             <Field id="is-from" label="Your name">
-              <input id="is-from" name="fromName" className="input" defaultValue={s.fromName ?? ""} maxLength={120} autoComplete="name" />
+              <input id="is-from" name="fromName" className="input" value={fromName} onChange={(e) => setFromName(e.target.value)} maxLength={120} autoComplete="name" />
             </Field>
             <Field id="is-from-email" label="Email" optional>
               <input id="is-from-email" name="fromEmail" type="email" className="input" defaultValue={s.fromEmail ?? ""} maxLength={200} autoComplete="off" />
@@ -158,10 +159,10 @@ export function InvoiceSettingsCard({ settings, nextNumber, stripe }: { settings
           </div>
 
           <div className="inv-pair">
-            <Field id="is-check" label="Checks payable to" optional>
+            <Field id="is-check" label="Checks payable to" optional hint="Blank means your name above.">
               <input id="is-check" name="checkPayee" className="input" value={checkPayee} onChange={(e) => setCheckPayee(e.target.value)} maxLength={120} autoComplete="off" />
             </Field>
-            <Field id="is-check-addr" label="Mail checks to" optional hint="Printed as “Mail to …” only when set.">
+            <Field id="is-check-addr" label="Mail checks to" optional hint="Blank means your address above: the invoice prints “Mail to the address above”.">
               <textarea id="is-check-addr" name="checkAddress" rows={2} className="input min-h-0!" defaultValue={s.checkAddress ?? ""} maxLength={300} />
             </Field>
           </div>
@@ -246,7 +247,7 @@ export function InvoiceSettingsCard({ settings, nextNumber, stripe }: { settings
                 );
               })}
             </ul>
-            <p className="hint">Every new invoice starts with the ticked ways. You can still change them on any invoice, and invoices already made keep theirs. Nothing ticked means Zelle.</p>
+            <p className="hint">Every new invoice starts with the ticked ways. You can still change them on any invoice, and invoices already made keep theirs. Nothing ticked means Zelle and check. Bank transfer (ACH) is for when a customer asks: add it on that invoice.</p>
           </div>
           <div className="inv-pair">
             <Field id="is-days" label="Due in (days)" hint="0 = due on receipt, like your Skynova invoices.">

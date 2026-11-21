@@ -76,12 +76,13 @@ async function main() {
   assert.equal(ctx0.nextNumber, "0000170");
   assert.deepEqual(ctx0.setupMissing, ["fromName", "fromAddress", "zelle"], "asks once: name, address, Zelle");
   assert.equal(ctx0.prefill.issueDate, today); assert.equal(ctx0.prefill.dueDate, today, "due on receipt");
-  assert.deepEqual(ctx0.prefill.payWays, ["zelle"]);
+  assert.deepEqual(ctx0.prefill.payWays, ["zelle", "check"], "the first invoice starts like every later one: Zelle and a check by mail");
+  assert.equal(ctx0.payWays.check.ok, false, "nothing is saved yet: the one-time ask on the invoice fills it in");
   assert.equal(ctx0.payWays.card.ok, false); assert.equal(ctx0.payWays.bank.ok, false, "no Stripe: no online way");
   assert.ok(ctx0.billTo.some((o) => o.kind === "client" && o.name === "Crab O Clock"), "managed businesses are in Bill to");
   assert.ok(!ctx0.billTo.some((o) => o.id === "noraeatsgood"), "never Nora's own workspace");
-  assert.equal(T.creatorDefaultsLine({ issueDate: today, dueDate: today, payWays: ctx0.prefill.payWays, nextNumber: ctx0.nextNumber }).text, "Due on receipt · Zelle · #0000170");
-  ok("creator context: next 0000170, due on receipt, Zelle, the one-time ask, Bill to");
+  assert.equal(T.creatorDefaultsLine({ issueDate: today, dueDate: today, payWays: ctx0.prefill.payWays, nextNumber: ctx0.nextNumber }).text, "Due on receipt · Zelle, check · #0000170");
+  ok("creator context: next 0000170, due on receipt, Zelle and check, the one-time ask, Bill to");
 
   /* ── Make PDF: a new customer, the one-time ask, her two lines ── */
   const two = [
@@ -97,7 +98,7 @@ async function main() {
   const d1 = first.r;
   assert.equal(d1.number, "0000170"); assert.equal(d1.totalCents, 62510); assert.equal(d1.issueDate, today); assert.equal(d1.dueDate, today);
   assert.equal(d1.payUrl, null, "no online way: no pay link to copy");
-  assert.deepEqual(d1.payWays, ["zelle"]);
+  assert.deepEqual(d1.payWays, ["zelle", "check"], "no ways sent: Zelle and a check by mail, never a bank transfer");
   assert.equal(d1.fileName, "Invoice 0000170 - Sample Bistro.pdf");
   assert.equal(d1.pdfPath, `/invoices/${d1.id}/pdf`);
   assert.match(d1.message, /^Hi Sam! Here is invoice 0000170 for \$625\.10, due on receipt\. The PDF is attached\./);
@@ -138,7 +139,8 @@ async function main() {
   await rejects(ops.createAndFinalizeInvoice({ billTo: { kind: "customer", id: bistro.id }, items: two }, "claude"), /Only Nora or Cameron/, "Claude never makes the PDF");
   await rejects(ops.createAndFinalizeInvoice({ billTo: { kind: "customer", id: bistro.id }, items: two, payWays: ["zelle", "card"] }, NORA), /Stripe/, "card needs Stripe and Settings");
   await rejects(ops.createAndFinalizeInvoice({ billTo: { kind: "customer", id: bistro.id }, items: two, payWays: ["custom"] }, NORA), /Type the other way/, "custom needs its line");
-  await rejects(ops.createAndFinalizeInvoice({ billTo: { kind: "customer", id: bistro.id }, items: two, payWays: ["check"] }, NORA), /checks are made out/, "check needs a payee");
+  await rejects(ops.createAndFinalizeInvoice({ billTo: { kind: "customer", id: bistro.id }, items: two, payWays: ["venmo"] }, NORA), /Venmo in Settings/, "a way needs its details");
+  assert.equal((await ops.getInvoiceCreatorContext({ today })).payWays.check.ok, true, "a check is made out to her name: nothing more to set up");
   await rejects(ops.createAndFinalizeInvoice({ billTo: { kind: "customer", id: bistro.id }, items: [{ description: "Food Stipend", quantity: 1, unitCents: 0 }] }, NORA), /\$0/, "a $0 invoice is refused");
   await rejects(ops.createAndFinalizeInvoice({ billTo: { kind: "customer", id: bistro.id }, items: two, issueDate: today, dueDate: T.addDaysYmd(today, -1) }, NORA), /before the invoice date/, "due before issued");
   await rejects(ops.createAndFinalizeInvoice({ billTo: { kind: "customer", id: bistro.id }, items: two, notes: "Card 4242 4242 4242 4242" }, NORA), /card or bank/, "no card numbers in notes");
@@ -179,7 +181,16 @@ async function main() {
   await rejects(ops.createInvoiceDraft({ customerId: bistro.id, items: two, contractId: "ctr_x" }, "claude"), /Contracts are people only/, "Claude never links a contract");
   await rejects(ops.createInvoiceDraft({ customerId: bistro.id, items: two, payWays: ["card"] }, "claude"), /Stripe/, "Claude can't pick card while it's off");
   await rejects(ops.finalizeInvoice(cd.id, "claude"), /Only Nora or Cameron/, "Claude never finalizes");
-  await rejects(ops.finalizeInvoice(cd.id, NORA, { today }), /checks are made out/, "finalize checks the ways' details");
+  // finalize checks the ways' details: a draft that offers Venmo can't become a PDF while no Venmo is saved
+  const vd = await ops.createInvoiceDraft({ customerId: bistro.id, items: two, payWays: ["zelle", "venmo"] }, NORA);
+  await rejects(ops.finalizeInvoice(vd.id, NORA, { today }), /Venmo in Settings/, "finalize checks the ways' details");
+  await ops.deleteDraftInvoice(vd.id, NORA);
+  // a check needs nothing more: made out to her name, mailed to the address at the top of the invoice
+  assert.deepEqual(
+    T.paymentInfoLines(T.payOptions(await ops.getInvoiceSettings(), { number: "0000179", payWays: cd.payWays, payNote: null }, false, null), null),
+    ["Please send payment via Zelle to (555) 010-0100.", "Put invoice 0000179 in the Zelle memo", "", "Checks Payable to Nora Chen", "Mail to the address above"],
+    "what it prints with nothing typed for checks: Zelle, then a check by mail to her address above",
+  );
   await ops.saveInvoiceSettings({ checkPayee: "Nora Chen", checkAddress: "100 Sample St\nSampleton, VA 23000" }, NORA);
   const fc = await ops.finalizeInvoice(cd.id, NORA, { today });
   assert.equal(fc.first, true); assert.equal(fc.invoice.number, "0000179"); assert.equal(fc.invoice.issueDate, today); assert.equal(fc.invoice.dueDate, today);
@@ -222,7 +233,7 @@ async function main() {
   assert.equal(pub.state, "open");
   if (pub.state === "open") {
     assert.equal(pub.invoice.number, toVoid.number); assert.equal(pub.invoice.balanceCents, 62510);
-    assert.deepEqual(pub.options.map((o) => o.way), ["zelle"], "exactly its ways");
+    assert.deepEqual(pub.options.map((o) => o.way), ["zelle", "check"], "exactly its ways");
     assert.equal(JSON.stringify(pub).includes("privateNotes"), false);
   }
   await ops.markInvoiceViewed(toVoid.id);
@@ -345,7 +356,7 @@ async function main() {
   assert.ok(made && made.invoiceId); assert.equal(run1.failed, 0);
   assert.ok(!run1.created.some((c) => c.retainerId === ret.retainer.id), "the contract's month was already billed");
   const rd = await ops.getInvoice(made!.invoiceId);
-  assert.equal(rd!.status, "draft"); assert.equal(rd!.items[0].description, T.retainerItemDescription("Social media services", today.slice(0, 7))); assert.deepEqual(rd!.payWays, ["zelle"]);
+  assert.equal(rd!.status, "draft"); assert.equal(rd!.items[0].description, T.retainerItemDescription("Social media services", today.slice(0, 7))); assert.deepEqual(rd!.payWays, ["zelle", "check"]);
   assert.equal((await ops.runRetainers(now)).created.length, 0, "a second run makes nothing");
   await ops.deleteDraftInvoice(made!.invoiceId, NORA);
   assert.equal((await ops.runRetainers(now)).created.length, 0, "a deleted draft isn't made again this month");
@@ -599,14 +610,14 @@ async function main() {
   if (pub3.state === "open") assert.deepEqual(pub3.options, [
     { way: "ach", label: "Sample Bank Checking", account: ACCT, routing: ROUT },
     { way: "zelle", to: "(555) 010-0100", name: null, memo: `Put invoice ${n3} in the Zelle memo` },
-    { way: "check", payee: "Nora Chen", address: "100 Sample St\nSampleton, VA 23000" },
+    { way: "check", payee: "Nora Chen", address: "100 Sample St\nSampleton, VA 23000", addressAbove: false },
   ], "her order: the account number, the routing number, then Zelle, then checks");
   const zOnly = await ops.createAndFinalizeInvoice({ billTo: { kind: "customer", id: bistro.id }, items: two, payWays: ["zelle"] }, NORA, { today });
   const pubZ = await ops.getInvoiceByToken((await ops.getInvoiceLink(zOnly.id, NORA))!.split("/i/")[1], { today });
   noBank(JSON.stringify(pubZ), "the page of an invoice that didn't choose a bank transfer"); assert.doesNotMatch(JSON.stringify(pubZ), /ROUTING|000000000|Sample Bank/);
   assert.doesNotMatch(await pdfDrawn((await ops.invoicePdf(zOnly.id, { today }))!.bytes), /ACH|ROUTING|Sample Bank/, "nor its PDF");
   // an invoice made before keeps the ways saved on it
-  assert.deepEqual((await ops.getInvoice(d1.id, { today }))!.payWays, ["zelle"], "an invoice already made keeps its own ways");
+  assert.deepEqual((await ops.getInvoice(d1.id, { today }))!.payWays, ["zelle", "check"], "an invoice already made keeps its own ways");
   assert.deepEqual((await ops.getInvoice(cd.id, { today }))!.payWays, ["zelle", "check"]);
   // a void or unknown link still reveals nothing
   const v3 = await ops.createAndFinalizeInvoice({ billTo: { kind: "customer", id: bistro.id }, items: two }, NORA, { today });

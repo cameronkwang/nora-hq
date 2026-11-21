@@ -84,7 +84,8 @@ assert.deepEqual(T.printPayWays([]), ["zelle"]);
 assert.equal(T.payWaysLabel(["zelle"]), "Zelle"); assert.equal(T.payWaysLabel(["bank", "check", "zelle"]), "Zelle, check, bank transfer online"); assert.equal(T.payWaysLabel(["paypal"]), "PayPal");
 assert.equal(T.payWaysLabel(["check", "ach", "zelle"]), "Zelle, bank transfer (ACH), check"); assert.equal(T.payWaysLabel(["ach"]), "Bank transfer (ACH)");
 assert.equal(T.PAY_WAY_LABEL.ach, "Bank transfer (ACH)"); assert.equal(T.PAY_WAY_LABEL.bank, "Bank transfer online", "the Stripe way keeps its own name");
-assert.equal(T.DEFAULT_PAY_WAYS.join(), "zelle", "the built-in default stays Zelle only");
+assert.equal(T.DEFAULT_PAY_WAYS.join(), "zelle", "an invoice with no known way falls back to Zelle");
+assert.equal(T.NEW_INVOICE_PAY_WAYS.join(), "zelle,check", "a new invoice starts with Zelle and a check by mail; a bank transfer (ACH) only when asked for");
 assert.equal(T.hasOnlineWay(["zelle"]), false); assert.equal(T.hasOnlineWay(["zelle", "bank"]), true);
 const off = T.availablePayWays(d, true);
 assert.equal(off.zelle.ok, false); assert.equal(off.bank.ok, true); assert.equal(off.card.ok, false); assert.match(off.card.why ?? "", /Card is off/); assert.equal(off.custom.ok, true);
@@ -101,8 +102,15 @@ assert.equal(T.noPayOptions([]), true);
 assert.deepEqual(T.paymentInfoLines(opts, null), ["Please send payment via Zelle to (555) 010-0100.", "Put invoice 0000170 in the Zelle memo", "", "Cash at the shoot is fine"]);
 assert.deepEqual(T.paymentInfoLines([{ way: "bank" }], "https://hq.example.com/i/abc"), ["Pay online by bank transfer: https://hq.example.com/i/abc"]);
 assert.deepEqual(T.paymentInfoLines([{ way: "bank" }, { way: "card" }], null), []); // no link: no online line
-assert.deepEqual(T.paymentInfoLines([{ way: "check", payee: "Nora Chen", address: "100 Sample St\nSampleton, VA 23000" }], null), ["Checks Payable to Nora Chen", "Mail to 100 Sample St, Sampleton, VA 23000"]);
-assert.deepEqual(T.paymentInfoLines([{ way: "check", payee: "Nora Chen", address: null }], null), ["Checks Payable to Nora Chen"], "no mailing address saved: no Mail to line");
+assert.deepEqual(T.paymentInfoLines([{ way: "check", payee: "Nora Chen", address: "9 Other St\nSampleton, VA 23000", addressAbove: false }], null), ["Checks Payable to Nora Chen", "Mail to 9 Other St, Sampleton, VA 23000"], "a different address saved for checks is spelled out");
+assert.deepEqual(T.paymentInfoLines([{ way: "check", payee: "Nora Chen", address: "100 Sample St\nSampleton, VA 23000", addressAbove: true }], null), ["Checks Payable to Nora Chen", "Mail to the address above"], "her own address is at the top of the PDF: the check line points there");
+assert.deepEqual(T.paymentMessageLines([{ way: "check", payee: "Nora Chen", address: "100 Sample St\nSampleton, VA 23000", addressAbove: true }], null), ["Checks Payable to Nora Chen", "Mail to 100 Sample St, Sampleton, VA 23000"], "a message has no address above: it is spelled out");
+assert.deepEqual(T.paymentInfoLines([{ way: "check", payee: "Nora Chen", address: null, addressAbove: false }], null), ["Checks Payable to Nora Chen"], "no address anywhere: no Mail to line");
+// a check works with nothing extra typed: made out to the name the invoice is from, mailed to the address it is from
+assert.equal(T.checkPayee(s), "Nora Chen"); assert.equal(T.checkPayee({ checkPayee: " Nora Chen LLC ", fromName: "Nora Chen" }), "Nora Chen LLC"); assert.equal(T.checkPayee(d), null);
+assert.equal(T.availablePayWays(s, false).check.ok, true); assert.equal(T.availablePayWays(d, false).check.ok, false);
+assert.deepEqual(T.payOptions(s, { number: "0000170", payWays: ["check"], payNote: null }, false, null), [{ way: "check", payee: "Nora Chen", address: "100 Sample St\nSampleton, VA 23000", addressAbove: true }]);
+assert.deepEqual(T.paymentInfoLines(T.payOptions(s, { number: "0000170", payWays: ["zelle", "check"], payNote: null }, false, null), null), ["Please send payment via Zelle to (555) 010-0100.", "Put invoice 0000170 in the Zelle memo", "", "Checks Payable to Nora Chen", "Mail to the address above"], "the block a new invoice prints: Zelle, then check by mail, no bank lines");
 assert.equal(T.PAY_WAY_METHOD.zelle, "zelle"); assert.equal(T.PAY_WAY_METHOD.custom, "other"); assert.equal(T.PAY_WAY_METHOD.ach, "ach");
 assert.equal(T.PAYMENT_METHOD_LABEL.ach, "Bank transfer (ACH)"); assert.ok((T.MANUAL_PAYMENT_METHODS as readonly string[]).includes("ach"), "a person can record a bank transfer");
 
@@ -145,7 +153,10 @@ assert.equal(av3.ach.ok, true); assert.equal(T.availablePayWays(d, true).ach.ok,
 const unreadable = T.readInvoiceSettings({ ownBankEnc: "v1.x.y.z" });
 assert.equal(unreadable.ownBankUnreadable, true); assert.equal(unreadable.ownBankLast4, null); assert.match(T.availablePayWays(unreadable, false).ach.why ?? "", /again/);
 assert.equal(T.checkPayWays(["zelle", "ach"], null, T.availablePayWays(s, false)), "Add your bank account and routing numbers in Settings.", "ACH can't be chosen without its details");
-assert.deepEqual(T.defaultPayWays(d, T.availablePayWays(d, false)), ["zelle"], "nothing ticked: Zelle");
+assert.deepEqual(T.defaultPayWays(d, T.availablePayWays(d, false)), ["zelle"], "nothing ticked and nothing set up yet: Zelle");
+assert.deepEqual(T.defaultPayWays(s, T.availablePayWays(s, false)), ["zelle", "check"], "nothing ticked: Zelle and check, never a bank transfer");
+assert.deepEqual(T.defaultPayWays(three, av3), ["zelle", "check"], "bank details saved but not ticked: still Zelle and check only");
+assert.deepEqual(T.defaultPayWays({ payDefaults: ["zelle"] }, T.availablePayWays(s, false)), ["zelle"], "Zelle alone ticked: Zelle alone");
 assert.deepEqual(T.defaultPayWays({ payDefaults: ["check", "ach", "zelle"] }, av3), ["zelle", "ach", "check"]);
 assert.deepEqual(T.defaultPayWays({ payDefaults: ["zelle", "ach", "bank"] }, T.availablePayWays(s, false)), ["zelle"], "a ticked way that lost its details is not offered");
 assert.deepEqual(T.defaultPayWays({ payDefaults: ["ach"] }, T.availablePayWays(s, false)), ["zelle"], "none left: back to Zelle");

@@ -205,7 +205,7 @@ export const InvoiceDraftInput = z.object({
   /** The contract this invoice bills. People only (Claude never links contracts). */
   contractId: id.nullish(),
   lang: z.enum(schema.INTAKE_LANGS).nullish(),
-  /** Default ["zelle"]. Claude passes these only when Nora or Cameron said how this invoice should be paid. */
+  /** Default: the ways ticked in Settings, else Zelle and check (defaultPayWays). Claude passes these only when Nora or Cameron said how this invoice should be paid. */
   payWays: PayWaysInput.optional(),
   /** The "custom" way's line ("Cash at the shoot is fine"). Required when payWays has "custom". */
   payNote: line(200),
@@ -238,7 +238,7 @@ export type BillToInputT = z.input<typeof BillToInput>;
 
 /**
  * The fast creator's one form (/invoices/new): "Make PDF" (createAndFinalizeInvoice) and "Save as draft"
- * (saveQuickDraft) take the same input. Dates default to today and due the same day; payWays to ["zelle"].
+ * (saveQuickDraft) take the same input. Dates default to today and due the same day; payWays to the ways ticked in Settings (none ticked: Zelle and check).
  */
 export const QuickInvoiceInput = z.object({
   billTo: BillToInput,
@@ -328,7 +328,7 @@ export const InvoiceSettingsInput = z.object({
   ownBankRemove: z.boolean(),
   achEnabled: z.boolean(),
   cardEnabled: z.boolean(),
-  /** The ways ticked for new invoices. Each must have its details filled in; none ticked = the built-in default, Zelle. */
+  /** The ways ticked for new invoices. Each must have its details filled in; none ticked = the built-in default, Zelle and check. */
   payDefaults: z.array(z.enum(PAY_WAYS)).max(PAY_WAYS.length),
   termsDays: z.number().int().min(0).max(MAX_TERMS_DAYS),
   footer: block(500),
@@ -1051,9 +1051,17 @@ function dealLine(kinds: readonly string[]): string {
   return labels.length ? `Collab: ${labels.join(", ")}` : "Collab";
 }
 
-/** What a new invoice starts with: the ways ticked in Settings that are available right now, else Zelle. */
+/**
+ * What a new invoice starts with in the creator: the ways ticked in Settings (none ticked: Zelle and check) that are
+ * available right now. The very first time, the creator asks for her name, address and Zelle number on the invoice
+ * itself (invoiceSetupMissing): a way that only waits for one of those counts as there, so her first invoice starts
+ * like every later one. Make PDF still checks the ways against what is really saved.
+ */
 function newInvoiceWays(settings: InvoiceSettings): PayWay[] {
-  return defaultPayWays(settings, availablePayWays(settings, stripeConfigured()));
+  const avail = availablePayWays(settings, stripeConfigured());
+  const missing = invoiceSetupMissing(settings);
+  const yes = { ok: true, why: null };
+  return defaultPayWays(settings, { ...avail, ...(missing.includes("zelle") ? { zelle: yes } : {}), ...(missing.includes("fromName") ? { check: yes } : {}) });
 }
 
 function blankPrefill(settings: InvoiceSettings, today: string): InvoicePrefill {

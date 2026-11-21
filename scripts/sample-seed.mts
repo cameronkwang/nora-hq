@@ -152,10 +152,10 @@ await db.insert(schema.askMessages).values({ id: "sample-askmsg-1", askId: "samp
   const link = (name: string) => ({ tokenHash: createHash("sha256").update(token(name), "utf8").digest("hex"), tokenEnc: enc({ t: token(name) }) });
   // Payment settings (merged, like every settings writer): fake From, Zelle and bank account, bank transfer online on,
   // card off, the two saved lines. The account and routing numbers go in encrypted (ops-invoices readBank: { a, r }),
-  // never in plain text. No ways are ticked for new invoices: the built-in default, Zelle only, is what local dev shows.
+  // never in plain text. No ways are ticked for new invoices: the built-in default, Zelle and check, is what local dev shows.
   const settings = {
     fromName: "Nora Chen", fromAddress: "100 Sample St\nSampleton, VA 23000", zelle: "5550100100",
-    checkPayee: "Nora Chen", checkAddress: "100 Sample St\nSampleton, VA 23000", venmo: "@sample-nora",
+    checkPayee: "Nora Chen", venmo: "@sample-nora", // no separate address for checks: the invoice prints "Mail to the address above"
     ownBankLabel: "Sample Bank Checking", ownBankEnc: enc({ a: "000123456789", r: "000000000" }),
     achEnabled: true, cardEnabled: false, termsDays: 0,
     savedItems: [

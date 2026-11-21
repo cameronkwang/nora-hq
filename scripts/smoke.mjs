@@ -3971,8 +3971,9 @@ async function invoicingEndToEnd(browser) {
     // As on her first day: From and Zelle empty in Settings.
     await go("/settings#invoicing");
     saved = { from: await page.inputValue("#is-from"), addr: await page.inputValue("#is-addr"), zelle: await page.inputValue("#is-zelle") };
-    for (const sel of ["#is-from", "#is-addr", "#is-zelle"]) await page.fill(sel, "");
-    // Nothing ticked for new invoices = the built-in default, Zelle only (whatever an earlier run left ticked).
+    // No separate address for checks either: the invoice then prints "Mail to the address above" (her own, at the top).
+    for (const sel of ["#is-from", "#is-addr", "#is-zelle", "#is-check-addr"]) await page.fill(sel, "");
+    // Nothing ticked for new invoices = the built-in default, Zelle and check (whatever an earlier run left ticked).
     for (const box of await page.locator("#invoicing input[name=payDefaults]:checked").all()) await box.uncheck();
     await page.getByRole("button", { name: "Save invoice settings" }).click();
     await page.waitForLoadState("networkidle");
@@ -3995,7 +3996,7 @@ async function invoicingEndToEnd(browser) {
     await page.keyboard.type("75.10");
     must((await page.locator(".inv-sum .is-total").innerText()).includes("$625.10"), "total is not $625.10");
     const line = await defaultsLine();
-    must(/^Due on receipt\s*·\s*Zelle\s*·\s*#\d{7}/.test(line.replace(/\s+\(next invoice number\)/, "")), `defaults line: ${line}`);
+    must(/^Due on receipt\s*·\s*Zelle, check\s*·\s*#\d{7}/.test(line.replace(/\s+\(next invoice number\)/, "")), `defaults line: ${line}`);
     const peek = await peekNumber();
     if (fresh) must(peek === "0000170", `fresh sample data: the next number is ${peek}, not 0000170`);
     await page.getByRole("button", { name: /^Make PDF/ }).click();
@@ -4027,11 +4028,13 @@ async function invoicingEndToEnd(browser) {
     await page.waitForTimeout(1000);
   }
 
-  await st("the PDF: %PDF bytes; its text has the number, the total, Zelle and the memo line; no Item column", async () => {
+  await st("the PDF: %PDF bytes; its text has the number, the total, Zelle and the memo line, then a check by mail to the address above; no bank lines; no Item column", async () => {
     must(inv1, "no invoice from the first step");
     const t = await pdfOf(inv1);
-    for (const want of ["INVOICE".split("").join("\n"), `Invoice #\n${num1}`, "625.10", "$625.10", "Zelle", `Put invoice ${num1} in the Zelle memo`, "SNF Kingdom", "Standard Content Creation Package", "Food Stipend", "Balance Due"])
+    for (const want of ["INVOICE".split("").join("\n"), `Invoice #\n${num1}`, "625.10", "$625.10", "Zelle", `Put invoice ${num1} in the Zelle memo`, "Checks Payable to Nora Chen", "Mail to the address above", "SNF Kingdom", "Standard Content Creation Package", "Food Stipend", "Balance Due"])
       must(t.includes(want), `PDF text lacks ${JSON.stringify(want)}`);
+    must(t.indexOf("Put invoice") < t.indexOf("Checks Payable to"), "the check lines are not under the Zelle lines");
+    must(!/ACH|ROUTING|ACCT/.test(t), "a new invoice prints bank transfer lines nobody asked for");
     must(!/^Item$/m.test(t), "the PDF still has Skynova's Item column");
     must(!/Pay online/.test(t), "a Zelle-only PDF prints Pay online");
   });
@@ -4099,9 +4102,10 @@ async function invoicingEndToEnd(browser) {
     link1 = await customerLink(inv1);
     const en = await publicText(link1);
     must(en.status === 200, `HTTP ${en.status}`);
-    for (const want of ["$625.10", `Invoice ${num1}`, "Zelle", saved?.zelle || "(555) 010-0100", `Put invoice ${num1} in the Zelle memo`, "SNF Kingdom", "Standard Content Creation Package", "Food Stipend"])
+    for (const want of ["$625.10", `Invoice ${num1}`, "Zelle", saved?.zelle || "(555) 010-0100", `Put invoice ${num1} in the Zelle memo`, "Checks Payable to Nora Chen", "Mail to", (saved?.addr || "100 Sample St").split("\n")[0], "SNF Kingdom", "Standard Content Creation Package", "Food Stipend"])
       must(en.text.includes(want), `page lacks ${JSON.stringify(want)}`);
-    for (const never of ["Check", "Venmo", "PayPal", "Pay online", "SAMPLE Taco Spot", "Crab O Clock", "SAMPLE Bakery", "Sample Pizzeria", num2 || "0000000", "Private note"])
+    must(!en.text.includes("address above"), "the page says \"the address above\" (only the PDF has her address at the top)");
+    for (const never of ["Bank transfer", "Account number", "Routing", "Venmo", "PayPal", "Pay online", "SAMPLE Taco Spot", "Crab O Clock", "SAMPLE Bakery", "Sample Pizzeria", num2 || "0000000", "Private note"])
       must(!en.text.includes(never), `page shows ${JSON.stringify(never)}`);
     must(!(await pp.locator("a[href^='/invoices'], a[href^='/clients'], a[href^='/deals'], a[href^='/contracts']").count()), "the page links into Nora HQ");
     const zh = await publicText(`${link1}?lang=zh-Hans`);
@@ -4222,7 +4226,7 @@ async function invoicingEndToEnd(browser) {
       must(!(await page.content()).includes(ACCT), "the done state holds the account number");
 
       // The PDF: PAYMENT INFORMATION, then her three blocks in her order, in her words.
-      const blocks = [LABEL, `ACH to ACCT#:${ACCT}`, `ROUTING:${ROUT}`, `Please send payment via Zelle to ${zelle}.`, `Put invoice ${num} in the Zelle memo`, "Checks Payable to Nora Chen", "Mail to 100 Sample St, Sampleton, VA 23000"];
+      const blocks = [LABEL, `ACH to ACCT#:${ACCT}`, `ROUTING:${ROUT}`, `Please send payment via Zelle to ${zelle}.`, `Put invoice ${num} in the Zelle memo`, "Checks Payable to Nora Chen", "Mail to the address above"];
       const t = await pdfOf(made);
       inOrder(t, ["PAYMENT INFORMATION:", ...blocks], "the PDF");
       must(!/\[Zelle|Check payable to|, mail to|••••/.test(t), "the PDF still has the old wording, or a masked account");
@@ -4250,12 +4254,12 @@ async function invoicingEndToEnd(browser) {
       const pubPdf = await pp.request.get(`${BASE}${link}/pdf`);
       must(pubPdf.status() === 200, `public PDF ${pubPdf.status()}`);
       inOrder(pdfText(Buffer.from(await pubPdf.body())), blocks, "the customer's PDF");
-      // Only the ways chosen for THAT invoice: the first invoice (Zelle only) shows no bank account anywhere.
+      // Only the ways chosen for THAT invoice: the first invoice (Zelle and check) shows no bank account anywhere.
       if (link1) {
         const z = await publicText(link1);
-        must(!z.text.includes(ACCT) && !z.text.includes(ROUT) && !/Bank transfer|Account number|Routing/.test(z.text), "a Zelle-only invoice's page shows the bank account");
-        must(!(await (await pp.request.get(`${BASE}${link1}`)).text()).includes(ACCT), "a Zelle-only invoice's HTML holds the account number");
-        must(!/ACH|ROUTING/.test(await pdfOf(inv1)), "a Zelle-only invoice's PDF prints the bank account");
+        must(!z.text.includes(ACCT) && !z.text.includes(ROUT) && !/Bank transfer|Account number|Routing/.test(z.text), "the page of an invoice without a bank transfer shows the bank account");
+        must(!(await (await pp.request.get(`${BASE}${link1}`)).text()).includes(ACCT), "the HTML of an invoice without a bank transfer holds the account number");
+        must(!/ACH|ROUTING/.test(await pdfOf(inv1)), "the PDF of an invoice without a bank transfer prints the bank account");
       }
       // Claude: the way by name, never a number (not even masked). The tax CSV neither.
       if (hasMcp) {
@@ -4279,14 +4283,14 @@ async function invoicingEndToEnd(browser) {
       if (sample.status === 200) inOrder(sample.text, ["Bank transfer (ACH)", ACCT, ROUT, "Zelle", "Checks Payable to Nora Chen"], "the sample invoice with all three ways");
       else console.log("  (no sample data: the sample three-way invoice was not checked)");
     } finally {
-      // Back to the built-in default (Zelle only) for the steps after this one and for the next run. The account stays.
+      // Back to the built-in default (Zelle and check) for the steps after this one and for the next run. The account stays.
       await go("/settings#invoicing").catch(() => {});
-      await tick(["zelle"]).catch(() => {});
+      await tick(["zelle", "check"]).catch(() => {});
       await saveSettings().catch(() => {});
     }
     await go("/invoices/new");
     const back = await defaultsLine();
-    must(/^Due on receipt\s*·\s*Zelle\s*·/.test(back), `after unticking, the defaults line is: ${back}`);
+    must(/^Due on receipt\s*·\s*Zelle, check\s*·/.test(back), `after unticking the bank transfer, the defaults line is: ${back}`);
     // An invoice made while three ways were ticked keeps them (it is void now, but still says so).
     if (made && hasMcp) must((await tool("get_invoice", { id: made })).pay_ways === "Zelle, Bank transfer (ACH), Check", "the invoice lost the ways saved on it");
   });
@@ -4529,7 +4533,7 @@ async function invoicingEndToEnd(browser) {
     const d = await tool("create_draft_invoice", { customer_id: cus1, lines: [{ description: "Smoke Claude draft", unit_cents: 12345 }] });
     must(d.ok && d.status === "draft" && !("number" in d), `draft: ${JSON.stringify(d)}`);
     const g = await tool("get_invoice", { id: d.id });
-    must(g.number === "draft" && g.status === "draft" && g.pay_ways === "Zelle", `Claude's draft: ${JSON.stringify(g).slice(0, 200)}`);
+    must(g.number === "draft" && g.status === "draft" && g.pay_ways === "Zelle, Check", `Claude's draft: ${JSON.stringify(g).slice(0, 200)}`);
     const fin = await mcp("tools/call", { name: "finalize_invoice", arguments: { id: d.id } });
     must(fin.body?.error || fin.body?.result?.isError, "an unknown finalize tool did something");
     await go(`/invoices/${d.id}`);
