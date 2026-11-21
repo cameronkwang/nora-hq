@@ -62,10 +62,12 @@ assert.equal(T.retainerItemDescription("Social media services", "2026-11"), "Soc
 assert.equal(T.looksLikeCardOrBankNumber("4242 4242 4242 4242"), true); assert.equal(T.looksLikeCardOrBankNumber("Zelle: (555) 010-0100"), false);
 assert.equal(T.looksLikeCardOrBankNumber("routing 000000000 account 00012345"), true); assert.equal(T.looksLikeCardOrBankNumber("Check #1043 for $600"), false);
 assert.equal(T.looksLikeCardOrBankNumber("Order 1234567890123"), false); // 13 digits failing Luhn
-// next to the word "account" a number must be long enough to be one: 8 digits in a row, or 9 written in groups
+// next to the word "account" six or more digits are a number, however grouped; a month, a date or a named invoice number is not
 for (const t of ["account 00012345", "Reel, acct 0001-2345-6", "account number 000 123 456", "acct 12, then account 000123456789"]) assert.equal(T.looksLikeCardOrBankNumber(t), true, `a number next to the word: ${t}`);
+// short numbers and wide gaps are still numbers: six or more digits next to the word, however they are grouped
+for (const t of ["ACH to ACCT#:0001234", "ACH to ACCT#:000123", "account 0001 2345", "ACH to ACCT#: 0001  2345  6789", "acct 0001 - 2345 - 6789", "account 12 34 56", "routing 0000 0000 0", "account 2026 0001 2345"]) assert.equal(T.looksLikeCardOrBankNumber(t), true, `still a number next to the word: ${t}`);
 // ordinary lines on a social media invoice: a month or a date after "account" is not a bank account number
-for (const t of ["Account management 11-2026", "Instagram account management 2026-12", "Social account takeover 2026 - 12 posts", "Account management (November 2026)", "TikTok account audit 12/2026", "Account management 2026-11-01", "Account management 11/01/2026 - 11/30/2026", "Account setup, 3 reels"]) assert.equal(T.looksLikeCardOrBankNumber(t), false, `an ordinary line is refused: ${t}`);
+for (const t of ["Account management 11-2026", "Instagram account management 2026-12", "Social account takeover 2026 - 12 posts", "Account management (November 2026)", "TikTok account audit 12/2026", "Account management 2026-11-01", "Account management 11/01/2026 - 11/30/2026", "Account setup, 3 reels", "Account management 2026-11 - 2026-12", "Account management 2026-11-01 - 2026-11-30", "Account management 3 - 5 reels", "Deposit on account, invoice 0000170", "Paid on account (inv 0000169)"]) assert.equal(T.looksLikeCardOrBankNumber(t), false, `an ordinary line is refused: ${t}`);
 assert.equal(T.toCsv([["Date", "Customer", "Amount"], ["2026-11-20", "=HYPERLINK(1)", -5], ["2026-11-21", 'Say "hi", ok', T.csvAmount(125050)]]), 'Date,Customer,Amount\r\n2026-11-20,\'=HYPERLINK(1),-5\r\n2026-11-21,"Say ""hi"", ok",1250.50\r\n');
 
 /* settings: defaults (card OFF, bank transfer on, due on receipt, the two saved lines, no bank account, Zelle and check for new invoices) */

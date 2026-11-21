@@ -1889,6 +1889,11 @@ export async function finalizeInvoice(id: string, actor: string, opts: { origin?
   if (inv.status !== "draft") return { invoice: inv, first: false, done: buildDone(inv, customer, settings, { origin: opts.origin, stripeReady }) };
   const wayError = checkPayWays(sortPayWays(inv.payWays), inv.payNote, availablePayWays(settings, stripeReady));
   if (wayError) throw new OpsError(wayError);
+  // A check by mail needs somewhere to mail it. The creator asks on its own screen; this covers a draft's own page
+  // (a draft Claude or the monthly run made starts with Zelle and check).
+  if (inv.payWays.includes("check") && !settings.checkAddress?.trim() && !settings.fromAddress?.trim()) {
+    throw new OpsError("Add your address in Settings first: it is where a check is mailed (or take Check off this invoice's ways to pay).");
+  }
   if (inv.totalCents <= 0) throw new OpsError("The total is $0. Add an amount first.");
   if (inv.issueDate && inv.dueDate) checkDates(inv.issueDate, inv.dueDate);
   checkPrintable({ customerName: customer.name, items: inv.items });

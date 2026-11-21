@@ -99,6 +99,11 @@ async function main() {
   const laterOn = await ops.saveInvoiceSettings({ zelle: "(555) 010-0100" }, NORA); // the number arrives later (the creator's ask, or Settings)
   assert.deepEqual(T.defaultPayWays(laterOn, T.availablePayWays(laterOn, false)), ["zelle", "check"], "once the Zelle number is in, a new invoice offers Zelle and a check by mail");
   assert.deepEqual((await ops.getInvoiceCreatorContext({ today })).prefill.payWays, ["zelle", "check"]);
+  // Make PDF on a draft's own page: a check by mail needs somewhere to mail it (the creator asks on its own screen)
+  await ops.saveInvoiceSettings({ fromAddress: null }, NORA);
+  await rejects(ops.finalizeInvoice(dEarly.id, NORA, { today }), /Add your address in Settings first: it is where a check is mailed/, "a draft offering a check, with no address saved, is not made into a PDF");
+  const [stillDraft] = await db.select().from(schema.invoices).where(eq(schema.invoices.id, dEarly.id));
+  assert.equal(stillDraft.status, "draft"); assert.equal(stillDraft.number, null, "and no number was taken");
   // back to a fresh setup for the checks below
   for (const d of await db.select({ id: schema.invoices.id }).from(schema.invoices).where(eq(schema.invoices.customerId, earlyBird.id))) await ops.deleteDraftInvoice(d.id, NORA);
   await ops.deleteCustomer(earlyBird.id, NORA);

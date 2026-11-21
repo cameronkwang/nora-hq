@@ -248,11 +248,15 @@ the app, and everything below exists to keep it in as few places as possible.
   every other text setting. Card numbers are refused everywhere, the account box included. (A customer's phone and
   email are not run through it: an international phone number is long enough to look like a card number.)
 - **What counts as a bank number in free text.** A card number is 13 to 19 digits that pass the card check. A bank
-  number is one written next to the word routing, account, acct or ABA, and long enough to be one: 8 or more digits
-  in a row ("ACH to ACCT#:000123456789", "ROUTING:000000000") or 9 or more written in groups ("account 0001 2345
-  6789"). A month or a date after the word "account" is ordinary wording on a social media invoice and passes:
-  "Account management 11-2026", "Instagram account management 2026-12". Not caught: her account number typed with
-  none of those words next to it (the op that checks free text does not know the number).
+  number is six or more digits written next to the word routing, account, acct or ABA, however they are grouped
+  ("ACH to ACCT#:000123456789", "ROUTING:000000000", "account 0001 2345 6789", "ACH to ACCT#:0001234"). Two shapes
+  pass, because they are ordinary wording on a social media invoice: a month or a date after the word ("Account
+  management 11-2026", "Instagram account management 2026-12") and an invoice number named as one ("on account,
+  invoice 0000170"). Not caught: her account number typed with none of those words next to it (the op that checks
+  free text does not know the number), and a number of fewer than six digits.
+- **A check needs an address.** Make PDF is refused while an invoice offers a check and no address is saved (hers
+  at the top of the invoice, or one for checks): the creator asks for it on its own screen, a draft's page points
+  to Settings.
 
 ## Numbers
 

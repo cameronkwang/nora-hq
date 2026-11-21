@@ -882,10 +882,11 @@ export function bankLabelHoldsNumber(label: string | null | undefined): boolean 
  * details, and Nora's own account number goes in ONE place only, its own boxes in Settings (bankDetailsProblem),
  * never in free text. A phone number, a check number or an amount does not match.
  *
- * Next to one of those words the number has to be long enough to be one: 8 or more digits in a row ("ACH to
- * ACCT#:000123456789", "ROUTING:000000000"), or 9 or more written in groups ("account 0001 2345 6789"). A month or a
- * date after the word "account" is ordinary wording for a social media invoice and passes: "Account management
- * 11-2026", "Instagram account management 2026-12".
+ * Next to one of those words, six or more digits are a number of that kind, however they are grouped ("ACH to
+ * ACCT#:000123456789", "ROUTING:000000000", "account 0001 2345 6789", "ACH to ACCT#:0001234"). Two shapes pass,
+ * because they are ordinary wording on a social media invoice: a month or a date ("Account management 11-2026",
+ * "Instagram account management 2026-12", "2026-11-01 - 2026-11-30"), and an invoice number named as one ("on
+ * account, invoice 0000170").
  */
 export function looksLikeCardOrBankNumber(text: string | null | undefined): boolean {
   const s = text ?? "";
@@ -893,10 +894,18 @@ export function looksLikeCardOrBankNumber(text: string | null | undefined): bool
     const digits = m[0].replace(/\D/g, "");
     if (digits.length >= 13 && digits.length <= 19 && luhn(digits)) return true;
   }
-  for (const m of s.matchAll(/\b(?:routing|account|acct|aba)\b[^\d\n]{0,20}(\d(?:[ -]?\d)*)/gi)) {
-    if (/\d{8}/.test(m[1]) || m[1].replace(/\D/g, "").length >= 9) return true;
+  for (const m of s.matchAll(/\b(?:routing|account|acct|aba)\b([^\d\n]{0,20})(\d[\d -]*)/gi)) {
+    if (/\binv(?:oice)?\b/i.test(m[1])) continue; // "on account, invoice 0000170": an invoice number, said so
+    const groups = m[2].trim().split(/[ -]+/);
+    if (groups.join("").length >= 6 && !datesOnly(groups)) return true;
   }
   return false;
+}
+
+/** Groups of digits that read as a month, a date or a range of them: 1, 2 or 4 digits each, every 4-digit one a year (19xx, 20xx), at least one year. */
+function datesOnly(groups: string[]): boolean {
+  const year = (g: string) => /^(?:19|20)\d\d$/.test(g);
+  return groups.length <= 6 && groups.some(year) && groups.every((g) => g.length <= 2 || year(g));
 }
 
 /** What every op answers when free text holds one (ops-invoices guardText, ops-payment savePaymentLine). Fixed words: never what was typed. */
