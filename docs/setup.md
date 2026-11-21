@@ -178,12 +178,14 @@ Notes:
 
 ## Changing the sign-in password
 
-The production sign-in password is built into the app as a salted hash in `src/lib/team.ts`
-(the Vercel `APP_PASSWORD` variable is no longer used in production). To change it, generate a new hash:
+The sign-in password is the `APP_PASSWORD` variable in Vercel. It is not in the code, in any form.
 
-```bash
-node -e 'const c=require("crypto");const s=c.randomBytes(16);console.log("scrypt:"+s.toString("base64")+":"+c.scryptSync(process.argv[1],s,64).toString("base64"))' "new password here"
-```
+1. Open **Vercel → Project → Settings → Environment Variables**.
+2. Add `APP_PASSWORD` (or edit it) with the new password, for **Production and Preview**. Keep it long: four or more random words is fine.
+3. Open **Deployments**, pick the newest Production deployment and choose **Redeploy**. The new password works once that finishes.
 
-Replace `PASSWORD_HASH` with the output, commit, and deploy. People allowed to sign in are `TEAM` in the same file,
-plus anyone in the Vercel `APP_USERS` variable.
+While `APP_PASSWORD` is not set, nobody can sign in to the live app (people already signed in stay signed in).
+People allowed to sign in are `TEAM` in `src/lib/team.ts`, plus anyone in the Vercel `APP_USERS` variable.
+
+Older deployments keep the password they were built with. Turn on **Settings → Deployment Protection → Vercel Authentication**
+so that only the live address can be opened without a Vercel login.

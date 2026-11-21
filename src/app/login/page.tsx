@@ -3,6 +3,7 @@ import { cookies } from "next/headers";
 import { allowedUsers, checkPassword, getUser } from "@/lib/auth";
 import { SESSION_COOKIE, SESSION_MAX_AGE, signSession } from "@/lib/session";
 import { checkLogin, clearFailedLogins, recordFailedLogin } from "@/lib/login-guard";
+import { signInPassword } from "@/lib/password-check";
 import { buttonClass, cx } from "@/components/ui";
 
 export const metadata = { title: "Sign in" };
@@ -47,6 +48,8 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
   const { error, next, locked } = await searchParams;
   const lockedMin = locked && /^\d{1,3}$/.test(locked) ? Number(locked) : null;
   const dev = process.env.NODE_ENV !== "production" && !process.env.APP_PASSWORD;
+  // The live app with no APP_PASSWORD set: nobody can sign in, so say why instead of "don't match".
+  const off = !signInPassword();
   return (
     <main className="ps-login">
       <form action={login} className="w-full max-w-sm">
@@ -63,7 +66,9 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
             <input className="input" id="password" name="password" type="password" autoComplete="current-password" required />
           </div>
         </div>
-        {lockedMin ? (
+        {off ? (
+          <p role="alert" className="status is-danger mt-5 flex whitespace-normal">Sign-in is switched off: the APP_PASSWORD setting is missing in Vercel.</p>
+        ) : lockedMin ? (
           <p role="alert" className="status is-danger mt-5 flex whitespace-normal">Too many tries. Please wait about {lockedMin} minute{lockedMin === 1 ? "" : "s"} and try again.</p>
         ) : error ? (
           <p role="alert" className="status is-danger mt-5 flex whitespace-normal">That email and password don&apos;t match.</p>

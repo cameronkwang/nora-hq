@@ -1,13 +1,14 @@
 import "server-only";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
-import { scryptSync, timingSafeEqual } from "node:crypto";
-import { PASSWORD_HASH, TEAM } from "./team";
+import { passwordMatches, signInPassword } from "./password-check";
+import { TEAM } from "./team";
 import { SESSION_COOKIE, verifySession, type SessionUser } from "./session";
 
 /**
  * APP_USERS="Cameron:cameron@example.com,Nora:nora@example.com" — the only people who can sign in.
- * APP_PASSWORD — shared sign-in password (keep it long). In local dev both have defaults.
+ * APP_PASSWORD — shared sign-in password (keep it long). In local dev both have defaults. In production the password
+ * comes only from this variable (lib/password-check.ts): nothing in the code can be used to sign in.
  */
 const isProd = process.env.NODE_ENV === "production";
 
@@ -30,22 +31,8 @@ export function allowedUsers(): SessionUser[] {
   return users.filter((u) => u.email && !seen.has(u.email) && (seen.add(u.email), true));
 }
 
-function checkHash(input: string, stored: string): boolean {
-  const [scheme, saltB64, hashB64] = stored.split(":");
-  if (scheme !== "scrypt" || !saltB64 || !hashB64) return false;
-  const expected = Buffer.from(hashB64, "base64");
-  const actual = scryptSync(input, Buffer.from(saltB64, "base64"), expected.length);
-  return timingSafeEqual(actual, expected);
-}
-
 export function checkPassword(input: string): boolean {
-  // Production: the built-in hashed password (lib/team.ts) is the sign-in password.
-  if (isProd && PASSWORD_HASH) return checkHash(input, PASSWORD_HASH);
-  const expected = process.env.APP_PASSWORD ?? (!isProd ? "dev" : "");
-  if (!expected) return false;
-  const a = Buffer.from(input);
-  const b = Buffer.from(expected);
-  return a.length === b.length && timingSafeEqual(a, b);
+  return passwordMatches(input, signInPassword());
 }
 
 export async function getUser(): Promise<SessionUser | null> {
