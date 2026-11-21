@@ -238,14 +238,33 @@ The main way to make an invoice. One screen, phone first, great on desktop. Serv
 - **Bill to** is a typeahead (`billToOptions`, filtered in the browser with `filterBillTo`) over customers, managed
   businesses and deal businesses, each name once. Picking one fills the address (the customer's billing address,
   else the business's public facts address in `clients.public_info`, else the deal's address); the address is
-  editable and saved on the customer. A name that matches nothing creates the customer inline on Make PDF, with an
-  address box. `?customer=`, `?client=`, `?deal=`, `?contract=` (+ `&part=rest`) and `?draft=` open it pre-filled.
-- **Same as last time** shows for a customer with past invoices (`lastInvoiceForCustomer`): it copies the lines (and
-  ways to pay, notes); a saved line typed each time (Food Stipend) comes back with its amount empty and focused
-  (`sameAsLastTime`).
+  editable and saved on the customer. The creator always sends what the address box shows, so an address that came
+  from the public facts is printed and saved the first time (the op writes it only when it differs). A name that
+  matches nothing creates the customer inline on Make PDF, with an address box. `?customer=`, `?client=`, `?deal=`,
+  `?contract=` (+ `&part=rest`) and `?draft=` open it pre-filled. A managed business that already has a customer is
+  found by the business (`BillToOption.clientId`), not by its name: a deal made from Nora's schedule keeps the
+  schedule's name, and must still bill that business's one customer.
+- **Same as last time** repeats the last invoice she MADE for that customer: sent (paid or not), never an unsent
+  draft and never a Skynova import (its one line is a placeholder). `BillToOption.hasLast` says whether there is one
+  (`hasPastInvoices` only words the list: "Customer" or "Customer, no invoices yet"). The lines come with the page
+  for the 40 most recently billed customers (`BillToOption.last`, one `select distinct on (customer_id)`), so the
+  button works the moment she picks one; for anyone else they are fetched on pick (`lastInvoiceForCustomer`), the
+  button already there and focused: a tap or Enter while it loads is kept and applied when it arrives. It copies the
+  lines (and ways to pay, notes); a saved line typed each time (Food Stipend) comes back with its amount empty and
+  focused (`sameAsLastTime`).
 - **Lines**: the saved lines are chips (`lineFromSavedItem`); a description + amount row adds a custom line; Enter
   moves to the next field (and from the amount adds the line); quantity is 1 unless changed; totals update live
-  (`invoiceTotals`). `readyItems` names the first line that still needs an amount.
+  (`invoiceTotals`) from exactly the lines Make PDF will send, a custom line typed but not added yet included.
+  `readyItems` names the first line that still needs an amount.
+- **Dates follow today.** Until she sets a date herself, the invoice is dated the day it is MADE, not the day the
+  screen was opened: the creator checks today (America/New_York) when the tab comes back and again when Make PDF is
+  pressed, and moves the default dates with it (due on receipt stays due on receipt, "15 days" stays 15 days; a
+  deal's agreed due date stays that date). "New invoice" on the done state starts from today too.
+- **What the PDF can't print.** The PDF has English letters only (Helvetica). The creator says so under the field
+  before Make PDF ("The PDF prints English letters only: 小点心 will be left out"), and stops when a customer's name
+  or a line would print EMPTY (Chinese only): "Add the name in English for the PDF (you can keep both)". The ops
+  refuse the same (`createAndFinalizeInvoice`, `finalizeInvoice`), so no PDF ever says "Customer" or has a blank row.
+  One rule for all of it: `invoices-types pdfText / pdfUnprintable / pdfPrintsEmpty`.
 - **Defaults** show as one quiet line, `creatorDefaultsLine`: "Due on receipt · Zelle · #0000170". Each part is
   tappable: the due date (a date field, plus "Due on receipt"), the ways to pay (a checklist from
   `availablePayWays`, each unavailable one saying why, e.g. "Card is off. Turn it on in Settings first."; "Other"
@@ -257,6 +276,12 @@ The main way to make an invoice. One screen, phone first, great on desktop. Serv
 - **ONE focal button, "Make PDF"** (Cmd/Ctrl+Enter on desktop): `createAndFinalizeInvoice` saves and finalizes in one
   step (number, status sent, link) and the screen turns into the **done state**. **Save as draft** is secondary
   (`saveQuickDraft`). Errors show inline next to the field, the form keeps everything.
+- **Pressed again after a lost response.** The creator sends an id with the form (`QuickInvoiceInput.requestId`, a new
+  one whenever the form changed); the invoice's own id is made from it. A second press with the same form conflicts
+  on that id, takes no number and returns the invoice the first press made.
+- **Editing a finalized invoice** (`?edit=<id>`, `getInvoiceEditContext`) opens the same screen with everything the
+  form can change: lines, dates, ways to pay, notes, language AND the discount and the private note, so Save changes
+  never clears what she didn't touch.
 
 ### The done state
 
@@ -269,17 +294,22 @@ The main way to make an invoice. One screen, phone first, great on desktop. Serv
 `InvoiceDone` (also `getInvoiceDone(id)` for an invoice that is already finalized, and after Make PDF on the invoice
 page). Buttons in order (`doneActions`):
 
-- **Share PDF** (phones, when `navigator.canShare({ files })`): iOS only allows `share()` inside a fresh tap, so the
-  done state fetches the PDF (`pdfPath`) as a `File` named `fileName` as soon as it appears; the Share button is
-  then a second tap on a ready file. While it loads the button says "Getting PDF…"; if fetching fails it falls back
-  to Download.
+- **Share PDF** (phones, when `navigator.canShare({ files })`): iOS only allows `share()` inside a fresh tap, so Share
+  is a second tap on a file that is already there. After Make PDF on such a phone the PDF comes back WITH the answer
+  (`InvoiceDone.pdfBase64`, asked for with `makePdfAction(input, { pdf: true })`): no second round trip. On a reload
+  of the done state and on the invoice page it is fetched (`pdfPath`) as soon as the buttons appear; while it loads
+  the button says "Getting PDF…"; if fetching fails it falls back to Download.
 - **Download PDF**: a link to `pdfPath?download=1` (works everywhere, no JavaScript needed).
 - **Copy message**: the short text to send with it, in the customer's language (`message`; all three in `messages`):
   "Hi Sam! Here is invoice 0000170 for $625.10, due on receipt. The PDF is attached. / Zelle: (555) 010-0100, with
   0000170 in the memo. / Thank you!" (`invoiceCopy(lang).share.pdfMessage`).
 - **Copy pay link**: only when an online way is on (`payUrl` set).
-- **Next steps** (`nextSteps`, `invoiceNextSteps`): "Make contract" when it has none; then "New invoice". The focal
-  button on the done state is Share PDF on phones and Download PDF on desktop (one ink-filled button, never two).
+- **Next steps** (`nextSteps`, `invoiceNextSteps`): "Make contract" when it has none; then "New invoice". They sit
+  right under the buttons, above the message, so Make contract is on the first screen of the smallest iPhone. The
+  focal button on the done state is Share PDF on phones and Download PDF on desktop (one ink-filled button, never two).
+- **It stays put.** After Make PDF the address gains `?done=<id>` next to what it had; `done` is not part of the
+  page's key, so the app's live refresh (every 20 s and whenever the tab comes back) re-renders the same screen
+  instead of remounting it: Share stays ready and the chosen message language stays chosen.
 
 ### Speed
 
@@ -289,9 +319,9 @@ page). Buttons in order (`doneActions`):
 - `getInvoiceCreatorContext` runs its reads in parallel (settings, saved lines, customers, clients, deals, the
   next number, the prefill): one round trip's worth of waiting.
 - Make PDF is ONE server action: at most 4 statements on the common path (customer exists: the INSERT that
-  finalizes, then nothing; a new customer: one more INSERT; a deal: one deal UPDATE). The PDF itself is made on the
-  GET of `/invoices/<id>/pdf` (pdf-lib, standard fonts, no embedding of custom fonts), which the done state
-  prefetches.
+  finalizes, then nothing; a new customer: one more INSERT; a deal: one deal UPDATE). The PDF is made by pdf-lib
+  (standard fonts, nothing embedded): for a phone that will share it, inside the same action, next to the log write
+  (about 20 ms, no second round trip); otherwise on the GET of `/invoices/<id>/pdf`.
 - Budget: Make PDF round trip well under a second locally after warm-up (aim for under 300 ms), the PDF route under
   200 ms. **Measure and report**: team_ui times the action and the PDF fetch in the browser (`performance.now()`,
   five runs after one warm-up) and puts the numbers in its report; core reports the statement count per path.
@@ -326,7 +356,10 @@ clients see a familiar document, in the clean Ink style:
                                                       Balance Due    $625.10
 ```
 
-- Letter, pdf-lib, Helvetica (the `contract-pdf.ts` style: `printable()` drops what Helvetica can't draw). Server side.
+- Letter, pdf-lib, Helvetica. Server side. Helvetica has the Western European letters only: `invoices-types pdfText`
+  is the one rule for what prints (curly quotes and dashes become plain, an accent it lacks is dropped from its
+  letter so "Phở" prints "Pho", anything else is left out; line breaks in the notes are kept), checked against the
+  real font for every character in `scripts/test-invoice-review.ts`.
 - Top left: From name and address lines (email / phone under them only if set). Top right: "INVOICE" large,
   letter-spaced, grey.
 - Left: the customer's name and their address on one line (`oneLineAddress`). Right column: "Invoice #", "Invoice
@@ -343,7 +376,10 @@ clients see a familiar document, in the clean Ink style:
 - A draft prints "DRAFT" (and "DRAFT" as the number); a void one "VOID". Long tables flow onto more pages with the
   header repeated; "Page 1 of 2" at the bottom only when there is more than one page.
 - File name `Invoice 0000170 - Sample Bistro.pdf` (`invoiceFileName`). English only; a name Helvetica can't draw in
-  full (CJK) is printed with what it can and the message carries the full name.
+  full ("SAMPLE Bakery 小点心") is printed with what it can, the creator and the invoice page say what is left out,
+  and the message and the pay page carry the full name. A name or a line that would print empty (Chinese only) is
+  refused before the PDF is made. Embedding a Chinese font (pdf-lib + fontkit, a subset, only when needed) is the
+  fuller answer and is not built.
 
 ## The life of an invoice
 
@@ -387,12 +423,15 @@ text, not a status.
 
 - **Record payment** (people only): amount (default: the balance), date (default today), method (default from the
   invoice's first way: Zelle), optional reference and note. Refused on a draft or void invoice and above the balance
-  ("That's more than the $200.00 still owed."). Insert, then the ONE recompute UPDATE, then the deal sync.
+  ("That's more than the $200.00 still owed."). The amount is HELD first in one conditional UPDATE (below, "Record a
+  payment"), so two people recording the same payment at the same moment can't both pass; then the insert, the ONE
+  recompute UPDATE, the deal sync, and any open Stripe page for the old balance is closed.
 - **Delete payment** (people): with a confirm. Recompute and deal sync. A Stripe payment can be deleted too (after a
   refund in Stripe); the activity log keeps who and when.
 - **Stripe payment** (`system`, from the verified webhook): `recordStripePayment`, ON CONFLICT
   (`stripe_session_id`) DO NOTHING, so a replay records nothing. Never refused for being more than the balance (the
-  money arrived): the invoice page shows "Overpaid by $X" so a person can sort it out.
+  money arrived): the invoice page shows "Overpaid by $X" so a person can sort it out, and Nora gets a push ("Paid
+  twice", or "Paid after it was cancelled" for a void invoice) saying to refund it in Stripe.
 - Payments never appear on Nora's Schedule, in the schedule's pushes or in its calendar entries.
 
 ## Ways to pay on each invoice
@@ -425,13 +464,30 @@ Only for invoices whose ways include `bank` or `card`.
   `price_data[product_data][name]=Invoice 0000170`, `quantity=1`, `client_reference_id=<invoice id>`,
   `metadata[invoice_id]`, `payment_intent_data[metadata][invoice_id]`, `customer_email` when known (or `customer`
   when bank reuse applies), `locale` (`en`, `zh`, `zh-TW`), `success_url=<page>?paid=1`, `cancel_url=<page>`,
-  `expires_at` (1 hour). No surcharge line, ever.
+  `expires_at` (1 hour). No surcharge line, ever. With bank transfer:
+  `payment_method_options[us_bank_account][verification_method]=instant` (Stripe's API allows `automatic`, the
+  default, or `instant`). `automatic` falls back to typing the account by hand and confirming two small deposits a
+  day or two later; Checkout then completes before any money moves and the invoice would say "a bank payment is on
+  its way" for up to 10 days with nothing debited. With `instant` a started transfer is always a real debit; a
+  customer whose bank can't be verified instantly pays by Zelle.
 - **Starting it** (`lib/ops-stripe startCheckout`, public): POST from the pay page. Refused for a draft, void, paid
   invoice, an invoice without an online way, or while a bank payment is clearing ("A bank payment is on its way").
   An `open` session for the same amount that hasn't expired is reused instead of making another; at most 6 new
   sessions per invoice per hour and 20 per day (an atomic counter in `app_settings`, key
   `stripe.checkout_rate.<invoice id>`). The amount is always the balance at that
-  moment, read on the server.
+  moment, read on the server. Older open sessions for ANOTHER amount are expired; one for the same amount is left
+  alone (two presses at once must not expire the page the browser is following).
+- **Open pages are closed when they stop being right** (`lib/ops-invoices closeOpenCheckouts`: expire at Stripe, mark
+  `expired`): when the invoice is voided, a payment is recorded or deleted, the total is edited, the link is
+  replaced, a bank transfer starts on another page, or a Stripe payment is recorded. So a Stripe page the customer
+  opened earlier can't take the money for a cancelled invoice, a paid one or an old amount. A payment already in
+  flight can still land: it is recorded (it is real money), logged without the amount, and Nora is pushed "Paid
+  after it was cancelled: <customer>" or "Paid twice: <customer>" with "refund it in Stripe" and a link to the
+  invoice; the invoice page says the same.
+- **Void waits for a bank transfer.** An invoice can't be voided while a bank transfer is clearing (a checkout in
+  `processing`): the money would land on a void invoice about 4 business days later. `voidInvoice` checks it in its
+  one UPDATE and says "A bank payment is on its way for this invoice. Wait until it arrives or fails, then void
+  it."; the invoice page hides Void meanwhile.
 - **Webhook** `POST /api/stripe/webhook` (public prefix; it checks the signature itself). Read the raw body with
   `await req.text()`. Verify `Stripe-Signature` (`t=…,v1=…`): HMAC-SHA256 of `${t}.${rawBody}` with
   `STRIPE_WEBHOOK_SECRET`, hex, constant-time compared with every `v1`, `t` within 5 minutes. Bad signature: 400.
@@ -469,7 +525,11 @@ people only: no Claude tool reads, makes or links contracts**, and invoice tools
 - **The link**: `invoices.contractId` (nullable, `on delete set null`); `contracts.customerId` (set null). Many
   invoices per contract.
 - **Contract to invoice.** After a contract downloads, the builder offers **"Make the invoice"**, which opens the fast
-  creator pre-filled (`/invoices/new?contract=<id>`, `invoicePrefillFromContract`):
+  creator pre-filled (`/invoices/new?contract=<id>`, `invoicePrefillFromContract`). On a wide screen it sits under the
+  Download button; under 1200px (phones, an iPad) it takes the fixed bar where Download was, as the bar's ink button
+  with "Downloaded and saved." and a quiet "Download again" above it, so the next step is on the screen the moment
+  the download lands (the same for "Back to the invoice" on a contract made from an invoice). Changing the form after
+  a download puts Preview and Download back (what was saved is no longer what the form shows). It opens with:
   - customer: the contract's `customerId`, else a customer whose name key matches the contract's business, else a new
     one (made on Make PDF) from the business, contact and email;
   - lines and due date (`invoiceFromContractFields`, matching what the contract says): the saved package name at the
@@ -481,12 +541,18 @@ people only: no Claude tool reads, makes or links contracts**, and invoice tools
   - `contractId` set, source `contract`.
   - A **monthly** contract also offers **"Set up monthly invoices"** (`createRetainerFromContract`): a retainer from its
     fee, start date (day of month, first month) and term (`retainerFromContractFields`; the term is a minimum and the
-    contract then runs month to month, so the retainer has no end: a person pauses it). One per contract; a month an
-    invoice from the contract already billed is not billed again. Its drafts carry the `contractId`.
+    contract then runs month to month, so the retainer has no end: a person pauses it). One per contract. Its drafts
+    carry the `contractId` and are due in the contract's "pay within" days (`contractPaymentDays`), as the contract
+    says. **A month is never billed twice**, whichever button is pressed first: `createRetainerFromContract` marks a
+    month an invoice already bills, and `runRetainers` checks again before each draft (an invoice of the contract for
+    that month, by its retainer month or its first line, takes the month). "Invoice this month" is offered only while
+    the contract has no invoice and its monthly invoices haven't taken this month.
 - **Invoice to contract.** The invoice page and the done state offer **"Make contract"**, which opens `/contracts`
   pre-filled (`/contracts?invoice=<id>`, `contractPrefillFromInvoice` → `contractFieldsFromInvoice`): business,
   contact, email, the fee from the main line (a retainer invoice opens a monthly contract), plus the invoice's deal.
-  The saved contract links back: `saveContract({ fields, dealId, invoiceId })` calls `linkContractToInvoice`.
+  The saved contract links back: `saveContract({ fields, dealId, invoiceId })` calls `linkContractToInvoice`. A
+  contract made from a retainer's invoice takes that retainer as its own (`retainers.contractId`), so it shows as
+  billing monthly already and never offers a second "Set up monthly invoices".
 - **Each shows the other**:
   - Past contracts rows show their invoices ("0000170 · Paid", `invoicesForContracts` + `invoiceRefLabel`), or the
     next step ("Make invoice", "Make deposit invoice", "Invoice the rest", "Set up monthly invoices";
@@ -526,8 +592,10 @@ A retainer belongs to a customer (and maybe a contract): amount, description, da
 reminders cron (`runDailyReminders`, once a day after 8am New York) calls `runRetainers` first. For each retainer that
 is due (`retainerDue`: active, started, not made this month, today on or after its day; a missed day catches up), it
 claims the month with ONE conditional UPDATE on `lastRunMonth`, then inserts ONE draft (source `retainer`, one line
-"Social media services (November 2026)", `retainerMonth`, due on receipt, Zelle, the retainer's `contractId`),
-unique per retainer and month. A person presses Make PDF. A draft someone deleted is not made again that month. If
+"Social media services (November 2026)", `retainerMonth`, Zelle, the retainer's `contractId`; due on receipt, or in
+its contract's "pay within" days when it bills a contract), unique per retainer and month. A retainer with a
+contract first checks that no invoice of that contract already bills the month (a hand-made "Invoice this month"):
+if one does, the month is marked taken and no draft is made. A person presses Make PDF. A draft someone deleted is not made again that month. If
 the insert fails, the claim is released so the next run retries. The preview mode (`?preview=1`) makes nothing
 (`dryRun`).
 
@@ -714,6 +782,11 @@ returning *;
 Either one failing on `invoices_number_unique` (a concurrent import wrote the same number between the check and the
 write) is retried once.
 
+Make PDF pressed again after a lost response (the creator's `requestId`): `$id` is `inv_<requestId>`, the number is
+`case when exists (select 1 from invoices y where y.id = $id) then null else TAKE end` (the CASE never reaches the
+sequence when the row is there, so a repeat takes no number) and the INSERT ends `on conflict (id) do nothing`. No
+row back: the op reads `$id` and returns the invoice the first press made.
+
 Move the sequence past every number used (after an import), and "Next invoice number" (floored the same way):
 
 ```sql
@@ -750,6 +823,26 @@ where i.id = $id
 returning i.*;
 ```
 
+Record a payment (people): the amount is held first, so two people recording the same payment at once can't both
+pass (the second waits for the row, then sees the first one's amount and is refused). Then the insert, then the
+recompute above, which sets `paid_cents` to the true sum whether or not the insert worked:
+
+```sql
+update invoices set paid_cents = paid_cents + $amount
+where id = $id and status in ('sent', 'partially_paid') and total_cents - paid_cents >= $amount
+returning id;
+```
+
+Void (only with no payment and no bank transfer on its way):
+
+```sql
+update invoices set status = 'void', voided_at = now(), voided_by = $actor, void_reason = $reason, updated_at = now()
+where id = $id and status in ('sent', 'partially_paid', 'paid')
+  and not exists (select 1 from invoice_payments p where p.invoice_id = invoices.id)
+  and not exists (select 1 from invoice_checkouts k where k.invoice_id = invoices.id and k.status = 'processing')
+returning *;
+```
+
 Stripe payment: `insert into invoice_payments … on conflict (stripe_session_id) do nothing returning id`, then the
 recompute.
 
@@ -768,10 +861,12 @@ Retainer from a contract (one per contract, `retainers_contract_uq`):
 `insert into retainers (…, contract_id) values (…) on conflict (contract_id) do nothing returning *`, then read the
 existing one when nothing came back.
 
-Link a saved contract to its invoice (two single-row statements; each is idempotent):
+Link a saved contract to its invoice (single-row statements; each is idempotent). The invoice's retainer, if it has
+one, becomes the contract's, so the contract never offers a second "Set up monthly invoices":
 
 ```sql
-update invoices set contract_id = $contractId, updated_at = now() where id = $invoiceId returning customer_id, deal_id;
+update invoices set contract_id = $contractId, updated_at = now() where id = $invoiceId returning customer_id, deal_id, retainer_id;
+update retainers set contract_id = $contractId, updated_at = now() where id = $retainerId and contract_id is null;
 update contracts set customer_id = coalesce(customer_id, $customerId), deal_id = coalesce(deal_id, $dealId) where id = $contractId;
 ```
 
@@ -832,8 +927,11 @@ anything that changes a signature is told to the others first.
   `src/lib/mcp/rules.ts` (the rule above)
 - Unit tests: `scripts/test-invoices-types.ts`, `scripts/test-invoice-numbers.mts`, `scripts/test-invoice-import.ts`,
   `scripts/test-invoices-ops.ts` (ops against a throwaway PGlite:
-  `PGLITE_DIR=$(mktemp -d) npx tsx --require ./scripts/server-only-shim.cjs scripts/test-invoices-ops.ts`), and
-  extending `scripts/sample-seed.mts` if more sample data helps
+  `PGLITE_DIR=$(mktemp -d) npx tsx --require ./scripts/server-only-shim.cjs scripts/test-invoices-ops.ts`),
+  `scripts/test-invoice-review.ts` (the same way; one stand-alone check per review finding: a void while a bank
+  transfer clears, stale Stripe pages, two people recording one payment, Make PDF pressed twice, Same as last time,
+  a month billed twice, the PDF's letters against the real font), and extending `scripts/sample-seed.mts` if more
+  sample data helps
 
 **team_ui** (every signed-in page)
 - `src/app/(app)/invoices/**`: the list (one-tap PDF per row), **the fast creator `/invoices/new` and its done state**,

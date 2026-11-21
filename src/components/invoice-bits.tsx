@@ -3,10 +3,13 @@ import type { ReactNode } from "react";
 import {
   INVOICE_STATUS_LABEL,
   INVOICE_STATUS_TONE,
+  PDF_LETTERS,
   contractRefLabel,
   formatCents,
   invoicePdfPath,
   invoiceRefLabel,
+  pdfText,
+  pdfUnprintable,
   shortDate,
   type ContractInvoiceRef,
   type ContractRef,
@@ -115,16 +118,23 @@ export function InvoiceRows({ rows, showCustomer = true, empty }: { rows: Invoic
   );
 }
 
-/** The invoice as its PDF prints it (InvoiceDocument: every word already formatted), on a hairline sheet. */
+/**
+ * The invoice as its PDF prints it (InvoiceDocument: every word already formatted), on a hairline sheet. The PDF has
+ * English letters only, so the text is shown the way it is drawn (invoices-types pdfText: the same rule as lib/invoice-pdf),
+ * and anything it leaves out (Chinese) is said above the sheet instead of being shown as if it printed.
+ */
 export function InvoicePaper({ doc }: { doc: InvoiceDocument }) {
   const total = doc.totals[doc.totals.length - 1];
+  const leftOut = pdfUnprintable([doc.from.name, ...doc.from.addressLines, doc.billTo.name, doc.billTo.address, ...doc.rows.map((r) => r.description), doc.notes, ...doc.paymentLines].filter(Boolean).join(" "));
   return (
+    <>
+    {leftOut && <p className="notice mb-4"><Status tone="warn" className="is-wrap">{PDF_LETTERS.isLeftOut(leftOut)}</Status></p>}
     <article className="inv-paper" aria-label={`Invoice ${doc.facts[0]?.value ?? ""} as the PDF shows it`}>
       <header className="inv-paper-top">
         <div className="min-w-0">
-          <p className="font-medium">{doc.from.name ?? <span className="text-muted">Your name (Settings)</span>}</p>
+          <p className="font-medium">{doc.from.name ? pdfText(doc.from.name) : <span className="text-muted">Your name (Settings)</span>}</p>
           {doc.from.addressLines.map((l, i) => (
-            <p key={i} className="meta">{l}</p>
+            <p key={i} className="meta">{pdfText(l)}</p>
           ))}
           {doc.from.email && <p className="meta">{doc.from.email}</p>}
           {doc.from.phone && <p className="meta">{doc.from.phone}</p>}
@@ -136,8 +146,8 @@ export function InvoicePaper({ doc }: { doc: InvoiceDocument }) {
       </header>
       <div className="inv-paper-mid">
         <div className="min-w-0">
-          <p className="font-medium [overflow-wrap:anywhere]">{doc.billTo.name}</p>
-          {doc.billTo.address && <p className="meta [overflow-wrap:anywhere]">{doc.billTo.address}</p>}
+          <p className="font-medium [overflow-wrap:anywhere]">{pdfText(doc.billTo.name) || "Customer"}</p>
+          {doc.billTo.address && <p className="meta [overflow-wrap:anywhere]">{pdfText(doc.billTo.address)}</p>}
         </div>
         <dl className="inv-facts">
           {doc.facts.map((f) => (
@@ -159,7 +169,7 @@ export function InvoicePaper({ doc }: { doc: InvoiceDocument }) {
         <tbody>
           {doc.rows.map((r, i) => (
             <tr key={i}>
-              <td>{r.description}</td>
+              <td>{pdfText(r.description)}</td>
               <td className="num">{r.unitPrice}</td>
               <td className="num">{r.quantity}</td>
               <td className="num">{r.amount}</td>
@@ -171,14 +181,14 @@ export function InvoicePaper({ doc }: { doc: InvoiceDocument }) {
         {doc.notes ? (
           <>
             <p><u>NOTES:</u></p>
-            <p className="whitespace-pre-line">{doc.notes}</p>
+            <p className="whitespace-pre-line">{pdfText(doc.notes)}</p>
             <p className="mt-3">{doc.paymentHeading}</p>
           </>
         ) : (
           <p><u>NOTES:</u> {doc.paymentHeading}</p>
         )}
         {doc.paymentLines.length ? (
-          doc.paymentLines.map((l, i) => <p key={i} className="[overflow-wrap:anywhere]">{l}</p>)
+          doc.paymentLines.map((l, i) => <p key={i} className="[overflow-wrap:anywhere]">{pdfText(l)}</p>)
         ) : (
           <p className="status is-warn is-small is-wrap">No way to pay prints yet. Add your Zelle number in Settings.</p>
         )}
@@ -192,6 +202,7 @@ export function InvoicePaper({ doc }: { doc: InvoiceDocument }) {
         ))}
       </dl>
     </article>
+    </>
   );
 }
 

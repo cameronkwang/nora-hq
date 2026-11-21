@@ -98,11 +98,14 @@ function refreshInvoice(id: string, customerId?: string | null) {
 
 /* ───────────────────────── The fast creator ───────────────────────── */
 
-/** "Make PDF": saves and finalizes in one step (number, status sent, link) and returns the done state. */
-export async function makePdfAction(input: QuickInvoiceInputT): Promise<ActionResult<{ done: InvoiceDone }>> {
+/**
+ * "Make PDF": saves and finalizes in one step (number, status sent, link) and returns the done state. `pdf` (a phone
+ * that can share files) also returns the PDF itself in the answer, so Share PDF needs no second round trip.
+ */
+export async function makePdfAction(input: QuickInvoiceInputT, opts: { pdf?: boolean } = {}): Promise<ActionResult<{ done: InvoiceDone }>> {
   const user = await requireUser();
   const o = await origin();
-  return attempt(async () => ({ done: await createAndFinalizeInvoice(input, user.email, { origin: o }) }));
+  return attempt(async () => ({ done: await createAndFinalizeInvoice(input, user.email, { origin: o, withPdf: opts?.pdf === true }) }));
 }
 
 /** "Save as draft": the same form, no number, no link. */

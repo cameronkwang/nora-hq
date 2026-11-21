@@ -1,6 +1,6 @@
 import "server-only";
 import { after } from "next/server";
-import { and, desc, eq, gt, inArray, like, ne, sql } from "drizzle-orm";
+import { and, desc, eq, gt, inArray, like, sql } from "drizzle-orm";
 import { getDb, schema } from "./db";
 import { newId } from "./ids";
 import { logActivity } from "./activity";
@@ -8,14 +8,13 @@ import { OpsError } from "./ops";
 import { today as todayNY } from "./dates";
 import { intakeBaseUrl } from "./ops-intake";
 import { personEmail, sendToAll, sendToUser } from "./notify";
-import { getInvoiceByToken, recordStripePayment } from "./ops-invoices";
+import { closeOpenCheckouts, getInvoiceByToken, recordStripePayment } from "./ops-invoices";
 import { formatCents, type StripePaymentMethod } from "./invoices-types";
 import type { IntakeLangCode } from "./intake-copy";
 import {
   CHECKOUT_SESSION_TTL_SEC,
   StripeApiError,
   createCheckoutSession,
-  expireCheckoutSession,
   getPaymentIntentFacts,
   stripeConfigured,
   verifyStripeSignature,
@@ -31,7 +30,13 @@ import {
  *   transfer or card and only while that way is on (lib/invoices-types payOptions: Stripe set up, the setting on).
  *   Refused for a void or paid invoice and while a bank payment is clearing. An open session for the same amount is
  *   reused; otherwise a new one is made (at most CHECKOUTS_PER_HOUR / CHECKOUTS_PER_DAY per invoice: one atomic
- *   counter, the drop link's pattern) and older open ones for another amount are expired at Stripe.
+ *   counter, the drop link's pattern) and older open ones for ANOTHER amount are expired at Stripe (never one for the
+ *   same amount: two presses at once must not expire the page the browser is following).
+ * - Open sessions are also closed (lib/ops-invoices closeOpenCheckouts) the moment the invoice is voided, a payment
+ *   is recorded or deleted, its total is edited, its link is replaced, a bank transfer starts on another page or a
+ *   Stripe payment is recorded: a page opened earlier can't take the money for a cancelled or paid invoice. A payment
+ *   already in flight can still land: it is recorded, logged, and Nora is pushed "Paid after it was cancelled" or
+ *   "Paid twice" so she refunds it in Stripe.
  * - handleStripeEvent (the webhook): checks the signature on the raw body (5 minute tolerance), claims the event id
  *   in ONE statement (a processed event is a no-op, a failed one is retried by Stripe), then:
  *     checkout.session.completed            paid (card) → records the payment; unpaid (bank started) → "processing"
@@ -198,20 +203,10 @@ export async function startCheckout(
     method: methods.length === 1 ? (methods[0] === "card" ? "stripe_card" : "stripe_ach") : null,
     expiresAt: session.expiresAt,
   }).onConflictDoNothing({ target: c.sessionId });
-  // Older open sessions (another amount: the balance changed) stop working, so a stale tab can't pay the old figure.
-  inBackground("expire older sessions", async () => {
-    const older = await db.select({ sessionId: c.sessionId }).from(c)
-      .where(and(eq(c.invoiceId, inv.id), eq(c.status, "open"), like(c.sessionId, "cs_%"), ne(c.sessionId, session.id)));
-    for (const o of older) {
-      try {
-        await expireCheckoutSession(o.sessionId);
-      } catch (e) {
-        console.error("[stripe] expire failed:", errName(e)); // it expires by itself within the hour anyway
-        continue;
-      }
-      await db.update(c).set({ status: "expired", updatedAt: new Date() }).where(and(eq(c.sessionId, o.sessionId), eq(c.status, "open")));
-    }
-  });
+  // Older open sessions for ANOTHER amount (the balance changed) stop working, so a stale tab can't pay the old
+  // figure. One for the same amount is left alone: it is the other press of a double tap, and the browser may be
+  // on its way to it (it is closed when the payment is recorded).
+  inBackground("expire older sessions", () => closeOpenCheckouts(inv.id, { exceptSessionId: session.id, keepAmountCents: amountCents }));
   return { url: session.url, reused: false, sessionId: session.id };
 }
 
@@ -325,6 +320,7 @@ async function processEvent(type: HandledEvent, event: StripeEventBody): Promise
   if (type === "checkout.session.completed" && s.payment_status !== "paid") {
     if (s.payment_status !== "unpaid") return "ignored"; // no_payment_required: nothing to record
     await setStatus("processing", ["open"], "stripe_ach"); // a bank transfer was started and is clearing
+    await closeOpenCheckouts(invoiceId, { exceptSessionId: sessionId }); // no second payment from another open page
     return "processing";
   }
   // Paid: completed with payment_status "paid" (card, or a bank account that cleared at once) or async succeeded.
@@ -363,7 +359,36 @@ async function processEvent(type: HandledEvent, event: StripeEventBody): Promise
     console.error(`[stripe] session ${sessionId}: its invoice is gone; nothing recorded`);
     return "ignored";
   }
+  // Money that should not have come: on a cancelled invoice, or on top of what was already paid. It is recorded (it
+  // is real), and Nora is told so she refunds it in Stripe. Once per payment (a replay records nothing).
+  if (res.recorded && (res.invoice.status === "void" || res.invoice.paidCents > res.invoice.totalCents)) {
+    await paidUnexpectedly(res.invoice, amountCents).catch((e) => console.error("[stripe] the refund notice failed:", errName(e)));
+  }
   return res.recorded ? "recorded" : "already_recorded";
+}
+
+/**
+ * A Stripe payment landed on a void invoice ("Paid after it was cancelled") or took an invoice past its total ("Paid
+ * twice"): logged without the amount, and a push to Nora that links to the invoice and says to refund it in Stripe.
+ */
+async function paidUnexpectedly(inv: schema.Invoice, amountCents: number) {
+  const db = await getDb();
+  const [c] = await db.select({ name: schema.customers.name, clientId: schema.customers.clientId }).from(schema.customers).where(eq(schema.customers.id, inv.customerId));
+  const who = c?.name ?? "a customer";
+  const cancelled = inv.status === "void";
+  const over = Math.max(0, inv.paidCents - inv.totalCents);
+  await logActivity({
+    actor: "system", action: cancelled ? "invoice.stripe_after_void" : "invoice.stripe_overpaid", entityType: "invoice", entityId: inv.id, clientId: c?.clientId ?? null,
+    summary: cancelled
+      ? `Stripe: a payment came in on invoice ${inv.number ?? ""} after it was cancelled; refund it in Stripe`
+      : `Stripe: invoice ${inv.number ?? ""} was paid twice; refund the extra in Stripe`,
+  });
+  const payload = cancelled
+    ? { title: `Paid after it was cancelled: ${who}`, body: `${formatCents(amountCents)} came in through Stripe on invoice ${inv.number ?? ""}, which is void. Refund it in Stripe.`, url: `/invoices/${inv.id}`, tag: `stripe-after-void-${inv.id}` }
+    : { title: `Paid twice: ${who}`, body: `Invoice ${inv.number ?? ""} is overpaid by ${formatCents(over)}. Refund the extra in Stripe.`, url: `/invoices/${inv.id}`, tag: `stripe-overpaid-${inv.id}` };
+  const nora = personEmail("nora");
+  if (nora) await sendToUser(nora, "payment_overdue", payload);
+  else await sendToAll("payment_overdue", payload);
 }
 
 /** A bank transfer bounced: the invoice stays owed. Logged, and Nora gets a push (no amount in the log). */

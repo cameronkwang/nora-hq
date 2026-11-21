@@ -39,7 +39,7 @@
   .inv-addr > textarea, .inv-addr > .hint { justify-self: stretch; }
   .inv-addr textarea.input { min-height: 0; }
   .inv-same { gap: 4px; text-decoration-style: solid; }
-  .inv-same[disabled] { color: var(--muted); cursor: default; }
+  .inv-same[aria-busy="true"] { color: var(--muted); }   /* still loading: a tap is kept and applied when it arrives */
   .inv-pair { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; justify-self: stretch; }
   @media (max-width: 479px) { .inv-pair { grid-template-columns: minmax(0, 1fr); } }
 

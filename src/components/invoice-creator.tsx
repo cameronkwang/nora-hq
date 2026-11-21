@@ -1,17 +1,18 @@
 "use client";
 
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import {
   PAY_WAYS,
   PAY_WAY_LABEL,
+  PDF_LETTERS,
   SETUP_PREFILL,
   addDaysYmd,
-  availablePayWays,
   centsToDollarsInput,
   checkPayWays,
   creatorDefaultsLine,
   customerNameKey,
+  daysBetween,
   filterBillTo,
   formatCents,
   invoiceTotals,
@@ -20,9 +21,12 @@ import {
   lineFromSavedItem,
   oneLineAddress,
   parseDollars,
+  pdfPrintsEmpty,
+  pdfUnprintable,
   readyItems,
   sortPayWays,
   type BillToOption,
+  type CreatorEdit,
   type CreatorLine,
   type InvoiceCreatorContext,
   type InvoiceDone,
@@ -33,9 +37,10 @@ import {
   type SavedItem,
 } from "@/lib/invoices-types";
 import type { IntakeLang } from "@/lib/schema";
+import { today as todayNY } from "@/lib/dates";
 import { lastInvoiceAction, makePdfAction, saveDraftAction, setNextNumberAction, updateInvoiceAction } from "@/app/(app)/invoices/actions";
 import type { QuickInvoiceInputT } from "@/lib/ops-invoices";
-import { InvoiceDoneView } from "./invoice-done";
+import { InvoiceDoneView, canShareFiles } from "./invoice-done";
 import { Status, buttonClass, cx } from "./ui";
 
 /**
@@ -54,7 +59,16 @@ type Panel = null | "due" | "pay" | "number";
 type ErrField = "billTo" | "lines" | "pay" | "setup" | "zelle" | "due" | "discount" | "form";
 type Err = { field: ErrField; message: string; lineKey?: number };
 
-export type CreatorEdit = { id: string; number: string | null; customerName: string; customerAddress: string | null };
+export type { CreatorEdit };
+
+/** One id per form as it was sent: pressing Make PDF again with the same form returns the invoice the first press made. */
+function newRequestId(): string {
+  try {
+    return crypto.randomUUID();
+  } catch {
+    return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}-${Math.random().toString(36).slice(2, 12)}`;
+  }
+}
 
 let seq = 1;
 const nextKey = () => seq++;
@@ -132,7 +146,10 @@ export function InvoiceCreator({ ctx, edit, initialDone }: { ctx: InvoiceCreator
   const [email, setEmail] = useState(p.newCustomer?.email ?? "");
   const [listOpen, setListOpen] = useState(false);
   const [active, setActive] = useState(0);
-  const [last, setLast] = useState<LastInvoice | null | "loading">(p.last ?? null);
+  // A picked customer's last invoice when it didn't come with the page (see `last` below), keyed by the option.
+  const [fetched, setFetched] = useState<{ key: string; value: LastInvoice | null } | null>(null);
+  /** She tapped Same as last time while it was still loading: it is applied the moment it arrives. */
+  const wantLast = useRef(false);
 
   /* Lines */
   const [lines, setLines] = useState<Line[]>(() => p.lines.map(toLine));
@@ -140,8 +157,15 @@ export function InvoiceCreator({ ctx, edit, initialDone }: { ctx: InvoiceCreator
   const [newAmount, setNewAmount] = useState("");
 
   /* Defaults and More */
-  const [issueDate, setIssueDate] = useState(p.issueDate);
-  const [dueDate, setDueDate] = useState(p.dueDate);
+  const [issueDateSet, setIssueDate] = useState(p.issueDate);
+  const [dueDateSet, setDueDate] = useState(p.dueDate);
+  // The day this form was started, and whether she set a date herself. A creator left open past midnight (or for
+  // days) still dates the invoice the day it is MADE: untouched default dates follow today (in the app's timezone).
+  const [formDay, setFormDay] = useState(ctx.today);
+  const [datesTouched, setDatesTouched] = useState(false);
+  const [nowDay, setNowDay] = useState(ctx.today);
+  /** Days until due picked with the Due chips while the dates still follow today (null: the prefill's). */
+  const [terms, setTerms] = useState<number | null>(null);
   const [payWays, setPayWays] = useState<PayWay[]>(sortPayWays(p.payWays));
   const [payNote, setPayNote] = useState(p.payNote ?? "");
   const [panel, setPanel] = useState<Panel>(null);
@@ -207,25 +231,65 @@ export function InvoiceCreator({ ctx, edit, initialDone }: { ctx: InvoiceCreator
     if (done) doneHeading.current?.focus();
   }, [done]);
 
-  // A customer with past invoices: fetch their last one as soon as they're picked, so "Same as last time" is instant.
-  // (A prefilled customer's last invoice comes with the page: no round trip.)
+  // "Same as last time": the picked customer's last invoice. It comes with the page for a prefilled customer and for
+  // the most recently billed ones (no round trip); for anyone else it is fetched the moment they are picked.
+  const last: LastInvoice | null | "loading" =
+    !picked?.customerId || !picked.hasLast || edit
+      ? null
+      : p.last !== undefined && p.billTo?.key === picked.key
+        ? p.last
+        : picked.last !== undefined
+          ? picked.last
+          : fetched?.key === picked.key
+            ? fetched.value
+            : "loading";
+  const applyLastRef = useRef<(l: LastInvoice) => void>(() => {});
   useEffect(() => {
-    if (!picked?.customerId || !picked.hasPastInvoices || edit) {
-      setLast(null);
-      return;
-    }
-    if (p.last !== undefined && p.billTo?.key === picked.key) {
-      setLast(p.last);
-      return;
-    }
+    wantLast.current = false;
+    if (!picked?.customerId || !picked.hasLast || edit) return;
+    if ((p.last !== undefined && p.billTo?.key === picked.key) || picked.last !== undefined) return;
     let live = true;
-    setLast("loading");
-    lastInvoiceAction(picked.customerId).then((r) => live && setLast(r)).catch(() => live && setLast(null));
+    const key = picked.key;
+    lastInvoiceAction(picked.customerId)
+      .then((r) => {
+        if (!live) return;
+        setFetched({ key, value: r });
+        if (r && wantLast.current) applyLastRef.current(r);
+        // Nothing to repeat after all: the button is gone, so the first saved line is next.
+        else if (!r) requestAnimationFrame(() => (!document.activeElement || document.activeElement === document.body) && firstChipRef.current?.focus());
+        wantLast.current = false;
+      })
+      .catch(() => live && setFetched({ key, value: null }));
     return () => {
       live = false;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [picked, edit]);
+
+  // Today, as the app's timezone has it: checked when the tab comes back and again when Make PDF is pressed.
+  useEffect(() => {
+    const tick = () => setNowDay(todayNY());
+    tick();
+    window.addEventListener("focus", tick);
+    document.addEventListener("visibilitychange", tick);
+    return () => {
+      window.removeEventListener("focus", tick);
+      document.removeEventListener("visibilitychange", tick);
+    };
+  }, []);
+  // The dates follow today while she hasn't set one herself and the form started on its default date (not an edit,
+  // not a draft that carries its own date).
+  const datesFollowToday = !edit && !datesTouched && p.issueDate === formDay && isYmd(p.issueDate) && isYmd(p.dueDate);
+  /** The dates the invoice will carry if it is made on `day`: hers once she set one, else the defaults as of that day. */
+  const datesOn = (day: string) => {
+    if (!datesFollowToday) return { issue: issueDateSet, due: dueDateSet };
+    const issue = day > formDay ? day : formDay;
+    const days = terms ?? Math.max(0, daysBetween(p.issueDate, p.dueDate));
+    // A deal's agreed due date is a date, not a number of days: it stays (never before the invoice date).
+    const fixedDue = terms == null && p.source === "deal" && days > 0;
+    return { issue, due: fixedDue ? (p.dueDate >= issue ? p.dueDate : issue) : addDaysYmd(issue, days) };
+  };
+  const { issue: issueDate, due: dueDate } = datesOn(nowDay);
 
   /* ───────── derived ───────── */
 
@@ -235,7 +299,9 @@ export function InvoiceCreator({ ctx, edit, initialDone }: { ctx: InvoiceCreator
   const offerNew = listOpen && !!who.trim() && !exact;
   const optionCount = options.length + (offerNew ? 1 : 0);
 
-  const items = looseItems(lines);
+  // The same lines Make PDF will send: a custom line typed but not added yet counts too.
+  const pendingLine: Line | null = newDesc.trim() || newAmount.trim() ? { key: -1, description: newDesc, quantity: "1", amount: newAmount, savedItemId: null } : null;
+  const items = looseItems(pendingLine ? [...lines, pendingLine] : lines);
   const subtotal = invoiceTotals(items).subtotalCents;
   let discountCents = 0;
   let discountError = "";
@@ -250,6 +316,14 @@ export function InvoiceCreator({ ctx, edit, initialDone }: { ctx: InvoiceCreator
     discountError = e instanceof Error ? e.message : "Check the discount.";
   }
   const totals = invoiceTotals(items, discountCents);
+
+  // What the PDF can't print (it has English letters only): said under the field before Make PDF, never found out after.
+  const billName = edit ? "" : (picked ?? (!isNew ? exact : null))?.name ?? who;
+  const nameEmpty = !edit && pdfPrintsEmpty(billName);
+  const nameLeftOut = edit ? "" : pdfUnprintable(billName);
+  const lineTexts = [...lines.map((l) => l.description), newDesc];
+  const linesLeftOut = pdfUnprintable(lineTexts.join(" "));
+  const notesLeftOut = pdfUnprintable(notes);
 
   const setupMissing = edit ? [] : ctx.setupMissing;
   const zelleTyped = setupMissing.includes("zelle") && !!setup.zelle.trim();
@@ -267,7 +341,7 @@ export function InvoiceCreator({ ctx, edit, initialDone }: { ctx: InvoiceCreator
     setListOpen(false);
     if (err?.field === "billTo") setErr(null);
     // Next: "Same as last time" if they have past invoices, else the first saved line.
-    requestAnimationFrame(() => (o.hasPastInvoices && o.customerId ? sameRef.current : firstChipRef.current)?.focus());
+    requestAnimationFrame(() => ((o.hasLast && o.customerId && o.last !== null ? sameRef.current : null) ?? firstChipRef.current)?.focus());
   }
 
   function pickNew() {
@@ -305,22 +379,28 @@ export function InvoiceCreator({ ctx, edit, initialDone }: { ctx: InvoiceCreator
     if (item.unitCents == null) setFocusKey(l.key);
   }
 
-  function applyLast() {
-    if (!last || last === "loading") return;
-    const ls = last.lines.map(toLine);
+  function applyLast(given?: LastInvoice) {
+    const from = given ?? last;
+    if (from === "loading") {
+      wantLast.current = true; // applied the moment it arrives (the tap is never lost)
+      return;
+    }
+    if (!from) return;
+    const ls = from.lines.map(toLine);
     setLines(ls);
-    setPayWays(sortPayWays(last.payWays));
-    setPayNote(last.payNote ?? "");
-    if (last.notes) setNotes(last.notes);
-    if (last.discountCents > 0) {
+    setPayWays(sortPayWays(from.payWays));
+    setPayNote(from.payNote ?? "");
+    if (from.notes) setNotes(from.notes);
+    if (from.discountCents > 0) {
       setDiscountMode("$");
-      setDiscount(centsToDollarsInput(last.discountCents));
-      setDiscountLabel(last.discountLabel ?? "");
+      setDiscount(centsToDollarsInput(from.discountCents));
+      setDiscountLabel(from.discountLabel ?? "");
     }
     const empty = ls.find((l) => !l.amount.trim());
     if (empty) setFocusKey(empty.key);
     else requestAnimationFrame(() => makeRef.current?.focus());
   }
+  applyLastRef.current = applyLast;
 
   const patchLine = (key: number, patch: Partial<Line>) => setLines((ls) => ls.map((l) => (l.key === key ? { ...l, ...patch } : l)));
   const removeLine = (key: number) => setLines((ls) => ls.filter((l) => l.key !== key));
@@ -379,7 +459,7 @@ export function InvoiceCreator({ ctx, edit, initialDone }: { ctx: InvoiceCreator
 
   /* ───────── Submit ───────── */
 
-  function build(): QuickInvoiceInputT | null {
+  function build(forPdf: boolean): QuickInvoiceInputT | null {
     setErr(null);
     // Who
     let billTo: QuickInvoiceInputT["billTo"] | null = null;
@@ -387,13 +467,20 @@ export function InvoiceCreator({ ctx, edit, initialDone }: { ctx: InvoiceCreator
     const target = picked ?? (!isNew ? exact : null);
     if (edit) billTo = { kind: "customer", id: "edit" };
     else if (target) {
-      const changed = addr && addr !== (target.address ?? "").trim() ? addr : null;
-      billTo = { kind: target.kind, id: target.id, address: changed };
+      // Always what the address box shows: an address that came from the business's public facts is printed and saved
+      // on the customer (the server writes it only when it differs from the one they already have).
+      billTo = { kind: target.kind, id: target.id, address: addr };
     } else if (who.trim()) {
       billTo = { kind: "new", name: who.trim(), address: addr, contactName: contactName.trim() || null, email: email.trim() || null, lang: lang || null };
     }
     if (!billTo) {
       setErr({ field: "billTo", message: "Who is this invoice for?" });
+      whoRef.current?.focus();
+      return null;
+    }
+    // A name the PDF would print empty (Chinese only) is stopped here, not printed as "Customer".
+    if (forPdf && nameEmpty) {
+      setErr({ field: "billTo", message: target ? PDF_LETTERS.customer(target.name) : PDF_LETTERS.name });
       whoRef.current?.focus();
       return null;
     }
@@ -423,11 +510,20 @@ export function InvoiceCreator({ ctx, edit, initialDone }: { ctx: InvoiceCreator
       else if (!lines.length) firstChipRef.current?.focus();
       return null;
     }
+    if (forPdf || edit) {
+      const blank = ready.items.find((i) => pdfPrintsEmpty(i.description));
+      if (blank) {
+        const at = lines.find((l) => l.description.trim() === blank.description);
+        setErr({ field: "lines", message: PDF_LETTERS.line(blank.description), lineKey: at?.key });
+        return null;
+      }
+    }
     if (discountError) {
       setErr({ field: "discount", message: discountError });
       return null;
     }
-    // Dates
+    // Dates: as of this moment (the screen may have been open since yesterday).
+    const { issue: issueDate, due: dueDate } = datesOn(todayNY());
     if (!isYmd(issueDate) || !isYmd(dueDate)) {
       setErr({ field: "due", message: "Pick the invoice date and the due date." });
       setPanel("due");
@@ -477,14 +573,21 @@ export function InvoiceCreator({ ctx, edit, initialDone }: { ctx: InvoiceCreator
     };
   }
 
+  // The id Make PDF sends with the form: the same form sent again (after "Couldn't reach Nora HQ") gets the same id,
+  // so the server returns the invoice the first press made; a form she changed since gets a new one.
+  const request = useRef<{ form: string; id: string } | null>(null);
+
   async function makePdf() {
     if (busy) return;
-    const input = build();
+    const input = build(true);
     if (!input) return;
     if (edit) return saveEdit(input);
     setBusy("pdf");
+    const form = JSON.stringify(input);
+    if (request.current?.form !== form) request.current = { form, id: newRequestId() };
     const t0 = performance.now();
-    const r = await makePdfAction(input).catch(() => ({ ok: false as const, error: "Couldn't reach Nora HQ. Check the connection and try again." }));
+    // A phone that can share files gets the PDF back with the answer: Share PDF is ready with no second round trip.
+    const r = await makePdfAction({ ...input, requestId: request.current.id }, { pdf: canShareFiles() }).catch(() => ({ ok: false as const, error: "Couldn't reach Nora HQ. Check the connection and try again." }));
     try {
       performance.measure("invoice:make-pdf", { start: t0, end: performance.now() });
     } catch {
@@ -495,19 +598,27 @@ export function InvoiceCreator({ ctx, edit, initialDone }: { ctx: InvoiceCreator
       setErr({ field: "form", message: r.error });
       return;
     }
+    request.current = null;
     setDone(r.done);
-    // A reload (or the live refresh) shows the same done state; "New invoice" starts again.
-    try {
-      window.history.replaceState(null, "", `/invoices/new?done=${encodeURIComponent(r.done.id)}`);
-    } catch {
-      /* the done state still shows */
-    }
+    // A reload shows the same done state; "New invoice" starts again. The address keeps what it had and gains ?done=,
+    // so the page's key stays the same and the live refresh never remounts this screen (Share stays ready, the message
+    // language stays chosen). Deferred a tick: changing the address while the action is settling makes Next refresh.
+    const doneId = r.done.id;
+    window.setTimeout(() => {
+      try {
+        const u = new URL(window.location.href);
+        u.searchParams.set("done", doneId);
+        window.history.replaceState(null, "", `${u.pathname}${u.search}`);
+      } catch {
+        /* the done state still shows */
+      }
+    }, 0);
     window.scrollTo({ top: 0 });
   }
 
   async function saveDraft() {
     if (busy || edit) return;
-    const input = build();
+    const input = build(false);
     if (!input) return;
     setBusy("draft");
     const r = await saveDraftAction(input).catch(() => ({ ok: false as const, error: "Couldn't reach Nora HQ. Try again." }));
@@ -534,8 +645,16 @@ export function InvoiceCreator({ ctx, edit, initialDone }: { ctx: InvoiceCreator
     router.push(`/invoices/${encodeURIComponent(edit.id)}?saved=edit`);
   }
 
-  function startNew() {
-    const blank = blankPrefill(ctx);
+  /** A blank form again (after the done state). */
+  function resetForm() {
+    // Today as it is NOW: the done state may have been open since last week.
+    const day = todayNY();
+    const blank = blankPrefill({ ...ctx, today: day });
+    setFormDay(day);
+    setNowDay(day);
+    setDatesTouched(false);
+    setTerms(null);
+    request.current = null;
     setDone(null);
     setPrefill(blank);
     setWho("");
@@ -559,9 +678,25 @@ export function InvoiceCreator({ ctx, edit, initialDone }: { ctx: InvoiceCreator
     setPrivateNotes("");
     setLang("");
     setErr(null);
+  }
+
+  function startNew() {
+    resetForm();
     // Fresh numbers, Bill to list and settings from the server (the page is dynamic).
     router.replace("/invoices/new");
   }
+
+  // The done state lives at …?done=<id>. When she leaves it for a plain New invoice (the sidebar, the list's button),
+  // the page keeps this screen mounted (the same key), so the form starts again here.
+  const urlDone = useSearchParams().get("done");
+  const hadUrlDone = useRef(!!urlDone);
+  const resetRef = useRef(resetForm);
+  resetRef.current = resetForm;
+  useEffect(() => {
+    if (hadUrlDone.current && !urlDone && done) resetRef.current();
+    hadUrlDone.current = !!urlDone;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [urlDone]);
 
   // Cmd/Ctrl+Enter makes the PDF from anywhere on the screen (not only from inside a field).
   const makeFn = useRef(makePdf);
@@ -667,6 +802,9 @@ export function InvoiceCreator({ ctx, edit, initialDone }: { ctx: InvoiceCreator
               )}
             </div>
             {errFor("billTo") && <p id={`${uid}-who-err`} role="alert" className="inv-err"><Status tone="danger" small className="is-wrap">{errFor("billTo")}</Status></p>}
+            {!errFor("billTo") && nameLeftOut && (
+              <p className="inv-err"><Status tone="warn" small className="is-wrap">{nameEmpty ? PDF_LETTERS.name : PDF_LETTERS.leftOut(nameLeftOut)}</Status></p>
+            )}
 
             {(picked || isNew) && (
               <div className="inv-addr">
@@ -701,10 +839,10 @@ export function InvoiceCreator({ ctx, edit, initialDone }: { ctx: InvoiceCreator
                     </div>
                   </div>
                 )}
-                {picked?.hasPastInvoices && picked.customerId && (
-                  <button ref={sameRef} type="button" className="inv-quiet inv-same" onClick={applyLast} disabled={last === "loading" || !last}>
+                {last && (
+                  <button ref={sameRef} type="button" className="inv-quiet inv-same" aria-busy={last === "loading" || undefined} onClick={() => applyLast()}>
                     {last === "loading" ? "Same as last time…" : "Same as last time"}
-                    {last && last !== "loading" && last.number && <span className="meta"> ({last.number})</span>}
+                    {last !== "loading" && last.number && <span className="meta"> ({last.number})</span>}
                   </button>
                 )}
               </div>
@@ -835,6 +973,7 @@ export function InvoiceCreator({ ctx, edit, initialDone }: { ctx: InvoiceCreator
             </button>
           </div>
           {errFor("lines") && <p role="alert" className="inv-err"><Status tone="danger" small className="is-wrap">{errFor("lines")}</Status></p>}
+          {!errFor("lines") && linesLeftOut && <p className="inv-err"><Status tone="warn" small className="is-wrap">{PDF_LETTERS.leftOut(linesLeftOut)}</Status></p>}
 
           <dl className="inv-sum" aria-live="polite">
             {totals.discountCents > 0 && (
@@ -876,18 +1015,28 @@ export function InvoiceCreator({ ctx, edit, initialDone }: { ctx: InvoiceCreator
               <input id={`${uid}-issue`} type="date" className="input" value={issueDate} onChange={(e) => {
                 const v = e.target.value;
                 // Due on receipt follows the invoice date.
-                if (dueDate <= issueDate) setDueDate(v);
+                setDueDate(dueDate <= issueDate ? v : dueDate);
                 setIssueDate(v);
+                setDatesTouched(true);
               }} />
             </div>
             <div>
               <label htmlFor={`${uid}-due`} className="label">Due date</label>
-              <input id={`${uid}-due`} type="date" className="input" min={issueDate} value={dueDate} onChange={(e) => setDueDate(e.target.value)} />
+              <input id={`${uid}-due`} type="date" className="input" min={issueDate} value={dueDate} onChange={(e) => {
+                setIssueDate(issueDate);
+                setDueDate(e.target.value);
+                setDatesTouched(true);
+              }} />
             </div>
           </div>
           <div className="chips mt-3" role="group" aria-label="Due">
             {[0, 7, 15, 30].map((d) => (
-              <button key={d} type="button" className="chip" aria-pressed={isYmd(issueDate) && dueDate === addDaysYmd(issueDate, d)} onClick={() => isYmd(issueDate) && setDueDate(addDaysYmd(issueDate, d))}>
+              <button key={d} type="button" className="chip" aria-pressed={isYmd(issueDate) && dueDate === addDaysYmd(issueDate, d)} onClick={() => {
+                if (!isYmd(issueDate)) return;
+                // Days from the invoice date, which still follows today until she picks a date herself.
+                if (datesFollowToday) setTerms(d);
+                else setDueDate(addDaysYmd(issueDate, d));
+              }}>
                 <span>{d === 0 ? "Due on receipt" : `${d} days`}</span>
               </button>
             ))}
@@ -963,6 +1112,7 @@ export function InvoiceCreator({ ctx, edit, initialDone }: { ctx: InvoiceCreator
           <div>
             <label htmlFor={`${uid}-notes`} className="label">Notes <span className="font-normal text-muted">(printed after NOTES:)</span></label>
             <textarea id={`${uid}-notes`} className="input" rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} maxLength={2000} />
+            {notesLeftOut && <p className="inv-err"><Status tone="warn" small className="is-wrap">{PDF_LETTERS.leftOut(notesLeftOut)}</Status></p>}
           </div>
           <div>
             <label htmlFor={`${uid}-lang`} className="label">Language <span className="font-normal text-muted">(the message and their page; the PDF is English)</span></label>

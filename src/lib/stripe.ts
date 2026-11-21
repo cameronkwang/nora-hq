@@ -10,6 +10,8 @@ import { createHmac, timingSafeEqual } from "node:crypto";
  * Without STRIPE_SECRET_KEY, invoices simply show no "Pay online" (Zelle and check still work). See docs/invoicing.md
  * and docs/stripe-setup.md. Pay online is offered only on invoices whose ways include "bank" (bank transfer, the
  * online option) or "card" (off unless turned on in Settings). Never a surcharge or fee added for either.
+ * Bank transfers use instant verification only (payment_method_options.us_bank_account.verification_method "instant",
+ * one of "automatic" | "instant" in Stripe's published API spec), so a started transfer is always a real debit.
  *
  * Bank reuse (docs/stripe-setup.md "Saved bank accounts"): researched and NOT used. Stripe's hosted Checkout only
  * prefills a returning customer's saved CARD, so a saved bank account would not skip the bank login, and Stripe's
@@ -125,6 +127,11 @@ export async function createCheckoutSession(input: CreateCheckoutInput): Promise
     mode: "payment",
     submit_type: "pay",
     payment_method_types: methods,
+    // Bank transfer: instant verification ONLY (the customer signs in to their bank). Stripe's default, "automatic",
+    // falls back to typing the account by hand and confirming two small deposits a day or two later; Checkout then
+    // completes before any money moves, and the invoice would say "a bank payment is on its way" for up to 10 days
+    // with nothing debited. A customer whose bank can't be verified instantly pays by Zelle (the default anyway).
+    payment_method_options: methods.includes("us_bank_account") ? { us_bank_account: { verification_method: "instant" } } : undefined,
     line_items: [{ quantity: 1, price_data: { currency: "usd", unit_amount: input.amountCents, product_data: { name } } }],
     client_reference_id: input.invoiceId,
     metadata: { invoice_id: input.invoiceId },
@@ -146,7 +153,7 @@ export async function createCheckoutSession(input: CreateCheckoutInput): Promise
   return { id: s.id, url: s.url, expiresAt: s.expires_at ? new Date(s.expires_at * 1000) : expiresAt, customerId: cust };
 }
 
-/** POST /v1/checkout/sessions/<id>/expire: an older open session for a different amount stops working. */
+/** POST /v1/checkout/sessions/<id>/expire: an open session stops working (Stripe then shows the customer "expired"). */
 export async function expireCheckoutSession(sessionId: string): Promise<void> {
   if (!/^cs_[A-Za-z0-9_]{6,200}$/.test(sessionId)) return;
   await stripeRequest("POST", `/checkout/sessions/${encodeURIComponent(sessionId)}/expire`, { form: new URLSearchParams() });

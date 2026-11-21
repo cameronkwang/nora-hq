@@ -691,6 +691,76 @@ function luhn(digits: string): boolean {
 /* ───────────────────────── The PDF (and the invoice page's preview) ───────────────────────── */
 
 /**
+ * The PDF is drawn in Helvetica, which holds the Western European letters only (the "WinAnsi" set: ASCII, the accented
+ * Latin-1 letters and a few signs). These helpers are the ONE rule for what it can print, shared by lib/invoice-pdf
+ * (what is drawn), the creator (the warning before Make PDF), the invoice page's preview and the ops (Make PDF is
+ * refused when a name or a line would print empty). scripts/test-invoice-review.ts checks the rule against the real
+ * font for every character.
+ */
+const WINANSI_EXTRA = new Set([
+  0x152, 0x153, 0x160, 0x161, 0x178, 0x17d, 0x17e, 0x192, 0x2c6, 0x2dc, 0x2013, 0x2014, 0x2018, 0x2019, 0x201a, 0x201c, 0x201d, 0x201e,
+  0x2020, 0x2021, 0x2022, 0x2026, 0x2030, 0x2039, 0x203a, 0x20ac, 0x2122,
+]);
+const inWinAnsi = (cp: number) => (cp >= 0x20 && cp <= 0x7e) || (cp >= 0xa0 && cp <= 0xff) || WINANSI_EXTRA.has(cp);
+/** Typographic characters drawn as their plain form (as the PDF always has), and two letters with no accent to strip. */
+const PDF_REPLACE: Record<string, string> = {
+  "‘": "'", "’": "'", "“": '"', "”": '"', // curly quotes
+  "–": "-", "—": "-", "…": "...", " ": " ", // en and em dash, ellipsis, no-break space
+  "đ": "d", "Đ": "D", // d with stroke (Vietnamese)
+};
+
+/** One character as the PDF draws it: itself, its plain form, its letter without an accent Helvetica lacks ("ở" → "o"), or null. */
+function pdfChar(ch: string): string | null {
+  const mapped = PDF_REPLACE[ch];
+  if (mapped != null) return mapped;
+  if (inWinAnsi(ch.codePointAt(0)!)) return ch;
+  const parts = [...ch.normalize("NFD")];
+  if (parts.length > 1 && inWinAnsi(parts[0].codePointAt(0)!) && parts.slice(1).every((m) => /\p{M}/u.test(m))) return parts[0];
+  return null;
+}
+
+/**
+ * Text as the PDF prints it: what Helvetica can't draw (Chinese, emoji) is left out, curly quotes and dashes become
+ * plain ones, runs of spaces become one. Line breaks are kept. "SAMPLE Bakery 小点心" → "SAMPLE Bakery".
+ */
+export function pdfText(text: string | null | undefined): string {
+  let out = "";
+  for (const ch of (text ?? "").normalize("NFC")) {
+    if (ch === "\n") out += "\n";
+    else if (/\s/u.test(ch)) out += " ";
+    else out += pdfChar(ch) ?? "";
+  }
+  return out.replace(/ {2,}/g, " ").replace(/ *\n */g, "\n").trim();
+}
+
+/** The characters the PDF will leave out, each once, in order ("小点心"); "" when everything prints. */
+export function pdfUnprintable(text: string | null | undefined): string {
+  let out = "";
+  for (const ch of (text ?? "").normalize("NFC")) {
+    if (/[\s\p{C}\p{M}]/u.test(ch) || pdfChar(ch) != null || out.includes(ch)) continue;
+    out += ch;
+  }
+  return out;
+}
+
+/** True when a name or a line has text but none of it would print (Chinese only): Make PDF asks for the English first. */
+export function pdfPrintsEmpty(text: string | null | undefined): boolean {
+  return /[\p{L}\p{N}]/u.test(text ?? "") && !/[\p{L}\p{N}]/u.test(pdfText(text));
+}
+
+/** The words shown when the PDF can't print something, in one place so the creator and the ops say the same. */
+export const PDF_LETTERS = {
+  /** A new customer typed in Bill to. */
+  name: "The PDF prints English letters only. Add the name in English for the PDF (you can keep both).",
+  /** A customer who exists: their name is changed on their page. */
+  customer: (name: string) => `The PDF prints English letters only. Add ${name}'s name in English on their customer page first (you can keep both).`,
+  line: (description: string) => `The PDF prints English letters only. Add English to the line "${description}" (you can keep both).`,
+  leftOut: (chars: string) => `The PDF prints English letters only: ${chars} will be left out.`,
+  /** On an invoice that is already made (above its preview). */
+  isLeftOut: (chars: string) => `The PDF prints English letters only: ${chars} is left out of it.`,
+} as const;
+
+/**
  * Everything the PDF prints, already worded and formatted, so lib/invoice-pdf only draws and the team's invoice page
  * can show the same thing. Her Skynova layout and wording, in the clean Ink style (hairlines, no blue header bar),
  * without Skynova's "Item: Service" column:
@@ -796,8 +866,17 @@ export type BillToOption = {
   lang: IntakeLang | null;
   /** The customer this already is (a client or deal whose customer exists is listed once, as the customer). */
   customerId: string | null;
-  /** Offers "Same as last time". */
+  /** The managed business this is (a "client" option) or belongs to (its customer); null otherwise. */
+  clientId: string | null;
+  /** They have an invoice that isn't void (the list says "Customer", not "Customer, no invoices yet"). */
   hasPastInvoices: boolean;
+  /** Offers "Same as last time": an invoice she MADE for them (sent, not a draft, not an import). */
+  hasLast: boolean;
+  /**
+   * That invoice's lines, sent with the page for the most recently billed customers so the button works the moment
+   * she picks them. undefined = not sent (fetched when they are picked); null = none.
+   */
+  last?: LastInvoice | null;
 };
 
 /** The creator's typeahead: words of the query match the start of words in the name (or anywhere for CJK). */
@@ -918,7 +997,15 @@ export type InvoiceDone = {
   payWays: PayWay[];
   contractId: string | null;
   nextSteps: NextStep[];
+  /**
+   * The PDF itself (base64), only on the answer to "Make PDF" from a phone that can share files: Share PDF is then
+   * ready at once, with no second round trip. Absent on a reload of the done state (the PDF is fetched instead).
+   */
+  pdfBase64?: string | null;
 };
+
+/** What the creator shows of the invoice being edited (/invoices/new?edit=<id>: a finalized, unpaid invoice). */
+export type CreatorEdit = { id: string; number: string | null; customerName: string; customerAddress: string | null };
 
 /** The done state's buttons, in order. Share needs Web Share with files (phones); Copy pay link needs an online way. */
 export type DoneAction = "share_pdf" | "download_pdf" | "copy_message" | "copy_pay_link";
@@ -990,6 +1077,11 @@ const intField = (s: string | null | undefined, fallback: number) => {
   const n = Math.round(Number(String(s ?? "").replace(/[$,\s%]/g, "")));
   return Number.isFinite(n) && n > 0 ? n : fallback;
 };
+
+/** "Pay within (days)" on a contract (15 when empty), as its invoices' terms. */
+export function contractPaymentDays(f: Pick<ContractFields, "paymentDays">): number {
+  return Math.min(intField(f.paymentDays, 15), MAX_TERMS_DAYS);
+}
 
 /** The monthly line ("Social media services (December 2026)") and the retainer's description. */
 export const MONTHLY_SERVICE_LINE = "Social media services";
@@ -1075,12 +1167,13 @@ export function contractFieldsFromInvoice(
 /**
  * A contract's one-tap next steps (Past contracts rows, the customer and deal pages): "Make invoice" (or "Make
  * deposit invoice") when nothing is invoiced, "Invoice the rest" after a deposit, "Invoice this month" and "Set up
- * monthly invoices" for a monthly contract without a retainer. Nothing for a gifted (no fee) contract.
+ * monthly invoices" for a monthly contract without a retainer. Nothing for a gifted (no fee) contract, and no
+ * "Invoice this month" once the contract's monthly invoices already took this month.
  */
 export function contractNextSteps(
   c: { id: string; kind: ContractKind; fields: ContractFields },
   invoices: readonly ContractInvoiceRef[],
-  opts: { hasRetainer: boolean; savedItems?: readonly SavedItem[]; today: string },
+  opts: { hasRetainer: boolean; savedItems?: readonly SavedItem[]; today: string; retainerMonth?: string | null },
 ): NextStep[] {
   const href = (part?: string) => `/invoices/new?contract=${encodeURIComponent(c.id)}${part ? `&part=${part}` : ""}`;
   const live = invoices.filter((i) => i.status !== "void");
@@ -1088,7 +1181,9 @@ export function contractNextSteps(
     if (contractFeeCents(c.fields.fee) <= 0) return [];
     const out: NextStep[] = [];
     if (!opts.hasRetainer) out.push({ kind: "monthly_invoices", label: "Set up monthly invoices", contractId: c.id });
-    if (!live.length) out.push({ kind: "make_invoice", label: "Invoice this month", href: href() });
+    // Once its monthly invoices took this month (retainerMonth = the retainer's lastRunMonth), this month is not offered again.
+    const monthTaken = opts.hasRetainer && !!opts.retainerMonth && opts.retainerMonth >= opts.today.slice(0, 7);
+    if (!live.length && !monthTaken) out.push({ kind: "make_invoice", label: "Invoice this month", href: href() });
     return out;
   }
   const invoicedCents = live.reduce((s, i) => s + i.mainLineCents, 0);

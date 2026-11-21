@@ -124,6 +124,7 @@ async function pure() {
   assert.equal(b.get("line_items[0][price_data][unit_amount]"), "62510");
   assert.equal(b.get("line_items[0][price_data][currency]"), "usd");
   assert.equal(b.has("line_items[1][quantity]"), false, "ONE line: never a surcharge or fee line");
+  assert.equal(b.get("payment_method_options[us_bank_account][verification_method]"), "instant", "bank: instant verification only (a started transfer is a real debit)");
   assert.equal(b.get("metadata[invoice_id]"), "inv_1");
   assert.equal(b.get("payment_intent_data[metadata][invoice_id]"), "inv_1");
   assert.equal(b.get("client_reference_id"), "inv_1");
@@ -268,7 +269,11 @@ async function ops() {
   const after = await inv.getInvoiceByToken(tok);
   assert.equal(after.state, "open");
   const owed = after.state === "open" ? after.invoice.balanceCents : 0;
-  const s3 = third.sessionId;
+  // The $1 recorded above closed the page opened before it (its amount was stale): the customer opens a new one.
+  assert.equal((await db.select().from(schema.invoiceCheckouts).where(eq(schema.invoiceCheckouts.sessionId, third.sessionId)))[0].status, "expired", "a recorded payment closes the page opened for the old balance");
+  const live = await st.startCheckout(tok, { origin: "https://hq.example.test" });
+  assert.equal(lastSession().get("line_items[0][price_data][unit_amount]"), String(owed));
+  const s3 = live.sessionId;
   const sess = (extra: Record<string, unknown> = {}) => ({ id: s3, client_reference_id: bank.id, metadata: { invoice_id: bank.id }, amount_total: owed, payment_intent: "pi_mock_bank0001", payment_method_types: ["us_bank_account"], ...extra });
 
   assert.equal((await deliver("checkout.session.completed", sess({ payment_status: "unpaid" }), { secret: "whsec_wrong" }).res).status, 400, "bad signature: 400");
@@ -284,7 +289,7 @@ async function ops() {
   const started = await deliver("checkout.session.completed", sess({ payment_status: "unpaid" })).res;
   assert.deepEqual([started.status, started.body.outcome], [200, "processing"]);
   const clearing = await inv.getInvoiceByToken(tok);
-  assert.equal(clearing.state === "open" && clearing.invoice.processing[0]?.amountCents, bank.balanceCents - 10000, "the page shows the bank payment on its way (the session's amount)");
+  assert.equal(clearing.state === "open" && clearing.invoice.processing[0]?.amountCents, owed, "the page shows the bank payment on its way (the session's amount)");
   await assert.rejects(st.startCheckout(tok, { origin: "https://hq.example.test" }), (e: Error) => e instanceof st.PayOnlineError && e.key === "processing");
   // Bank transfer cleared: one stripe_ach payment for amount_total, with Stripe's fee; the invoice is paid.
   piType = "us_bank_account";

@@ -87,15 +87,22 @@ export function ContractBuilder({
     }
   }, []);
 
-  const set = <K extends keyof ContractFields>(k: K, v: ContractFields[K]) => setF((p) => ({ ...p, [k]: v }));
+  // Changing the form after a download: what was saved is no longer what the form shows, so the "next step" (the
+  // invoice for the SAVED contract) steps aside until she downloads again. Its Past contracts row keeps the step.
+  const set = <K extends keyof ContractFields>(k: K, v: ContractFields[K]) => {
+    setSaved(null);
+    setF((p) => ({ ...p, [k]: v }));
+  };
 
-  const setKind = (kind: ContractKind) =>
+  const setKind = (kind: ContractKind) => {
+    setSaved(null);
     setF((p) => ({
       ...p,
       kind,
       // Swap the example deliverables only if she hasn't written her own.
       deliverables: p.deliverables === DEFAULT_DELIVERABLES[p.kind] ? DEFAULT_DELIVERABLES[kind] : p.deliverables,
     }));
+  };
 
   const doc = useMemo(() => buildContract(f), [f]);
   const missing = missingFields(f);
@@ -125,12 +132,23 @@ export function ContractBuilder({
 
   /** "Start from this": load a past contract into the form with today's date. */
   function startFrom(c: PastContract) {
+    setSaved(null);
     setF({ ...defaultFields(today), ...c.fields, agreementDate: today });
     setNote(`Loaded ${c.clientBusiness}. Change what's different, then download.`);
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
   const collab = f.kind === "collab";
+  // The next step once it downloaded and saved, one tap: back to the invoice it was made from, or the invoice it asks
+  // for (nothing for a free collab). On a wide screen it sits under the form's Download button; under 1200px it takes
+  // the fixed bar, where Download was, so it is on the screen the moment the download lands.
+  const nextStep = !saved
+    ? null
+    : invoiceId
+      ? { href: `/invoices/${encodeURIComponent(invoiceId)}`, label: "Back to the invoice" }
+      : saved.fee > 0
+        ? { href: `/invoices/new?contract=${encodeURIComponent(saved.id)}`, label: "Make the invoice" }
+        : null;
 
   return (
     <div className="grid gap-10 max-md:gap-8 min-[1200px]:grid-cols-[minmax(0,26rem)_minmax(0,1fr)] min-[1200px]:gap-x-16">
@@ -277,16 +295,12 @@ export function ContractBuilder({
           {missing.length > 0 && <p><Status tone="warn" small className="whitespace-normal">Still blank: {missing.join(", ")}. The PDF shows [brackets] there.</Status></p>}
           {error && <p role="alert"><Status tone="danger" small className="whitespace-normal">{error}</Status></p>}
           {note && <p role="status"><Status tone="ok" small className="whitespace-normal">{note}</Status></p>}
-          {/* The next step, one tap: the invoice this contract asks for (and monthly invoices for a monthly one). */}
-          {saved && invoiceId && (
-            <div className="inv-steps">
-              <LinkButton href={`/invoices/${encodeURIComponent(invoiceId)}`} size="sm">Back to the invoice</LinkButton>
-            </div>
-          )}
-          {saved && !invoiceId && saved.fee > 0 && (
-            <div className="inv-steps">
-              <LinkButton href={`/invoices/new?contract=${encodeURIComponent(saved.id)}`}>Make the invoice</LinkButton>
-              {saved.kind === "monthly" && <MonthlyInvoicesButton contractId={saved.id} size="md" />}
+          {/* The next step, one tap: the invoice this contract asks for (and monthly invoices for a monthly one).
+              Wide screens only: under 1200px it is in the fixed bar below, never a screen or two down the page. */}
+          {saved && nextStep && (
+            <div className="inv-steps max-[1199px]:hidden">
+              <LinkButton href={nextStep.href} size={invoiceId ? "sm" : "md"}>{nextStep.label}</LinkButton>
+              {saved.kind === "monthly" && !invoiceId && <MonthlyInvoicesButton contractId={saved.id} size="md" />}
             </div>
           )}
           <p className="meta">This is a plain-English starting template, not legal advice. Have a lawyer look it over once before you use it widely.</p>
@@ -341,29 +355,50 @@ export function ContractBuilder({
 
       <PastContracts history={history} onStartFrom={startFrom} />
 
-      {/* Phones: Preview + Download stay in reach above the bottom tab bar while she scrolls the form. */}
+      {/* Phones and tablets: Preview + Download stay in reach above the bottom tab bar while she scrolls the form.
+          Once it downloaded and saved, the bar says so and its ink button becomes the next step (Make the invoice, or
+          Back to the invoice); downloading again is a quiet link beside the note. */}
       <div className="action-bar fixed inset-x-0 bottom-[var(--tabbar-h)] z-20 px-4 md:left-[17.5rem] min-[1200px]:hidden">
-        <div className="mx-auto flex max-w-md gap-2">
-          <Button
-            type="button"
-            onClick={() => {
-              const next = !showPreview;
-              setShowPreview(next);
-              if (next) requestAnimationFrame(() => document.getElementById("contract-preview")?.scrollIntoView({ behavior: "smooth" }));
-            }}
-            className="flex-1"
-            aria-expanded={showPreview}
-            aria-controls="contract-preview"
-          >
-            {showPreview ? "Hide preview" : "Preview"}
-          </Button>
-          <Button variant="primary" onClick={download} disabled={busy} className="flex-[2]">
-            {busy ? "Making PDF…" : "Download PDF"}
-          </Button>
+        <div className="mx-auto grid max-w-md gap-1">
+          {saved && (
+            <p className="flex min-h-8 items-center justify-between gap-3">
+              <Status tone="ok" small>{invoiceId ? "Saved. Linked to its invoice." : "Downloaded and saved."}</Status>
+              {nextStep && (
+                <button type="button" onClick={download} disabled={busy} className="link tap-target inv-linkbtn text-sm">
+                  {busy ? "Making PDF…" : "Download again"}
+                </button>
+              )}
+            </p>
+          )}
+          {saved && nextStep ? (
+            <div className="flex gap-2">
+              <LinkButton variant="primary" href={nextStep.href} className="flex-[2]">{nextStep.label}</LinkButton>
+              {saved.kind === "monthly" && !invoiceId && <MonthlyInvoicesButton contractId={saved.id} size="md" className="flex-[2]" />}
+            </div>
+          ) : (
+            <div className="flex gap-2">
+              <Button
+                type="button"
+                onClick={() => {
+                  const next = !showPreview;
+                  setShowPreview(next);
+                  if (next) requestAnimationFrame(() => document.getElementById("contract-preview")?.scrollIntoView({ behavior: "smooth" }));
+                }}
+                className="flex-1"
+                aria-expanded={showPreview}
+                aria-controls="contract-preview"
+              >
+                {showPreview ? "Hide preview" : "Preview"}
+              </Button>
+              <Button variant="primary" onClick={download} disabled={busy} className="flex-[2]">
+                {busy ? "Making PDF…" : "Download PDF"}
+              </Button>
+            </div>
+          )}
         </div>
       </div>
-      {/* Room so the sticky bar never covers the last field or the preview. */}
-      <div aria-hidden className="h-16 min-[1200px]:hidden" />
+      {/* Room so the sticky bar never covers the last field or the preview (taller once it holds the note). */}
+      <div aria-hidden className={cx("min-[1200px]:hidden", saved ? "h-28" : "h-16")} />
     </div>
   );
 }

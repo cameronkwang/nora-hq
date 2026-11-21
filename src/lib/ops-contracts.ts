@@ -76,14 +76,14 @@ export async function listContractsWithInvoices(limit = 50, opts: { today?: stri
   const db = await getDb();
   const [byContract, retainers, savedItems] = await Promise.all([
     invoicesForContracts(ids, { today: t }),
-    db.select({ contractId: schema.retainers.contractId }).from(schema.retainers).where(inArray(schema.retainers.contractId, ids)),
+    db.select({ contractId: schema.retainers.contractId, lastRunMonth: schema.retainers.lastRunMonth }).from(schema.retainers).where(inArray(schema.retainers.contractId, ids)),
     getSavedItems(),
   ]);
-  const withRetainer = new Set(retainers.map((r) => r.contractId));
+  const retainerMonth = new Map(retainers.map((r) => [r.contractId, r.lastRunMonth]));
   return list.map((c) => {
     const invoices = byContract[c.id] ?? [];
-    const hasRetainer = withRetainer.has(c.id);
-    return { ...c, invoices, hasRetainer, nextSteps: contractNextSteps({ id: c.id, kind: c.kind, fields: c.fields }, invoices, { hasRetainer, savedItems, today: t }) };
+    const hasRetainer = retainerMonth.has(c.id);
+    return { ...c, invoices, hasRetainer, nextSteps: contractNextSteps({ id: c.id, kind: c.kind, fields: c.fields }, invoices, { hasRetainer, retainerMonth: retainerMonth.get(c.id) ?? null, savedItems, today: t }) };
   });
 }
 

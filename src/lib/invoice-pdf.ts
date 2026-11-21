@@ -24,10 +24,11 @@ import "server-only";
  *                                                        Balance Due      $550.00
  *
  * Long tables flow onto more pages with the column header repeated; "Page 1 of 2" only when there is more than one.
- * Helvetica draws WinAnsi only: curly quotes and dashes are mapped, anything else (CJK, emoji) is dropped.
+ * Helvetica draws WinAnsi only: curly quotes and dashes are mapped, an accent it lacks is dropped from its letter, and
+ * anything else (CJK, emoji) is left out. Make PDF is refused before that could leave a name or a line empty (ops).
  */
 import { PDFDocument, StandardFonts, degrees, rgb, type PDFFont, type PDFPage } from "pdf-lib";
-import type { InvoiceDocument } from "./invoices-types";
+import { pdfText, type InvoiceDocument } from "./invoices-types";
 
 const PAGE_W = 612; // 8.5in
 const PAGE_H = 792; // 11in
@@ -51,23 +52,32 @@ const COL_QTY = RIGHT - 92;
 const COL_PRICE = RIGHT - 176;
 const DESC_W = COL_PRICE - 62 - (M + 4);
 
-const REPLACE: Record<string, string> = {
-  "‘": "'", "’": "'", "“": '"', "”": '"', "–": "-", "—": "-", "…": "...", " ": " ",
-};
-
-/** Keep only what Helvetica (WinAnsi) can draw. */
+/**
+ * Keep only what Helvetica (WinAnsi) can draw. The rule is invoices-types pdfText (shared with the creator's warning
+ * and the invoice page's preview); the font has the last word, so a character the rule let through by mistake is
+ * dropped here instead of failing the PDF. Line breaks are kept (the callers wrap on them).
+ */
 function printable(font: PDFFont, s: string): string {
-  let out = "";
-  for (const ch of s) {
-    const c = REPLACE[ch] ?? ch;
-    try {
-      font.encodeText(c);
-      out += c;
-    } catch {
-      /* not encodable in WinAnsi: drop it */
+  const t = pdfText(s);
+  try {
+    font.encodeText(t.replace(/\n/g, " "));
+    return t;
+  } catch {
+    let out = "";
+    for (const ch of t) {
+      if (ch === "\n") {
+        out += ch;
+        continue;
+      }
+      try {
+        font.encodeText(ch);
+        out += ch;
+      } catch {
+        /* not encodable in WinAnsi: drop it */
+      }
     }
+    return out;
   }
-  return out.replace(/\s{2,}/g, " ");
 }
 
 function wrap(font: PDFFont, size: number, text: string, width: number): string[] {
@@ -124,7 +134,7 @@ export async function renderInvoicePdf(doc: InvoiceDocument, meta: { title?: str
   const text = (s: string, x: number, yy: number, o: { font?: PDFFont; size?: number; color?: ReturnType<typeof rgb>; align?: "left" | "right" } = {}) => {
     const font = o.font ?? regular;
     const size = o.size ?? BODY;
-    const t = printable(font, s);
+    const t = printable(font, s).replace(/\n/g, " ");
     const w = font.widthOfTextAtSize(t, size);
     page.drawText(t, { x: o.align === "right" ? x - w : x, y: yy, size, font, color: o.color ?? INK });
     return w;
@@ -132,7 +142,7 @@ export async function renderInvoicePdf(doc: InvoiceDocument, meta: { title?: str
   const hair = (yy: number, x1 = M, x2 = RIGHT) => page.drawLine({ start: { x: x1, y: yy }, end: { x: x2, y: yy }, thickness: 0.6, color: HAIR });
   const spaced = (s: string, xRight: number, yy: number, size: number, spacing: number) => {
     // pdf-lib has no letter spacing: draw letter by letter, right-aligned.
-    const chars = [...printable(bold, s)];
+    const chars = [...printable(bold, s).replace(/\n/g, " ")];
     const total = chars.reduce((sum, ch) => sum + bold.widthOfTextAtSize(ch, size), 0) + spacing * Math.max(0, chars.length - 1);
     let x = xRight - total;
     for (const ch of chars) {

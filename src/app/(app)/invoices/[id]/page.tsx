@@ -134,7 +134,8 @@ export default async function InvoicePage({ params, searchParams }: { params: Pr
       {flash && <p role="status" className="notice mb-6"><Status tone="ok">{flash}</Status></p>}
       {err && <p role="alert" className="notice mb-6"><Status tone="danger" className="is-wrap">{err}</Status></p>}
       {SOURCE_NOTE[inv.source] && inv.source === "claude" && draft && <p className="notice mb-6"><Status tone="ink" className="is-wrap">{SOURCE_NOTE[inv.source]}</Status></p>}
-      {inv.overpaidCents > 0 && <p className="notice mb-6"><Status tone="warn" className="is-wrap">Overpaid by {money(inv.overpaidCents)}. Hand it back or delete the extra payment.</Status></p>}
+      {inv.status !== "void" && inv.overpaidCents > 0 && <p className="notice mb-6"><Status tone="warn" className="is-wrap">Overpaid by {money(inv.overpaidCents)}. Hand it back (a Stripe payment is refunded in Stripe) or delete the extra payment.</Status></p>}
+      {inv.status === "void" && inv.paidCents > 0 && <p className="notice mb-6"><Status tone="warn" className="is-wrap">{money(inv.paidCents)} came in after this invoice was cancelled. Refund it in Stripe.</Status></p>}
       {inv.processing.map((pr, i) => (
         <p key={i} className="notice mb-6"><Status tone="info" className="is-wrap">A bank payment of {money(pr.amountCents)} is on its way (started {formatDate(pr.startedAt)}). Bank transfers take about 4 business days.</Status></p>
       ))}
@@ -238,13 +239,14 @@ export default async function InvoicePage({ params, searchParams }: { params: Pr
                 <ConfirmButton confirm="Delete this draft? It has no number yet, so nothing is lost.">Delete draft</ConfirmButton>
               </form>
             )}
-            {open && inv.payments.length === 0 && (
+            {open && inv.payments.length === 0 && inv.processing.length === 0 && (
               <form action={voidInvoiceAction}>
                 <input type="hidden" name="id" value={inv.id} />
                 <ConfirmButton confirm={`Void invoice ${inv.number ?? ""}? It keeps its number, and its link then says it was cancelled.`}>Void invoice</ConfirmButton>
               </form>
             )}
             {open && inv.payments.length > 0 && <p className="meta">To void it, delete its payments first.</p>}
+            {open && inv.payments.length === 0 && inv.processing.length > 0 && <p className="meta">A bank payment is on its way. It can be voided once that arrives or fails.</p>}
           </div>
         </div>
       </div>

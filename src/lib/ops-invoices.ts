@@ -1,6 +1,6 @@
 import "server-only";
 import { createHash, randomBytes } from "node:crypto";
-import { and, asc, desc, eq, getTableColumns, ilike, inArray, isNull, ne, or, sql, type SQL } from "drizzle-orm";
+import { and, asc, desc, eq, getTableColumns, ilike, inArray, isNull, like, ne, or, sql, type SQL } from "drizzle-orm";
 import { z } from "zod";
 import { getDb, schema } from "./db";
 import { newId } from "./ids";
@@ -14,7 +14,7 @@ import { readPublicInfo } from "./business-facts";
 import { readContractFields, fieldsFromDeal, type ContractFields } from "./contract";
 import { invoiceCopy } from "./invoice-copy";
 import { buildInvoiceMessages, mailtoHref } from "./payment-request";
-import { stripeConfigured } from "./stripe";
+import { expireCheckoutSession, stripeConfigured } from "./stripe";
 import { renderInvoicePdf } from "./invoice-pdf";
 import { importedLine, parseImport } from "./invoice-import";
 import {
@@ -31,6 +31,7 @@ import {
   MONTHLY_SERVICE_LINE,
   PAYMENT_METHOD_LABEL,
   PAY_WAYS,
+  PDF_LETTERS,
   RETAINER_MAX_DAY,
   addDaysYmd,
   availablePayWays,
@@ -38,6 +39,7 @@ import {
   checkPayWays,
   contractFieldsFromInvoice,
   contractNextSteps,
+  contractPaymentDays,
   csvAmount,
   customerNameKey,
   daysBetween,
@@ -63,6 +65,7 @@ import {
   overpaidCents,
   payOptions,
   paymentInfoLines,
+  pdfPrintsEmpty,
   readInvoiceSettings,
   retainerDue,
   retainerFromContractFields,
@@ -75,6 +78,7 @@ import {
   type ContractInvoiceRef,
   type ContractPart,
   type ContractRef,
+  type CreatorEdit,
   type CreatorLine,
   type CustomerDetail,
   type CustomerSummary,
@@ -94,6 +98,7 @@ import {
   type InvoiceRow,
   type InvoiceSettings,
   type InvoiceSource,
+  type InvoiceStatus,
   type LastInvoice,
   type PayWay,
   type PayWayAvailability,
@@ -235,6 +240,11 @@ export const QuickInvoiceInput = z.object({
   contractId: id.nullish(),
   /** Update and finalize this draft instead of making a new invoice (a draft opened in the creator). */
   draftId: id.nullish(),
+  /**
+   * One per open form (the creator makes it): the invoice's id is derived from it, so pressing Make PDF again after a
+   * lost response returns the invoice the first press made instead of making a second one.
+   */
+  requestId: z.string().regex(/^[A-Za-z0-9_-]{16,40}$/).nullish(),
   /** The one-time inline ask ("From" and Zelle, when Settings has none): merged into the settings first. */
   setup: z.object({ fromName: line(120), fromAddress: block(300), zelle: line(120) }).partial().nullish(),
 });
@@ -776,7 +786,7 @@ export async function getCustomer(id: string, opts: { today?: string } = {}): Pr
   if (!c) return null;
   const clients = await clientNamesFor([c.clientId]);
   const byContract = contracts.length ? await invoicesForContracts(contracts.map((k) => k.id), { today: t }) : {};
-  const withRetainer = new Set(retainers.map((r) => r.contractId).filter(Boolean));
+  const retainerMonth = new Map(retainers.filter((r) => r.contractId).map((r) => [r.contractId!, r.lastRunMonth]));
   const summary = summaryOf(c, figs, clients);
   return {
     ...summary,
@@ -785,7 +795,7 @@ export async function getCustomer(id: string, opts: { today?: string } = {}): Pr
     retainers,
     contracts: contracts.map((k) => {
       const invs = byContract[k.id] ?? [];
-      return { ...k, invoices: invs, nextSteps: contractNextSteps(k, invs, { hasRetainer: withRetainer.has(k.id), savedItems, today: t }) };
+      return { ...k, invoices: invs, nextSteps: contractNextSteps(k, invs, { hasRetainer: retainerMonth.has(k.id), retainerMonth: retainerMonth.get(k.id) ?? null, savedItems, today: t }) };
     }),
     paidAllTimeCents: figs.paid.get(id)?.paidAll ?? 0,
     invoicedAllTimeCents: figs.figs.get(id)?.invoicedAll ?? 0,
@@ -794,7 +804,7 @@ export async function getCustomer(id: string, opts: { today?: string } = {}): Pr
 
 /* ───────────────────────── Bill to (the creator's typeahead) ───────────────────────── */
 
-function customerOption(c: schema.Customer, o: { hasPast: boolean; clientAddress?: string | null }): BillToOption {
+function customerOption(c: schema.Customer, o: { hasPast: boolean; hasLast?: boolean; last?: LastInvoice | null; clientAddress?: string | null }): BillToOption {
   return {
     key: `customer:${c.id}`,
     kind: "customer",
@@ -806,26 +816,47 @@ function customerOption(c: schema.Customer, o: { hasPast: boolean; clientAddress
     email: c.email,
     lang: c.lang,
     customerId: c.id,
+    clientId: c.clientId,
     hasPastInvoices: o.hasPast,
+    hasLast: o.hasLast ?? false,
+    ...(o.last !== undefined ? { last: o.last } : {}),
   };
 }
 
-export async function billToOptions(opts: { limit?: number } = {}): Promise<BillToOption[]> {
+/**
+ * An invoice she MADE: sent (paid or not), and not an import. "Same as last time" repeats the newest of these, never
+ * an unsent draft and never a Skynova import's placeholder line.
+ */
+const MADE = sql`${schema.invoices.status} in ('sent', 'partially_paid', 'paid') and ${schema.invoices.source} <> 'import'`;
+const MADE_AT = sql`coalesce(${schema.invoices.sentAt}, ${schema.invoices.createdAt})`;
+/** How many of the most recently billed customers come with their last lines in the page (the rest are fetched on pick). */
+const LAST_WITH_PAGE = 40;
+
+export async function billToOptions(opts: { limit?: number; settings?: Promise<InvoiceSettings> } = {}): Promise<BillToOption[]> {
   const limit = Math.min(Math.max(opts.limit ?? 400, 1), 2000);
   const db = await getDb();
-  const [customers, counts, clients, deals] = await Promise.all([
+  const inv = schema.invoices;
+  const [customers, counts, lasts, clients, deals, settings] = await Promise.all([
     db.select().from(schema.customers).where(eq(schema.customers.archived, false)),
     db.select({
-      customerId: schema.invoices.customerId,
-      n: sql`count(*) filter (where ${schema.invoices.status} <> 'void')`.mapWith(Number),
-      last: sql<string | Date | null>`max(${schema.invoices.createdAt})`,
-    }).from(schema.invoices).groupBy(schema.invoices.customerId),
+      customerId: inv.customerId,
+      n: sql`count(*) filter (where ${inv.status} <> 'void')`.mapWith(Number),
+      made: sql`count(*) filter (where ${MADE})`.mapWith(Number),
+      last: sql<string | Date | null>`max(${inv.createdAt})`,
+    }).from(inv).groupBy(inv.customerId),
+    // The last invoice she made for each of the most recently billed customers, in ONE read: "Same as last time" is
+    // then ready the moment one of them is picked.
+    db.selectDistinctOn([inv.customerId]).from(inv)
+      .where(and(MADE, inArray(inv.customerId, db.select({ id: inv.customerId }).from(inv).groupBy(inv.customerId).orderBy(desc(sql`max(${inv.createdAt})`)).limit(LAST_WITH_PAGE))))
+      .orderBy(inv.customerId, desc(MADE_AT), desc(inv.createdAt)),
     db.select({ id: schema.clients.id, name: schema.clients.name, location: schema.clients.location, ownerEmail: schema.clients.ownerEmail, publicInfo: schema.clients.publicInfo })
       .from(schema.clients).where(and(eq(schema.clients.archived, false), ne(schema.clients.kind, "creator"))).orderBy(asc(schema.clients.sortOrder), asc(schema.clients.name)),
     db.select({ id: schema.deals.id, businessName: schema.deals.businessName, clientId: schema.deals.clientId, contactName: schema.deals.contactName, contactEmail: schema.deals.contactEmail, address: schema.deals.address })
       .from(schema.deals).where(ne(schema.deals.status, "cancelled")).orderBy(desc(schema.deals.createdAt)).limit(300),
+    opts.settings ?? getInvoiceSettings(),
   ]);
   const stats = new Map(counts.map((c) => [c.customerId, c]));
+  const lastOfCustomer = new Map(lasts.map((row) => [row.customerId, lastInvoiceOf(row, settings.savedItems)]));
   const clientById = new Map(clients.map((c) => [c.id, c]));
   const out: BillToOption[] = [];
   const keys = new Set<string>();
@@ -839,7 +870,10 @@ export async function billToOptions(opts: { limit?: number } = {}): Promise<Bill
   for (const c of sorted) {
     const cl = c.clientId ? clientById.get(c.clientId) : undefined;
     if (c.clientId) coveredClients.add(c.clientId);
-    out.push(customerOption(c, { hasPast: (stats.get(c.id)?.n ?? 0) > 0, clientAddress: cl ? clientAddress(cl.publicInfo) : null }));
+    const hasLast = (stats.get(c.id)?.made ?? 0) > 0;
+    // Their last lines when the page has them; null when there is nothing to repeat; undefined = fetched when picked.
+    const last = lastOfCustomer.get(c.id) ?? (hasLast ? undefined : null);
+    out.push(customerOption(c, { hasPast: (stats.get(c.id)?.n ?? 0) > 0, hasLast, last, clientAddress: cl ? clientAddress(cl.publicInfo) : null }));
     keys.add(c.nameKey);
   }
   for (const cl of clients) {
@@ -848,14 +882,14 @@ export async function billToOptions(opts: { limit?: number } = {}): Promise<Bill
     const nameKey = customerNameKey(name);
     if (keys.has(nameKey)) continue;
     keys.add(nameKey);
-    out.push({ key: `client:${cl.id}`, kind: "client", id: cl.id, name, nameKey, address: clientAddress(cl.publicInfo), contactName: null, email: cl.ownerEmail?.trim().toLowerCase() || null, lang: null, customerId: null, hasPastInvoices: false });
+    out.push({ key: `client:${cl.id}`, kind: "client", id: cl.id, name, nameKey, address: clientAddress(cl.publicInfo), contactName: null, email: cl.ownerEmail?.trim().toLowerCase() || null, lang: null, customerId: null, clientId: cl.id, hasPastInvoices: false, hasLast: false, last: null });
   }
   for (const d of deals) {
     if (d.clientId && (coveredClients.has(d.clientId) || clientById.has(d.clientId))) continue;
     const nameKey = customerNameKey(d.businessName);
     if (!nameKey || keys.has(nameKey)) continue;
     keys.add(nameKey);
-    out.push({ key: `deal:${d.id}`, kind: "deal", id: d.id, name: d.businessName, nameKey, address: d.address?.trim() || null, contactName: d.contactName, email: d.contactEmail?.trim().toLowerCase() || null, lang: null, customerId: null, hasPastInvoices: false });
+    out.push({ key: `deal:${d.id}`, kind: "deal", id: d.id, name: d.businessName, nameKey, address: d.address?.trim() || null, contactName: d.contactName, email: d.contactEmail?.trim().toLowerCase() || null, lang: null, customerId: null, clientId: null, hasPastInvoices: false, hasLast: false, last: null });
   }
   return out.slice(0, limit);
 }
@@ -863,8 +897,8 @@ export async function billToOptions(opts: { limit?: number } = {}): Promise<Bill
 export async function lastInvoiceForCustomer(customerId: string): Promise<LastInvoice | null> {
   const db = await getDb();
   const [[row], settings] = await Promise.all([
-    db.select().from(schema.invoices).where(and(eq(schema.invoices.customerId, customerId), ne(schema.invoices.status, "void")))
-      .orderBy(desc(schema.invoices.createdAt)).limit(1),
+    db.select().from(schema.invoices).where(and(eq(schema.invoices.customerId, customerId), MADE))
+      .orderBy(desc(MADE_AT), desc(schema.invoices.createdAt)).limit(1),
     getInvoiceSettings(),
   ]);
   return row ? lastInvoiceOf(row, settings.savedItems) : null;
@@ -930,7 +964,9 @@ function findOption(options: BillToOption[], want: { customerId?: string | null;
     if (o) return o;
   }
   if (want.clientId) {
-    const o = options.find((x) => x.key === `client:${want.clientId}`);
+    // The managed business itself, or (once it has one) its customer: a deal made from Nora's schedule carries the
+    // business but keeps the schedule's name, so the name alone would open it as a new customer.
+    const o = options.find((x) => x.clientId === want.clientId);
     if (o) return o;
   }
   if (want.dealId) {
@@ -943,9 +979,10 @@ function findOption(options: BillToOption[], want: { customerId?: string | null;
 
 async function withLast(prefill: InvoicePrefill, saved: readonly SavedItem[]): Promise<InvoicePrefill> {
   const cid = prefill.billTo?.customerId;
-  if (!cid || !prefill.billTo?.hasPastInvoices || prefill.source === "draft") return { ...prefill, last: null };
+  if (!cid || !prefill.billTo?.hasLast || prefill.source === "draft") return { ...prefill, last: null };
+  if (prefill.billTo.last !== undefined) return { ...prefill, last: prefill.billTo.last }; // it came with the Bill to list
   const db = await getDb();
-  const [row] = await db.select().from(schema.invoices).where(and(eq(schema.invoices.customerId, cid), ne(schema.invoices.status, "void"))).orderBy(desc(schema.invoices.createdAt)).limit(1);
+  const [row] = await db.select().from(schema.invoices).where(and(eq(schema.invoices.customerId, cid), MADE)).orderBy(desc(MADE_AT), desc(schema.invoices.createdAt)).limit(1);
   return { ...prefill, last: row ? lastInvoiceOf(row, saved) : null };
 }
 
@@ -956,7 +993,7 @@ async function prefillFromDraft(draftId: string, d: PrefillDeps): Promise<Invoic
   let billTo = findOption(options, { customerId: inv.customerId });
   if (!billTo) {
     const c = await customerRow(inv.customerId);
-    if (c) billTo = customerOption(c, { hasPast: true });
+    if (c) billTo = customerOption(c, { hasPast: true, last: null });
   }
   const issueDate = inv.issueDate ?? d.today;
   return {
@@ -1050,7 +1087,7 @@ async function prefillForBillTo(want: { customerId?: string | null; clientId?: s
   let billTo = findOption(options, want);
   if (!billTo && want.customerId) {
     const c = await customerRow(want.customerId);
-    if (c && !c.archived) billTo = customerOption(c, { hasPast: false });
+    if (c && !c.archived) billTo = customerOption(c, { hasPast: false, last: null });
   }
   if (!billTo) return null;
   return withLast({ ...blankPrefill(settings, d.today), billTo, lang: billTo.lang, source: "customer" }, settings.savedItems);
@@ -1067,7 +1104,7 @@ export async function getInvoiceCreatorContext(opts: {
 } = {}): Promise<InvoiceCreatorContext> {
   const today = opts.today ?? todayNY();
   const settingsP = getInvoiceSettings();
-  const optionsP = billToOptions();
+  const optionsP = billToOptions({ settings: settingsP });
   const deps: PrefillDeps = { today, settings: settingsP, options: optionsP };
   const prefillP: Promise<InvoicePrefill | null> = opts.draftId
     ? prefillFromDraft(opts.draftId, deps)
@@ -1099,6 +1136,48 @@ export async function getInvoiceCreatorContext(opts: {
     stripeReady,
     billTo,
     prefill: prefill ?? { ...blankPrefill(settings, today), last: null },
+  };
+}
+
+/**
+ * The creator opened to EDIT a finalized invoice (/invoices/new?edit=<id>): the creator's context with the invoice as
+ * its prefill, everything the form can change included (the discount and the private note too, or Save changes would
+ * clear them). null when the invoice is gone; `status` tells the page where a draft, paid or void one belongs.
+ */
+export async function getInvoiceEditContext(id: string, opts: { today?: string } = {}): Promise<{ status: InvoiceStatus; ctx: InvoiceCreatorContext; edit: CreatorEdit } | null> {
+  const [c, row] = await Promise.all([getInvoiceCreatorContext({ today: opts.today }), invoiceWithCustomer(id)]);
+  if (!row) return null;
+  const { inv, customer } = row;
+  const issueDate = inv.issueDate ?? c.today;
+  return {
+    status: inv.status,
+    edit: { id: inv.id, number: inv.number, customerName: customer.name, customerAddress: customer.billingAddress },
+    ctx: {
+      ...c,
+      prefill: {
+        ...c.prefill,
+        billTo: null,
+        newCustomer: null,
+        // The exact lines (a typed-each-time line keeps its amount here: it's this invoice's).
+        lines: inv.items.map((i) => creatorLineOf(i, c.savedItems)),
+        issueDate,
+        dueDate: inv.dueDate ?? issueDate,
+        payWays: sortPayWays(inv.payWays),
+        payNote: inv.payNote,
+        notes: inv.notes,
+        lang: inv.lang,
+        dealId: inv.dealId,
+        contractId: inv.contractId,
+        contractPart: null,
+        draftId: null,
+        source: "draft",
+        note: null,
+        discountCents: inv.discountCents,
+        discountLabel: inv.discountLabel,
+        privateNotes: inv.privateNotes,
+        last: null,
+      },
+    },
   };
 }
 
@@ -1178,6 +1257,13 @@ async function resolveBillTo(b: z.output<typeof BillToInput>, actor: string): Pr
 function draftAvailability(avail: PayWayAvailability): PayWayAvailability {
   const ok = { ok: true, why: null };
   return { ...avail, zelle: ok, check: ok, venmo: ok, paypal: ok };
+}
+
+/** Make PDF is refused when the customer's name or a line would print empty on the PDF (Chinese only): never "Customer" or a blank row. */
+function checkPrintable(o: { newName?: string | null; customerName?: string | null; items?: readonly InvoiceItem[] }) {
+  if (o.newName != null && pdfPrintsEmpty(o.newName)) throw new OpsError(PDF_LETTERS.name);
+  if (o.customerName != null && pdfPrintsEmpty(o.customerName)) throw new OpsError(PDF_LETTERS.customer(o.customerName));
+  for (const i of o.items ?? []) if (pdfPrintsEmpty(i.description)) throw new OpsError(PDF_LETTERS.line(i.description));
 }
 
 function checkDates(issueDate: string, dueDate: string) {
@@ -1263,6 +1349,7 @@ type QuickPlan = {
   customer: schema.Customer;
   settings: InvoiceSettings;
   draft: schema.Invoice | null;
+  requestId: string | null;
   values: {
     customerId: string;
     issueDate: string;
@@ -1287,6 +1374,8 @@ type QuickPlan = {
 async function planQuick(input: QuickInvoiceInputT, actor: string, today: string, mode: "finalize" | "draft"): Promise<QuickPlan> {
   const v = QuickInvoiceInput.parse(input);
   guardText([["the notes", v.notes], ["the private note", v.privateNotes], ["the other way to pay", v.payNote], ["the discount", v.discountLabel]]);
+  // Before anything is written (a new customer included): what the PDF can't print is refused, not printed wrong.
+  if (mode === "finalize") checkPrintable({ newName: v.billTo.kind === "new" ? v.billTo.name : null, items: v.items });
   const setup = setupPatch(v.setup);
   const db = await getDb();
   const [settings, bill, draft, dealOk, contractOk] = await Promise.all([
@@ -1299,6 +1388,7 @@ async function planQuick(input: QuickInvoiceInputT, actor: string, today: string
   if (v.draftId && !draft) throw new OpsError("That draft is gone. Start a new invoice.");
   if (!dealOk) throw new OpsError("That deal is gone.");
   if (!contractOk) throw new OpsError("That contract is gone.");
+  if (mode === "finalize") checkPrintable({ customerName: bill.customer.name });
   const keep = <T>(given: T | undefined, fromDraft: T, fallback: T): T => (given !== undefined ? given : draft ? fromDraft : fallback);
   const ways = sortPayWays(keep(v.payWays, draft?.payWays ?? [...DEFAULT_PAY_WAYS], [...DEFAULT_PAY_WAYS]));
   const payNote = keep(v.payNote, draft?.payNote ?? null, null) ?? null;
@@ -1318,6 +1408,7 @@ async function planQuick(input: QuickInvoiceInputT, actor: string, today: string
     customer: bill.customer,
     settings,
     draft,
+    requestId: v.draftId ? null : v.requestId ?? null,
     values: {
       customerId: bill.customer.id,
       issueDate,
@@ -1339,19 +1430,38 @@ async function planQuick(input: QuickInvoiceInputT, actor: string, today: string
   };
 }
 
-export async function createAndFinalizeInvoice(input: QuickInvoiceInputT, actor: string, opts: { origin?: string | null; today?: string } = {}): Promise<InvoiceDone> {
+/** The finished PDF as base64, for the answer to Make PDF from a phone (Share PDF is ready with no second round trip). */
+async function donePdf(inv: schema.Invoice, customer: schema.Customer, settings: InvoiceSettings, done: InvoiceDone, today: string): Promise<string | null> {
+  try {
+    const doc = invoiceDocument(inv, customer, settings, { stripeReady: stripeConfigured(), payUrl: done.payUrl, today });
+    return Buffer.from(await renderInvoicePdf(doc, { title: `Invoice ${inv.number ?? "DRAFT"}` })).toString("base64");
+  } catch (e) {
+    console.error("[invoices] the PDF for the done state failed", e instanceof Error ? e.message : e);
+    return null; // the done state fetches it instead
+  }
+}
+
+export async function createAndFinalizeInvoice(input: QuickInvoiceInputT, actor: string, opts: { origin?: string | null; today?: string; withPdf?: boolean } = {}): Promise<InvoiceDone> {
   people(actor, "make an invoice");
   const today = opts.today ?? todayNY();
   const plan = await planQuick(input, actor, today, "finalize");
   const { customer, settings, draft, values } = plan;
+  const stripeReady = stripeConfigured();
+  /** The done state for a row that already exists (pressed again): nothing is written. */
+  const already = async (inv: schema.Invoice, c: schema.Customer): Promise<InvoiceDone> => {
+    const done = buildDone(inv, c, settings, { origin: opts.origin, stripeReady });
+    return opts.withPdf ? { ...done, pdfBase64: await donePdf(inv, c, settings, done, today) } : done;
+  };
   if (draft && draft.status !== "draft") {
     if (draft.status === "void") throw new OpsError("This invoice is void.");
-    return buildDone(draft, customer, settings, { origin: opts.origin, stripeReady: stripeConfigured() }); // finalized meanwhile: nothing is overwritten
+    return already(draft, customer); // finalized meanwhile: nothing is overwritten
   }
   const token = makeLinkToken();
   if (!token && hasOnlineWay(values.payWays)) throw new OpsError("Can't make a pay link: TOKEN_ENC_KEY isn't set on the server. Untick paying online, or set it.");
   const db = await getDb();
   const source: InvoiceSource = draft ? draft.source : values.contractId ? "contract" : values.dealId ? "deal" : "manual";
+  // The form's own id (requestId): a second press after a lost response conflicts on it and makes nothing.
+  const newInvoiceId = plan.requestId ? `inv_${plan.requestId}` : newId("inv_");
   const write = async (): Promise<schema.Invoice | null> => {
     if (draft) {
       // ONE UPDATE: the form onto the draft, and finalized (only while it is still a draft).
@@ -1366,11 +1476,12 @@ export async function createAndFinalizeInvoice(input: QuickInvoiceInputT, actor:
       }).where(and(eq(schema.invoices.id, draft.id), eq(schema.invoices.status, "draft"))).returning();
       return row ?? null;
     }
-    // ONE INSERT that is already finalized: number, dates, status sent, the link.
+    // ONE INSERT that is already finalized: number, dates, status sent, the link. With the form's id, a repeat takes
+    // no number (the CASE skips the sequence when the row is there) and inserts nothing (ON CONFLICT DO NOTHING).
     const [row] = await db.insert(schema.invoices).values({
-      id: newId("inv_"),
+      id: newInvoiceId,
       ...values,
-      number: TAKE,
+      number: plan.requestId ? sql`case when exists (select 1 from invoices y where y.id = ${newInvoiceId}) then null else ${TAKE} end` : TAKE,
       status: "sent",
       tokenHash: token?.hash ?? null,
       tokenEnc: token?.enc ?? null,
@@ -1378,7 +1489,7 @@ export async function createAndFinalizeInvoice(input: QuickInvoiceInputT, actor:
       sentAt: sql`now()`,
       sentBy: actor,
       createdBy: actor,
-    }).returning();
+    }).onConflictDoNothing({ target: schema.invoices.id }).returning();
     return row ?? null;
   };
   let row: schema.Invoice | null;
@@ -1389,12 +1500,18 @@ export async function createAndFinalizeInvoice(input: QuickInvoiceInputT, actor:
     row = await write(); // an import wrote the same number between the check and the write: take the next one
   }
   if (!row) {
-    const now = draft ? await invoiceRow(draft.id) : null;
-    if (now && now.status !== "draft" && now.status !== "void") return buildDone(now, customer, settings, { origin: opts.origin, stripeReady: stripeConfigured() });
+    const now = await invoiceWithCustomer(draft ? draft.id : newInvoiceId);
+    if (now && now.inv.status === "void") throw new OpsError("This invoice is void.");
+    if (now && now.inv.status !== "draft") return already(now.inv, now.customer); // made by the first press (or finalized meanwhile)
     throw new OpsError("Couldn't make the invoice. Try again.");
   }
-  await afterFinalize(row, customer, actor, "Made invoice");
-  return buildDone(row, customer, settings, { origin: opts.origin, stripeReady: stripeConfigured(), token });
+  const done = buildDone(row, customer, settings, { origin: opts.origin, stripeReady, token });
+  // The log, the deal and the contract link, and (for a phone) the PDF itself, side by side.
+  const [, pdfBase64] = await Promise.all([
+    afterFinalize(row, customer, actor, "Made invoice"),
+    opts.withPdf ? donePdf(row, customer, settings, done, today) : null,
+  ]);
+  return opts.withPdf ? { ...done, pdfBase64 } : done;
 }
 
 export async function saveQuickDraft(input: QuickInvoiceInputT, actor: string, opts: { today?: string } = {}): Promise<{ id: string; customerId: string; created: boolean }> {
@@ -1531,6 +1648,7 @@ export async function updateInvoice(id: string, patch: InvoicePatchT, actor: str
     if (!k) throw new OpsError("That contract is gone.");
   }
   const items = v.items ?? cur.items;
+  if (finalized && v.items) checkPrintable({ items: v.items });
   const totals = invoiceTotals(items, v.discountCents ?? cur.discountCents);
   if (finalized && totals.totalCents <= 0) throw new OpsError("A finalized invoice can't total $0. Void it instead.");
   if (totals.totalCents < cur.paidCents) throw new OpsError(`The total can't go below what's already paid (${formatCents(cur.paidCents, { decimals: "always" })}).`);
@@ -1580,6 +1698,8 @@ export async function updateInvoice(id: string, patch: InvoicePatchT, actor: str
     finalized && row.dealId ? syncDealFromInvoices(row.dealId, actor) : null,
     finalized && cur.dealId && cur.dealId !== row.dealId ? syncDealFromInvoices(cur.dealId, actor) : null,
   ]);
+  // A Stripe page opened for the old total must not take the old amount.
+  if (finalized && row.totalCents !== cur.totalCents) await closeOpenCheckouts(id);
   return row;
 }
 
@@ -1610,6 +1730,7 @@ export async function finalizeInvoice(id: string, actor: string, opts: { origin?
   if (wayError) throw new OpsError(wayError);
   if (inv.totalCents <= 0) throw new OpsError("The total is $0. Add an amount first.");
   if (inv.issueDate && inv.dueDate) checkDates(inv.issueDate, inv.dueDate);
+  checkPrintable({ customerName: customer.name, items: inv.items });
   const token = makeLinkToken();
   if (!token && hasOnlineWay(sortPayWays(inv.payWays))) throw new OpsError("Can't make a pay link: TOKEN_ENC_KEY isn't set on the server.");
   const db = await getDb();
@@ -1641,22 +1762,60 @@ export async function finalizeInvoice(id: string, actor: string, opts: { origin?
   return { invoice: updated, first: r.first, done: buildDone(updated, customer, settings, { origin: opts.origin, stripeReady, token }) };
 }
 
+/**
+ * Open Stripe pages (Checkout Sessions) for this invoice stop working: expired at Stripe, then marked expired here.
+ * Called whenever the page's amount or right to be paid changed: the invoice was voided, a payment was recorded or
+ * deleted, its total was edited, its link was replaced, or a bank transfer started on another page. `keepAmountCents`
+ * spares pages for that amount (a second press of Pay online); `exceptSessionId` the page that is being paid.
+ * Never throws: a page Stripe wouldn't close stays open for at most its hour, and a payment that still lands on a
+ * void or paid invoice is recorded and pushed to Nora (lib/ops-stripe "Paid after it was cancelled" / "Paid twice").
+ */
+export async function closeOpenCheckouts(invoiceId: string, opts: { exceptSessionId?: string | null; keepAmountCents?: number | null } = {}): Promise<number> {
+  let closed = 0;
+  try {
+    const db = await getDb();
+    const c = schema.invoiceCheckouts;
+    const open = await db.select({ sessionId: c.sessionId, amountCents: c.amountCents }).from(c)
+      .where(and(eq(c.invoiceId, invoiceId), eq(c.status, "open"), like(c.sessionId, "cs_%")));
+    for (const o of open) {
+      if (o.sessionId === opts.exceptSessionId) continue;
+      if (opts.keepAmountCents != null && o.amountCents === opts.keepAmountCents) continue;
+      try {
+        await expireCheckoutSession(o.sessionId);
+      } catch (e) {
+        console.error("[invoices] a Stripe page could not be closed:", e instanceof Error ? e.message : e); // it expires by itself within the hour
+        continue;
+      }
+      await db.update(c).set({ status: "expired", updatedAt: new Date() }).where(and(eq(c.sessionId, o.sessionId), eq(c.status, "open")));
+      closed++;
+    }
+  } catch (e) {
+    console.error("[invoices] closing Stripe pages failed:", e instanceof Error ? e.message : e);
+  }
+  return closed;
+}
+
 export async function voidInvoice(id: string, actor: string, opts: { reason?: string | null } = {}): Promise<schema.Invoice> {
   people(actor, "void an invoice");
   const reason = cleanLine(opts.reason ?? "").slice(0, 300) || null;
   const db = await getDb();
-  // ONE statement: only a finalized invoice with no payments (delete them first).
+  // ONE statement: only a finalized invoice with no payments (delete them first) and no bank transfer on its way
+  // (the money would land on a void invoice about 4 business days later).
   const [row] = await db.update(schema.invoices).set({ status: "void", voidedAt: new Date(), voidedBy: actor, voidReason: reason, updatedAt: new Date() })
     .where(and(
       eq(schema.invoices.id, id),
       inArray(schema.invoices.status, ["sent", "partially_paid", "paid"]),
       sql`not exists (select 1 from invoice_payments p where p.invoice_id = ${schema.invoices.id})`,
+      sql`not exists (select 1 from invoice_checkouts k where k.invoice_id = ${schema.invoices.id} and k.status = 'processing')`,
     )).returning();
   if (!row) {
     const cur = await invoiceRow(id);
     if (!cur) throw new OpsError("That invoice is gone.");
     if (cur.status === "void") return cur;
     if (cur.status === "draft") throw new OpsError("This is a draft: delete it instead.");
+    const [clearing] = await db.select({ id: schema.invoiceCheckouts.id }).from(schema.invoiceCheckouts)
+      .where(and(eq(schema.invoiceCheckouts.invoiceId, id), eq(schema.invoiceCheckouts.status, "processing"))).limit(1);
+    if (clearing) throw new OpsError("A bank payment is on its way for this invoice. Wait until it arrives or fails, then void it.");
     throw new OpsError("This invoice has payments. Delete them first, then void it.");
   }
   const c = await customerRow(row.customerId);
@@ -1664,6 +1823,8 @@ export async function voidInvoice(id: string, actor: string, opts: { reason?: st
     logActivity({ actor, action: "invoice.voided", entityType: "invoice", entityId: id, clientId: c?.clientId ?? null, summary: `Voided invoice ${row.number} for ${c?.name ?? "a customer"}` }),
     row.dealId ? syncDealFromInvoices(row.dealId, actor) : null,
   ]);
+  // A Stripe page the customer opened earlier must not take the money for a cancelled invoice.
+  await closeOpenCheckouts(id);
   return row;
 }
 
@@ -1695,6 +1856,7 @@ export async function replaceInvoiceLink(id: string, actor: string, opts: { orig
   const [row] = await db.update(schema.invoices).set({ tokenHash: token.hash, tokenEnc: token.enc, updatedAt: new Date() })
     .where(and(eq(schema.invoices.id, id), inArray(schema.invoices.status, ["sent", "partially_paid", "paid"]))).returning({ number: schema.invoices.number, customerId: schema.invoices.customerId });
   if (!row) throw new OpsError("Only a finalized invoice that isn't void has a link.");
+  await closeOpenCheckouts(id); // an open Stripe page's way back carries the old link
   await logActivity({ actor, action: "invoice.link_replaced", entityType: "invoice", entityId: id, summary: `Made a new customer link for invoice ${row.number} (the old one stopped working)` });
   return payPageUrl(token.token, opts.origin);
 }
@@ -1896,8 +2058,17 @@ export async function linkContractToInvoice(contractId: string, invoiceId: strin
   people(actor, "link a contract");
   const db = await getDb();
   const [inv] = await db.update(schema.invoices).set({ contractId, updatedAt: new Date() }).where(eq(schema.invoices.id, invoiceId))
-    .returning({ customerId: schema.invoices.customerId, dealId: schema.invoices.dealId, number: schema.invoices.number });
+    .returning({ customerId: schema.invoices.customerId, dealId: schema.invoices.dealId, number: schema.invoices.number, retainerId: schema.invoices.retainerId });
   if (!inv) throw new OpsError("The contract was saved, but that invoice is gone, so they aren't linked.");
+  // A contract made from a retainer's invoice IS that retainer's contract: it already bills monthly, so the contract
+  // doesn't offer "Set up monthly invoices" (which would make a second retainer and two drafts every month).
+  if (inv.retainerId) {
+    await db.update(schema.retainers).set({ contractId, updatedAt: new Date() })
+      .where(and(eq(schema.retainers.id, inv.retainerId), isNull(schema.retainers.contractId)))
+      .catch((e) => {
+        if (!isUniqueViolation(e)) throw e; // the contract already has its own retainer: leave both as they are
+      });
+  }
   await db.update(schema.contracts).set({ customerId: sql`coalesce(${schema.contracts.customerId}, ${inv.customerId})`, dealId: sql`coalesce(${schema.contracts.dealId}, ${inv.dealId})` })
     .where(eq(schema.contracts.id, contractId));
   await logActivity({ actor, action: "invoice.contract_linked", entityType: "invoice", entityId: invoiceId, summary: `Linked a contract to ${inv.number ? `invoice ${inv.number}` : "a draft invoice"}` });
@@ -2053,27 +2224,50 @@ export async function recordPayment(invoiceId: string, input: PaymentInputT, act
   const row = await invoiceWithCustomer(invoiceId);
   if (!row) throw new OpsError("That invoice is gone.");
   const { inv, customer } = row;
-  if (inv.status === "draft") throw new OpsError("Make the PDF first: a draft can't be paid.");
-  if (inv.status === "void") throw new OpsError("This invoice is void.");
-  const owed = balanceCents(inv);
-  if (owed <= 0) throw new OpsError("This invoice is already paid in full.");
-  if (v.amountCents > owed) throw new OpsError(`That's more than the ${formatCents(owed, { decimals: "always" })} still owed.`);
+  /** Why this amount can't be recorded on the invoice as it is now, in plain words. */
+  const refusal = (now: schema.Invoice): OpsError => {
+    if (now.status === "draft") return new OpsError("Make the PDF first: a draft can't be paid.");
+    if (now.status === "void") return new OpsError("This invoice is void.");
+    const owed = balanceCents(now);
+    if (owed <= 0) return new OpsError("This invoice is already paid in full.");
+    return new OpsError(`That's more than the ${formatCents(owed, { decimals: "always" })} still owed.`);
+  };
+  if (!isOpenStatus(inv.status) || v.amountCents > balanceCents(inv)) throw refusal(inv);
   const db = await getDb();
-  const [payment] = await db.insert(schema.invoicePayments).values({
-    id: newId("pay_"),
-    invoiceId,
-    amountCents: v.amountCents,
-    paidOn: v.paidOn,
-    method: v.method,
-    reference: v.reference ?? null,
-    note: v.note ?? null,
-    recordedBy: actor,
-  }).returning();
-  const invoice = (await recompute(invoiceId)) ?? inv;
+  const i = schema.invoices;
+  // Hold the amount first, in ONE conditional UPDATE: only while the invoice is owed at least this much. Two people
+  // recording the same payment at the same moment can't both pass (the second waits for the row, then sees the first
+  // one's amount and is refused). recompute below then sets paid_cents to the true sum, whether or not the insert worked.
+  const [held] = await db.update(i).set({ paidCents: sql`${i.paidCents} + ${v.amountCents}` })
+    .where(and(eq(i.id, invoiceId), inArray(i.status, ["sent", "partially_paid"]), sql`${i.totalCents} - ${i.paidCents} >= ${v.amountCents}`))
+    .returning({ id: i.id });
+  if (!held) {
+    const now = await invoiceRow(invoiceId);
+    if (!now) throw new OpsError("That invoice is gone.");
+    throw refusal(now);
+  }
+  let payment: schema.InvoicePayment;
+  let invoice: schema.Invoice;
+  try {
+    [payment] = await db.insert(schema.invoicePayments).values({
+      id: newId("pay_"),
+      invoiceId,
+      amountCents: v.amountCents,
+      paidOn: v.paidOn,
+      method: v.method,
+      reference: v.reference ?? null,
+      note: v.note ?? null,
+      recordedBy: actor,
+    }).returning();
+  } finally {
+    invoice = (await recompute(invoiceId)) ?? inv;
+  }
   await Promise.all([
     logActivity({ actor, action: "invoice.payment_recorded", entityType: "invoice", entityId: invoiceId, clientId: customer.clientId, summary: `Recorded a ${PAYMENT_METHOD_LABEL[v.method]} payment on invoice ${inv.number} (${customer.name})${invoice.status === "paid" ? ": paid in full" : ""}` }),
     invoice.dealId ? syncDealFromInvoices(invoice.dealId, actor) : null,
   ]);
+  // A Stripe page opened before this payment would still take the old balance: close it.
+  await closeOpenCheckouts(invoiceId);
   return { payment, invoice };
 }
 
@@ -2088,6 +2282,7 @@ export async function deletePayment(paymentId: string, actor: string): Promise<s
     logActivity({ actor, action: "invoice.payment_deleted", entityType: "invoice", entityId: invoice.id, summary: `Deleted a ${PAYMENT_METHOD_LABEL[gone.method]} payment from invoice ${invoice.number}` }),
     invoice.dealId ? syncDealFromInvoices(invoice.dealId, actor) : null,
   ]);
+  await closeOpenCheckouts(invoice.id); // the balance changed: an open Stripe page has the old amount
   return invoice;
 }
 
@@ -2120,6 +2315,8 @@ export async function recordStripePayment(input: StripePaymentRecord): Promise<{
       ? db.update(schema.customers).set({ stripeCustomerId: stripeCustomer, updatedAt: new Date() }).where(and(eq(schema.customers.id, inv.customerId), isNull(schema.customers.stripeCustomerId)))
       : null,
   ]);
+  // Any other page still open for this invoice (a second tab, a second press) must not take the money again.
+  await closeOpenCheckouts(inv.id, { exceptSessionId: input.sessionId });
   return { recorded: true, invoice };
 }
 
@@ -2221,14 +2418,29 @@ export async function runRetainers(now = new Date(), opts: { dryRun?: boolean } 
   const day = Number(today.slice(8, 10));
   const db = await getDb();
   const [rows, settings] = await Promise.all([
-    db.select({ r: schema.retainers, name: schema.customers.name, lang: schema.customers.lang, archived: schema.customers.archived, clientId: schema.customers.clientId })
+    db.select({ r: schema.retainers, name: schema.customers.name, lang: schema.customers.lang, archived: schema.customers.archived, clientId: schema.customers.clientId, contractFields: schema.contracts.fields })
       .from(schema.retainers).innerJoin(schema.customers, eq(schema.customers.id, schema.retainers.customerId))
+      .leftJoin(schema.contracts, eq(schema.contracts.id, schema.retainers.contractId))
       .where(eq(schema.retainers.active, true)),
     getInvoiceSettings(),
   ]);
   const result: RunRetainersResult = { created: [], failed: 0 };
-  for (const { r, name, lang, archived, clientId } of rows) {
+  for (const { r, name, lang, archived, clientId, contractFields } of rows) {
     if (archived || !retainerDue(r, today)) continue;
+    if (r.contractId) {
+      // A month an invoice from its contract already bills ("Make the invoice" on the contract, made by hand) is not
+      // billed again: the month is marked taken and no draft is made. The same test as createRetainerFromContract.
+      const billed = await db.select({ items: schema.invoices.items, retainerMonth: schema.invoices.retainerMonth }).from(schema.invoices)
+        .where(and(eq(schema.invoices.contractId, r.contractId), ne(schema.invoices.status, "void")));
+      const lines = [retainerItemDescription(r.description, month).toLowerCase(), retainerItemDescription(MONTHLY_SERVICE_LINE, month).toLowerCase()];
+      if (billed.some((b) => b.retainerMonth === month || lines.includes(b.items[0]?.description.trim().toLowerCase() ?? ""))) {
+        if (!opts.dryRun) {
+          await db.update(schema.retainers).set({ lastRunMonth: month, updatedAt: new Date() })
+            .where(and(eq(schema.retainers.id, r.id), sql`${schema.retainers.lastRunMonth} is distinct from ${month}`));
+        }
+        continue;
+      }
+    }
     if (opts.dryRun) {
       result.created.push({ invoiceId: "", retainerId: r.id, customerName: name, amountCents: r.amountCents, month });
       continue;
@@ -2249,7 +2461,8 @@ export async function runRetainers(now = new Date(), opts: { dryRun?: boolean } 
         id: newId("inv_"),
         customerId: r.customerId,
         status: "draft",
-        termsDays: 0, // due on receipt: dated the day a person makes the PDF
+        // Dated the day a person makes the PDF. Due on receipt, or in its contract's "pay within" days.
+        termsDays: contractFields ? contractPaymentDays(readContractFields(contractFields)) : 0,
         items,
         ...totals,
         notes: settings.footer,

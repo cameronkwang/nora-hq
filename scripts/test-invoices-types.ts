@@ -143,7 +143,7 @@ assert.equal(T.invoicePdfPath("inv_1"), "/invoices/inv_1/pdf"); assert.equal(T.i
 
 /* the fast creator */
 assert.deepEqual(T.creatorDefaultsLine({ issueDate: "2026-11-20", dueDate: "2026-11-20", payWays: ["zelle"], nextNumber: "0000170" }), { due: "Due on receipt", pay: "Zelle", number: "#0000170", text: "Due on receipt · Zelle · #0000170" });
-const opt = (kind: T.BillToKind, id: string, name: string): T.BillToOption => ({ key: `${kind}:${id}`, kind, id, name, nameKey: T.customerNameKey(name), address: null, contactName: null, email: null, lang: null, customerId: kind === "customer" ? id : null, hasPastInvoices: false });
+const opt = (kind: T.BillToKind, id: string, name: string): T.BillToOption => ({ key: `${kind}:${id}`, kind, id, name, nameKey: T.customerNameKey(name), address: null, contactName: null, email: null, lang: null, customerId: kind === "customer" ? id : null, clientId: kind === "client" ? id : null, hasPastInvoices: false, hasLast: false });
 const list = [opt("client", "snf", "SNF Kingdom"), opt("customer", "c1", "Sample Bistro"), opt("deal", "d1", "Sample Bakery 小点心"), opt("customer", "c2", "Crab O Clock")];
 assert.deepEqual(T.filterBillTo(list, "sam").map((o) => o.key), ["customer:c1", "deal:d1"]);
 assert.deepEqual(T.filterBillTo(list, "clock").map((o) => o.key), ["customer:c2"]);
@@ -188,6 +188,11 @@ assert.deepEqual(T.contractNextSteps(c(collab({})), [ref({ mainLineCents: 55000 
 assert.deepEqual(T.contractNextSteps(c(monthly), [], { hasRetainer: false, today }).map((n) => n.label), ["Set up monthly invoices", "Invoice this month"]);
 assert.deepEqual(T.contractNextSteps(c(monthly), [ref({})], { hasRetainer: true, today }), []);
 assert.deepEqual(T.contractNextSteps(c(collab({ fee: "0" })), [], { hasRetainer: false, today }), []);
+// a monthly contract with its retainer: this month is offered only until the monthly invoices have taken it
+assert.deepEqual(T.contractNextSteps(c(monthly), [], { hasRetainer: true, retainerMonth: null, today }).map((n) => n.label), ["Invoice this month"]);
+assert.deepEqual(T.contractNextSteps(c(monthly), [], { hasRetainer: true, retainerMonth: today.slice(0, 7), today }), [], "the retainer took this month (its draft was deleted): not offered again");
+assert.deepEqual(T.contractNextSteps(c(monthly), [], { hasRetainer: true, retainerMonth: "2026-10", today }).map((n) => n.label), ["Invoice this month"], "last month's run doesn't take this month");
+assert.equal(T.contractPaymentDays({ paymentDays: "15" }), 15); assert.equal(T.contractPaymentDays({ paymentDays: "" }), 15); assert.equal(T.contractPaymentDays({ paymentDays: "400" }), T.MAX_TERMS_DAYS);
 assert.equal(T.contractRefLabel({ agreementDate: "2026-11-20", createdAt: "2026-11-21T10:00:00.000Z" }), "Contract Nov 20");
 assert.equal(T.contractRefLabel({ agreementDate: null, createdAt: "2026-11-21T10:00:00.000Z" }), "Contract Nov 21");
 
@@ -198,6 +203,17 @@ assert.equal(invoiceCopy("en").share.pdfMessage({ ...msg, zelle: null, dueOnRece
 assert.match(invoiceCopy("zh-Hans").share.pdfMessage(msg), /^Sample Bistro，您好！附上账单 0000170（PDF），金额 \$625\.10，收到即付。\n\nZelle：\(555\) 010-0100，备注请写 0000170。\n\n谢谢！$/);
 assert.match(invoiceCopy("zh-Hant").share.pdfMessage(msg), /帳單 0000170.*備註請寫 0000170/s);
 for (const lang of ["en", "zh-Hans", "zh-Hant"] as const) assert.doesNotMatch(invoiceCopy(lang).share.pdfMessage({ ...msg, url: "https://x" }), /\u2014|fee|surcharge|手续费|手續費/i);
+
+/* what the PDF can print (Helvetica: Western European letters only) */
+assert.equal(T.pdfText("SAMPLE Bakery 小点心"), "SAMPLE Bakery"); assert.equal(T.pdfUnprintable("SAMPLE Bakery 小点心"), "小点心");
+assert.equal(T.pdfText("老四川"), ""); assert.equal(T.pdfPrintsEmpty("老四川"), true); assert.equal(T.pdfPrintsEmpty("湘味轩 Xiang Wei Xuan"), false);
+assert.equal(T.pdfPrintsEmpty(""), false); assert.equal(T.pdfPrintsEmpty("  "), false); assert.equal(T.pdfPrintsEmpty("Sample Bistro"), false);
+assert.equal(T.pdfText("Crab O’Clock — “Café”…"), "Crab O'Clock - \"Café\"..."); assert.equal(T.pdfUnprintable("Crab O’Clock — “Café”…"), "");
+assert.equal(T.pdfText("Phở 79"), "Pho 79", "an accent Helvetica lacks is dropped from its letter"); assert.equal(T.pdfUnprintable("Phở 79"), "");
+assert.equal(T.pdfText("Café"), "Café", "a letter typed as letter + accent prints as the accented letter");
+assert.equal(T.pdfText("Thanks!\nSee  you\tsoon \u{1F35C}"), "Thanks!\nSee you soon", "line breaks kept, runs of spaces and emoji gone"); assert.equal(T.pdfUnprintable("\u{1F35C} \u{1F35C} ok"), "\u{1F35C}", "each character once");
+assert.match(T.PDF_LETTERS.leftOut("小点心"), /English letters only: 小点心 will be left out/); assert.match(T.PDF_LETTERS.name, /Add the name in English/);
+for (const t of [T.PDF_LETTERS.name, T.PDF_LETTERS.customer("X"), T.PDF_LETTERS.line("x"), T.PDF_LETTERS.leftOut("x"), T.PDF_LETTERS.isLeftOut("x")]) assert.doesNotMatch(t, /—/);
 
 /* the contract's fields as invoicing reads them (lib/contract readContractFields, used by ops-contracts too) */
 const rf = readContractFields({ kind: "monthly", fee: "800", clientBusiness: "Sample Bistro", extra: "x", depositPercent: 30 });

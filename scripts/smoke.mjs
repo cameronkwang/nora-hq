@@ -3654,6 +3654,7 @@ async function invoicingFlows(browser) {
     const m = /(\d{7,})/.exec(title);
     if (!m || !title.includes("$625.10") || !title.includes(name)) throw new Error(`done title: ${title}`);
     number = m[1];
+    await page.waitForURL(/[?&]done=/, { timeout: 10000 }).catch(() => {}); // the address gains ?done= a tick after the done state shows
     id = new URL(page.url()).searchParams.get("done") ?? "";
     if (!id) throw new Error("the URL has no ?done=");
     const msg = await page.locator(".inv-msg-text").innerText();
@@ -3741,6 +3742,80 @@ async function invoicingFlows(browser) {
     await m.close();
   });
 
+  await step("done state on the smallest iPhone (390 x 844, share on): Share ready with no second PDF fetch, Make contract above the tab bar, the live refresh keeps the language", async () => {
+    const m = await browser.newContext({ ...sizeByKey("390x844").context, colorScheme: "dark" });
+    await login(m, "nora@local");
+    // A phone that can share files (headless Chromium can't): the done state then offers Share PDF.
+    await m.addInitScript(() => {
+      Object.defineProperty(navigator, "canShare", { configurable: true, value: (d) => !!(d && d.files && d.files.length) });
+      Object.defineProperty(navigator, "share", { configurable: true, value: async () => {} });
+    });
+    const p = await m.newPage();
+    p.setDefaultTimeout(30000);
+    p.on("dialog", (d) => d.accept());
+    const pdfGets = [];
+    p.on("request", (r) => { if (/\/invoices\/[^/]+\/pdf/.test(r.url())) pdfGets.push(r.url()); });
+    await p.goto(`${BASE}/invoices/new`, { waitUntil: "networkidle" });
+    await p.getByRole("combobox", { name: "Bill to" }).tap();
+    await p.keyboard.type(`${name} Phone`);
+    await p.getByRole("option", { name: new RegExp(`New customer: ${name} Phone`) }).tap();
+    await p.getByRole("button", { name: /Standard Content Creation Package/ }).tap();
+    await p.getByRole("button", { name: /^Make PDF/ }).tap();
+    await p.locator(".inv-done-title").waitFor();
+    await p.getByRole("button", { name: "Share PDF" }).waitFor({ timeout: 8000 });
+    await p.waitForURL(/[?&]done=/, { timeout: 10000 });
+    const phoneId = new URL(p.url()).searchParams.get("done");
+    if (pdfGets.length) throw new Error(`the PDF was fetched ${pdfGets.length} more time(s) before Share could be used`);
+    const link = await p.locator(".inv-next").getByRole("link", { name: "Make contract" }).boundingBox();
+    const bar = await p.locator(".tabbar").boundingBox();
+    if (!link || !bar || link.y + link.height > bar.y + 1) throw new Error(`Make contract is at y=${Math.round(link?.y ?? -1)}, the tab bar at ${Math.round(bar?.y ?? -1)}`);
+    await p.getByRole("button", { name: "简体中文" }).tap();
+    // She leaves for Messages and comes back: the app refreshes itself. The done state must not start over.
+    await p.evaluate(() => { window.dispatchEvent(new Event("focus")); document.dispatchEvent(new Event("visibilitychange")); });
+    for (let i = 0; i < 8; i++) {
+      await p.waitForTimeout(250);
+      const st = await p.evaluate(() => {
+        const b = [...document.querySelectorAll(".inv-done-actions button")].find((x) => /Share PDF|Getting PDF/.test(x.textContent));
+        return { share: b ? b.textContent.trim() + (b.disabled ? " (disabled)" : "") : "no share button", lang: document.querySelector('.inv-msg .seg [aria-pressed="true"]')?.textContent };
+      });
+      if (st.share !== "Share PDF" || st.lang !== "简体中文") throw new Error(`after the refresh: Share is "${st.share}", the message language ${st.lang}`);
+    }
+    // tidy: void it
+    await p.goto(`${BASE}/invoices/${phoneId}`, { waitUntil: "networkidle" });
+    await p.getByRole("button", { name: "Void invoice" }).click();
+    await p.locator(".page-head .status", { hasText: "Void" }).waitFor();
+    await m.close();
+  });
+
+  await step("contract builder on an iPhone 15 Pro: after the download, Make the invoice is the bar's button, on the screen", async () => {
+    const m = await browser.newContext({ ...sizeByKey("393x852").context, colorScheme: "dark", acceptDownloads: true });
+    await login(m, "nora@local");
+    const p = await m.newPage();
+    p.setDefaultTimeout(30000);
+    p.on("dialog", (d) => d.accept());
+    await p.goto(`${BASE}/contracts`, { waitUntil: "networkidle" });
+    await p.getByLabel("Business name").fill(`${name} Contract`);
+    await p.getByLabel("Contact name").fill("Pat Smoke");
+    await p.getByLabel(/^Fee \(\$\)/).fill("550");
+    await Promise.all([p.waitForEvent("download"), p.getByRole("button", { name: "Download PDF" }).tap()]);
+    const link = p.getByRole("link", { name: "Make the invoice" });
+    await link.waitFor();
+    if ((await link.count()) !== 1) throw new Error(`${await link.count()} Make the invoice links showing`);
+    const box = await link.boundingBox();
+    const bar = await p.locator(".tabbar").boundingBox();
+    if (!box || !bar || box.y < 0 || box.y + box.height > bar.y + 1 || box.height < 44) throw new Error(`Make the invoice is at y=${Math.round(box?.y ?? -1)} (${Math.round(box?.height ?? 0)}px tall); the tab bar starts at ${Math.round(bar?.y ?? -1)}`);
+    const a = await p.evaluate(auditPage, true);
+    if (a.overflow) throw new Error(`overflow ${a.overflow}`);
+    // Changing the form puts Preview and Download back (what was saved is no longer what the form shows).
+    await p.getByLabel("Contact name").fill("Pat Smoke Jr");
+    await p.getByRole("button", { name: "Download PDF" }).waitFor();
+    if (await p.getByRole("link", { name: "Make the invoice" }).count()) throw new Error("Make the invoice still shows after the form changed");
+    // tidy: remove the contract from history
+    await p.locator("#past-contracts li", { hasText: `${name} Contract` }).first().getByRole("button", { name: /^Remove/ }).click();
+    await p.waitForTimeout(800);
+    await m.close();
+  });
+
   for (const e of errors) if (!DEV_BLIP.test(e)) fail(`invoicing: ${e}`);
   await ctx.close();
 }
@@ -3803,7 +3878,12 @@ async function invoicingEndToEnd(browser) {
   const go = (path) => page.goto(`${BASE}${path}`, { waitUntil: "networkidle" });
   const must = (cond, msg) => { if (!cond) throw new Error(msg); };
   const pad = (n) => String(n).padStart(7, "0");
-  const doneTitle = () => page.locator(".inv-done-title").innerText({ timeout: 30000 });
+  /** The done state's title. Waits for the address to gain ?done=<id> too (a tick later), so doneId() can read it. */
+  const doneTitle = async () => {
+    const t = await page.locator(".inv-done-title").innerText({ timeout: 30000 });
+    await page.waitForURL(/[?&]done=/, { timeout: 10000 }).catch(() => {});
+    return t;
+  };
   const doneId = () => new URL(page.url()).searchParams.get("done") ?? "";
   /** The creator's quiet line ("Due on receipt · Zelle · #0000170"). */
   const defaultsLine = () => page.locator(".inv-defaults").innerText();
@@ -4282,9 +4362,67 @@ async function invoicingEndToEnd(browser) {
     await page.waitForURL(/\/invoices(\?|$)/);
   });
 
+  let editCus = "";
+  await st("editing a sent invoice keeps its discount and private note (only the due date changes)", async () => {
+    await go("/invoices/new");
+    const who = page.getByRole("combobox", { name: "Bill to" });
+    await who.fill(`Smoke Edit ${stamp}`);
+    await page.getByRole("option", { name: new RegExp(`New customer: Smoke Edit ${stamp}`) }).click();
+    await page.getByRole("button", { name: /Standard Content Creation Package/ }).click();
+    // A custom line typed but not added yet is already in the total she sees.
+    await page.getByLabel("New line description").fill("Food Stipend");
+    await page.getByLabel("New line amount").fill("75.10");
+    must((await page.locator(".inv-sum .is-total").innerText()).includes("$625.10"), `a typed, not yet added line is missing from the total: ${await page.locator(".inv-sum .is-total").innerText()}`);
+    await page.locator("details.inv-more > summary").click();
+    await page.locator("input.inv-disc").fill("10");
+    await page.getByLabel("Discount label").fill("Repeat customer");
+    await page.getByLabel(/^Private note/).fill("SMOKE: agreed $10 off by text");
+    must((await page.locator(".inv-sum .is-total").innerText()).includes("$615.10"), "the discount is not in the total");
+    await page.keyboard.press("Control+Enter");
+    must((await doneTitle()).includes("$615.10"), "the invoice is not $615.10");
+    const id = doneId();
+    await go(`/invoices/new?edit=${id}`);
+    must((await page.locator("input.inv-disc").inputValue()) === "10", `the edit screen's discount is "${await page.locator("input.inv-disc").inputValue()}"`);
+    must((await page.getByLabel(/^Private note/).inputValue()) === "SMOKE: agreed $10 off by text", "the edit screen lost the private note");
+    must((await page.locator(".inv-sum .is-total").innerText()).includes("$615.10"), "the edit screen's total is not $615.10");
+    await page.locator(".inv-defaults").getByRole("button", { name: /Due/ }).click();
+    await page.getByRole("button", { name: "7 days" }).click();
+    await page.getByRole("button", { name: /^Save changes/ }).click();
+    await page.waitForURL(/\/invoices\/[^/?]+\?saved=edit/);
+    must((await page.locator(".page-head").innerText()).includes("$615.10"), "after the edit the invoice is not $615.10");
+    const main = await page.locator("main").innerText();
+    must(main.includes("SMOKE: agreed $10 off by text") && main.includes("Repeat customer"), "the edit dropped the private note or the discount label");
+    must(new RegExp(`Due ${shortNyDate(plusDays(today, 7))}`).test(await page.locator(".page-head").innerText()), "the due date did not move");
+    editCus = (await page.locator(".page-head a[href^='/invoices/customers/']").first().getAttribute("href")).split("/").pop();
+    await voidInvoice(id);
+  });
+
+  await st("what the PDF can't print: a Chinese-only name is stopped before Make PDF, a mixed name says what is left out", async () => {
+    const before = hasMcp ? (await invoiceNumbers()).length : 0;
+    await go("/invoices/new");
+    const who = page.getByRole("combobox", { name: "Bill to" });
+    await who.fill("老四川");
+    await page.getByRole("option", { name: /New customer: 老四川/ }).click();
+    must(/English/.test(await page.locator(".inv-billto").innerText()), "nothing under Bill to says the PDF needs English letters");
+    await page.getByRole("button", { name: /Standard Content Creation Package/ }).click();
+    await page.keyboard.press("Control+Enter");
+    await page.locator(".inv-billto [role=alert]").waitFor();
+    must(/Add the name in English/.test(await page.locator(".inv-billto [role=alert]").innerText()), "no message asking for the English name");
+    must(!(await page.locator(".inv-done-title").count()), "an invoice was made for a name the PDF can't print");
+    if (hasMcp) must((await invoiceNumbers()).length === before, "a number was taken");
+    // A mixed name is fine: it says what the PDF leaves out, and the PDF prints the rest.
+    await who.fill("SAMPLE Bakery");
+    await page.getByRole("option", { name: /SAMPLE Bakery/ }).first().click();
+    const t = await page.locator(".inv-billto").innerText();
+    must(/小点心 will be left out/.test(t), `nothing says 小点心 is left out: ${t.replace(/\s+/g, " ").slice(0, 160)}`);
+    const pdf = await pp.request.get(`${BASE}${SAMPLE_INVOICE_LINK("overdue")}/pdf`);
+    if (pdf.status() === 200) must(/SAMPLE Bakery/.test(pdfText(Buffer.from(await pdf.body()))), "the sample PDF lost the English part of the name");
+  });
+
   await st("tidy: void the open smoke invoice, archive the smoke customers", async () => {
     if (restId) await voidInvoice(restId);
     if (ctrCustomer) await archiveCustomer(ctrCustomer);
+    if (editCus) await archiveCustomer(editCus);
   });
 
   // a dev-server restart isn't an app error; the 404 is the made-up link's page (as designed)

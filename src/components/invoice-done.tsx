@@ -21,7 +21,7 @@ const LANGS: Array<{ code: IntakeLang; label: string; htmlLang: string }> = [
 ];
 
 /** Phones only (docs/invoicing.md "The done state"): Web Share with a PDF file, on a touch screen. */
-function canShareFiles(): boolean {
+export function canShareFiles(): boolean {
   try {
     if (typeof navigator.canShare !== "function" || typeof navigator.share !== "function") return false;
     if (!window.matchMedia("(max-width: 767px), (pointer: coarse)").matches) return false;
@@ -47,10 +47,12 @@ function useCopied() {
 
 /**
  * "Make PDF" landed: Share PDF (phones), Download PDF, Copy message (in the customer's language), Copy pay link (only
- * with an online way), then the next step. iOS only lets share() run inside a fresh tap, so the PDF is fetched as a
- * File as soon as this appears and Share is a second tap on a ready file; while it loads the button says "Getting
- * PDF…", and if fetching fails it falls back to Download. One ink-filled button: Share on phones, Download on desktop
- * (`focal={false}` on the invoice page, whose focal button is Record payment).
+ * with an online way), the next step right under them (Make contract stays on the first screen of a small iPhone),
+ * then the message. iOS only lets share() run inside a fresh tap, so Share is a second tap on a file that is already
+ * there: after Make PDF the PDF came back with the answer (done.pdfBase64, no second round trip); on a reload and on
+ * the invoice page it is fetched as soon as this appears ("Getting PDF…", and Download if that fails). One ink-filled
+ * button: Share on phones, Download on desktop (`focal={false}` on the invoice page, whose focal button is Record
+ * payment).
  */
 export function InvoiceDoneView({
   done,
@@ -73,6 +75,17 @@ export function InvoiceDoneView({
 
   useEffect(() => {
     if (!canShareFiles()) return;
+    if (done.pdfBase64) {
+      // Make PDF answered with the file itself: ready at once.
+      try {
+        const bytes = Uint8Array.from(atob(done.pdfBase64), (ch) => ch.charCodeAt(0));
+        file.current = new File([bytes], done.fileName, { type: "application/pdf" });
+        setShare("ready");
+        return;
+      } catch {
+        /* fetch it instead */
+      }
+    }
     let live = true;
     setShare("loading");
     const t0 = performance.now();
@@ -93,7 +106,7 @@ export function InvoiceDoneView({
     return () => {
       live = false;
     };
-  }, [done.pdfPath, done.fileName]);
+  }, [done.pdfPath, done.fileName, done.pdfBase64]);
 
   const actions = doneActions(done, { canShareFiles: share === "loading" || share === "ready" });
   const shareFocal = focal && actions.includes("share_pdf");
@@ -163,22 +176,7 @@ export function InvoiceDoneView({
       </div>
       {shareError && <p role="alert" className="mt-2"><Status tone="danger" small className="is-wrap">{shareError}</Status></p>}
 
-      {/* The text "Copy message" copies, so she sees what goes with the PDF. In the customer's language; the others one tap away. */}
-      <div className="inv-msg">
-        <div className="inv-msg-head">
-          <p className="eyebrow">Message to send with it</p>
-          <div className="seg" role="group" aria-label="Message language">
-            {LANGS.map((l) => (
-              <button key={l.code} type="button" lang={l.htmlLang} aria-pressed={lang === l.code} onClick={() => setLang(l.code)}>
-                {l.label}
-              </button>
-            ))}
-          </div>
-        </div>
-        <p lang={LANGS.find((l) => l.code === lang)?.htmlLang} className="inv-msg-text">{message}</p>
-      </div>
-
-      {/* On the invoice page (no head) the next steps have their own place, so they aren't repeated here. */}
+      {/* The next step, right under the buttons (on the invoice page, no head, the steps have their own place). */}
       {showHead && (
         <nav aria-label="Next" className="inv-next">
           <span className="meta">Next:</span>
@@ -201,6 +199,22 @@ export function InvoiceDoneView({
           )}
         </nav>
       )}
+
+      {/* The text "Copy message" copies, so she sees what goes with the PDF. In the customer's language; the others one tap away. */}
+      <div className="inv-msg">
+        <div className="inv-msg-head">
+          <p className="eyebrow">Message to send with it</p>
+          <div className="seg" role="group" aria-label="Message language">
+            {LANGS.map((l) => (
+              <button key={l.code} type="button" lang={l.htmlLang} aria-pressed={lang === l.code} onClick={() => setLang(l.code)}>
+                {l.label}
+              </button>
+            ))}
+          </div>
+        </div>
+        <p lang={LANGS.find((l) => l.code === lang)?.htmlLang} className="inv-msg-text">{message}</p>
+      </div>
+
     </section>
   );
 }

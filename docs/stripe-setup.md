@@ -76,6 +76,11 @@ Try it:
    once Stripe sends `async_payment_succeeded` (in test mode Stripe does that by itself, usually within minutes). A
    test card payment is recorded at once.
 5. The invoice in Nora HQ now shows the payment (method "Bank transfer (Stripe)" or "Card (Stripe)") and the fee.
+6. One more look, once: on Stripe's bank step there should be **no** "Enter bank details manually" choice (Nora HQ
+   asks for instant verification only, so a started bank payment is always a real debit). If Stripe still offers
+   it, tell whoever maintains Nora HQ before going live: with manual entry a payment can show as "on its way" for up
+   to 10 days with nothing debited. This is the one thing that could not be tried from the build machine (it has no
+   Stripe account); the setting itself is in Stripe's published API.
 
 Locally: run `stripe listen --forward-to localhost:3200/api/stripe/webhook` (the Stripe CLI prints a `whsec_…` for
 your machine) and start the dev server with `STRIPE_SECRET_KEY=sk_test_… STRIPE_WEBHOOK_SECRET=whsec_…`.
@@ -95,7 +100,14 @@ your machine) and start the dev server with `STRIPE_SECRET_KEY=sk_test_… STRIP
   from the request), `payment_method_types` = `us_bank_account` and/or `card` (the invoice's online ways that are on),
   `metadata[invoice_id]` on the session and its PaymentIntent, `client_reference_id` = the invoice id,
   `customer_email` when known, the page's language (`en`, `zh`, `zh-TW`), back to the invoice page with `?paid=1` or
-  without, open for one hour. An open session for the same amount is reused; a new one makes older open ones expire.
+  without, open for one hour. An open session for the same amount is reused; a new one makes older open ones for
+  ANOTHER amount expire (never one for the same amount: two presses at once must not expire the page the browser is
+  following). With bank transfer the session asks for **instant verification only**
+  (`payment_method_options[us_bank_account][verification_method]=instant`; Stripe's API takes `automatic`, its
+  default, or `instant`): the customer signs in to their bank and the debit starts at once. The default would also
+  let them type the account by hand and confirm two small deposits a day or two later; Checkout then finishes before
+  any money moves, and the invoice would say "a bank payment is on its way" for up to 10 days with nothing debited.
+  A customer whose bank can't be verified instantly pays by Zelle.
   At most 6 new sessions per invoice per hour and 20 per day (one atomic counter per invoice in `app_settings`, key
   `stripe.checkout_rate.<invoice id>`, the drop link's pattern). Refused for a paid or cancelled invoice and while a
   bank payment is clearing. The Pay online route only redirects to `https://checkout.stripe.com/…`; if a custom
@@ -105,6 +117,11 @@ your machine) and start the dev server with `STRIPE_SECRET_KEY=sk_test_… STRIP
   no-op; a failed one answers 500 so Stripe retries). The payment is recorded once per Checkout Session (unique
   session id), for `amount_total` (what was actually paid), as `stripe_ach` or `stripe_card`, with Stripe's fee from
   the PaymentIntent's balance transaction when that call works. Only sessions carrying our `metadata.invoice_id` count.
+- **Open pages are closed when they stop being right**: when the invoice is voided, a payment is recorded or deleted,
+  its total is edited, its link is replaced, a bank transfer starts on another page or a Stripe payment is recorded,
+  every open Checkout Session for it is expired at Stripe (`POST /v1/checkout/sessions/<id>/expire`). An invoice
+  can't be voided while a bank transfer is clearing. A payment already in flight can still land on a cancelled or
+  paid invoice: it is recorded, and Nora gets a push, "Paid after it was cancelled" or "Paid twice", to refund it.
 - **Stored**: the session id, its URL while open, amount, status (open, processing, paid, failed, expired) and method;
   event ids and types. Never a card or bank detail, never the event payload, never a key.
 - **Keys** live only in Vercel env vars. They are never in the database, logs, error messages or Claude's tools.
@@ -168,3 +185,6 @@ To turn it on later (a client pays by bank every month), in test mode with `stri
 | Webhook 400 "Webhook not configured" | `STRIPE_WEBHOOK_SECRET` is missing |
 | Paid on Stripe but not on the invoice | Look at the endpoint's recent deliveries in Stripe. A 500 is retried by Stripe for up to 3 days; "Resend" works too (it is recorded only once) |
 | "Too many tries" on Pay online | More than 6 new checkouts for that invoice in an hour. Wait, or pay another way |
+| A customer says Stripe wouldn't take their bank | Their bank can't be verified instantly (Nora HQ asks for instant verification only, so a started transfer is always a real debit). They pay by Zelle, the default |
+| A push "Paid after it was cancelled" or "Paid twice" | A Stripe payment landed on a void invoice, or on top of one already paid (the customer finished paying on a page opened earlier). Refund it in the Stripe dashboard, then delete that payment on the invoice |
+| "A bank payment is on its way" and Void is missing | A bank transfer is clearing (about 4 business days). The invoice can be voided once it arrives (delete or refund the payment first) or fails |

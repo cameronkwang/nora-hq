@@ -3,9 +3,9 @@ import { notFound, redirect } from "next/navigation";
 import { headers } from "next/headers";
 import { requireUser } from "@/lib/auth";
 import { OpsError } from "@/lib/ops";
-import { getInvoice, getInvoiceCreatorContext, getInvoiceDone } from "@/lib/ops-invoices";
-import { sameAsLastTime, sortPayWays, type ContractPart, type InvoiceCreatorContext, type InvoiceDone } from "@/lib/invoices-types";
-import { InvoiceCreator, type CreatorEdit } from "@/components/invoice-creator";
+import { getInvoiceCreatorContext, getInvoiceDone, getInvoiceEditContext } from "@/lib/ops-invoices";
+import type { ContractPart, CreatorEdit, InvoiceCreatorContext, InvoiceDone } from "@/lib/invoices-types";
+import { InvoiceCreator } from "@/components/invoice-creator";
 import { PageHeader, Status } from "@/components/ui";
 
 export const dynamic = "force-dynamic";
@@ -24,8 +24,9 @@ async function origin(): Promise<string> {
 /**
  * The fast creator (docs/invoicing.md "The fast creator"). Server-rendered from ONE call (getInvoiceCreatorContext,
  * whose reads run in parallel), so it opens filled in with no loading state; the screen itself is one small client
- * component. Pre-fills: ?customer= ?client= ?deal= ?contract= (&part=) ?draft=. ?done=<id> shows the done state again
- * (a reload after Make PDF). ?edit=<id> changes a finalized, unpaid invoice with the same screen.
+ * component. Pre-fills: ?customer= ?client= ?deal= ?contract= (&part=) ?draft=. ?done=<id> (added to the address
+ * after Make PDF) shows the done state again on a reload. ?edit=<id> changes a finalized, unpaid invoice with the same
+ * screen.
  */
 export default async function NewInvoicePage({ searchParams }: { searchParams: Promise<SP> }) {
   const user = await requireUser();
@@ -50,33 +51,13 @@ export default async function NewInvoicePage({ searchParams }: { searchParams: P
     if (doneId) {
       [ctx, done] = await Promise.all([getInvoiceCreatorContext({}), getInvoiceDone(doneId, user.email, { origin: await origin() })]);
     } else if (editId) {
-      const [c, inv] = await Promise.all([getInvoiceCreatorContext({}), getInvoice(editId)]);
-      if (!inv) notFound();
-      if (inv.status === "draft") redirect(`/invoices/new?draft=${encodeURIComponent(inv.id)}`);
-      if (inv.status === "paid" || inv.status === "void") redirect(`/invoices/${encodeURIComponent(inv.id)}`);
-      edit = { id: inv.id, number: inv.number, customerName: inv.customer.name, customerAddress: inv.customer.billingAddress };
-      ctx = {
-        ...c,
-        prefill: {
-          ...c.prefill,
-          billTo: null,
-          newCustomer: null,
-          // The exact lines (a typed-each-time line keeps its amount here: it's this invoice's).
-          lines: sameAsLastTime(inv.items, c.savedItems).map((l, i) => ({ ...l, unitCents: inv.items[i]?.unitCents ?? l.unitCents })),
-          issueDate: inv.issueDate ?? c.today,
-          dueDate: inv.dueDate ?? inv.issueDate ?? c.today,
-          payWays: sortPayWays(inv.payWays),
-          payNote: inv.payNote,
-          notes: inv.notes,
-          lang: inv.lang,
-          dealId: inv.dealId,
-          contractId: inv.contractId,
-          contractPart: null,
-          draftId: null,
-          source: "draft",
-          note: null,
-        },
-      };
+      // The invoice as the creator's prefill, with everything the form can change (ops: getInvoiceEditContext).
+      const e = await getInvoiceEditContext(editId);
+      if (!e) notFound();
+      if (e.status === "draft") redirect(`/invoices/new?draft=${encodeURIComponent(e.edit.id)}`);
+      if (e.status === "paid" || e.status === "void") redirect(`/invoices/${encodeURIComponent(e.edit.id)}`);
+      edit = e.edit;
+      ctx = e.ctx;
     } else {
       ctx = await getInvoiceCreatorContext(opts);
     }
@@ -85,7 +66,9 @@ export default async function NewInvoicePage({ searchParams }: { searchParams: P
     error = e.message;
   }
 
-  const key = editId ? `edit:${editId}` : doneId ? `done:${doneId}` : JSON.stringify(opts);
+  // ?done= is NOT part of the key: after Make PDF the creator adds it to the address it already has, so the live
+  // refresh renders the same key and the done state is never remounted (Share stays ready, the language stays chosen).
+  const key = editId ? `edit:${editId}` : JSON.stringify(opts);
   const title = edit ? `Edit ${edit.number ?? "invoice"}` : opts.draftId ? "Finish the draft" : "New invoice";
 
   return (
