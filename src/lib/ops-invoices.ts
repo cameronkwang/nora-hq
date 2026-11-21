@@ -182,8 +182,9 @@ export const InvoiceItemInput = z.object({
 }) satisfies z.ZodType<InvoiceItem>;
 
 /**
- * How this invoice asks to be paid: unique, at least one; order doesn't matter (shown Zelle first). Availability
- * (Zelle number set, Stripe set up, card turned on) is checked in the op with invoices-types checkPayWays.
+ * How this invoice asks to be paid: unique, at least one; order doesn't matter (the pickers list Zelle first, the PDF
+ * prints her bank account first). Availability (Zelle number set, her bank account saved, Stripe set up, card turned
+ * on) is checked in the op with invoices-types checkPayWays.
  */
 export const PayWaysInput = z.array(z.enum(PAY_WAYS)).min(1, "Pick at least one way to pay.").max(PAY_WAYS.length)
   .refine((w) => new Set(w).size === w.length, "Pick each way once.");

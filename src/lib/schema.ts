@@ -722,8 +722,11 @@ export const clientReports = pgTable(
  * Small settings blobs, e.g. "media_kit" → { enabled, rateLine, showRates, showPastCollabs, pastCollabs, bio };
  * NORA_PAYMENT_KEY → { line, …InvoiceSettings } = how Nora gets paid: `line` is printed on a deal's payment request
  * (e.g. "Zelle: …"); the other keys are the invoice settings (lib/invoices-types InvoiceSettings: From, Zelle, check,
- * Venmo, PayPal, Pay online on/off, default terms). Writers MERGE into the value (jsonb ||), never replace it.
- * Never a password, a card or bank account number, or a Stripe key (those are env vars only).
+ * Venmo, PayPal, Pay online on/off, the ways ticked for new invoices, default terms). Writers MERGE into the value
+ * (jsonb ||), never replace it. Never a password, a card number, a customer's bank details or a Stripe key (those are
+ * env vars only). The one bank account kept is Nora's own receiving account, which she prints on her invoices: its
+ * account and routing numbers are in `ownBankEnc`, ENCRYPTED with lib/crypto (TOKEN_ENC_KEY), never in plain text
+ * (docs/invoicing.md "Her own bank account").
  */
 export const NORA_PAYMENT_KEY = "nora_payment";
 export const appSettings = pgTable("app_settings", {
@@ -967,7 +970,8 @@ export const retainers = pgTable(
  * One invoice. status: draft · sent · partially_paid · paid · void ("overdue" is derived from dueDate, never stored).
  * number is null until finalized ("Make PDF": invoiceNumberSeq, "0000170"); an imported Skynova invoice keeps its own.
  * Dates default to today and due the same day ("Due on receipt", termsDays 0). payWays = how this invoice asks to be
- * paid, in any order (shown Zelle first): Zelle unless a person chose otherwise; payNote = the "custom" way's line.
+ * paid, in any order (the pickers list Zelle first, the PDF prints her bank account first): Zelle unless a person chose
+ * otherwise, on the invoice or as a default in Settings; payNote = the "custom" way's line.
  * contractId = the contract it bills (lib/contract), many invoices per contract.
  * items = the lines in order (InvoiceItem: description, quantity, unitCents); subtotal / discount / total are written
  * with them in the same UPDATE. paidCents = sum of invoice_payments, recomputed from them in ONE UPDATE after every

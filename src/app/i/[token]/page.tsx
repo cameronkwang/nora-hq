@@ -15,7 +15,8 @@ import { SESSION_COOKIE, verifySession } from "@/lib/session";
  * invoice link /i/<token>, made when an invoice is finalized (Make PDF). The token is the only key: only its sha256
  * is looked up (lib/ops-invoices getInvoiceByToken). A token that was never a link (or is a draft's) answers 404; a
  * cancelled invoice shows "This invoice was cancelled" and nothing else. Otherwise exactly this invoice and its
- * chosen ways to pay, Zelle first (components/invoice-public). Copy: lib/invoice-copy `page`.
+ * chosen ways to pay, in the PDF's order: her bank account for a transfer (this page and the PDF are the only places
+ * its full number is shown), Zelle, checks (components/invoice-public). Copy: lib/invoice-copy `page`.
  * Language: ?lang= → the invoice's (else its customer's) → Accept-Language.
  * ?paid=1 is Stripe's way back after paying; ?pay=<reason> is the Pay online route's way back when it couldn't start.
  * The customer opening it stamps "viewed" (after the response); a signed-in person or a link-preview bot does not.
