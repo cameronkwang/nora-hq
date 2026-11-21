@@ -127,7 +127,8 @@ await db.insert(schema.askMessages).values({ id: "sample-askmsg-1", askId: "samp
 
 // Invoicing (docs/invoicing.md): fake payment settings and saved lines, fake customers, one invoice in each state,
 // payments, two retainers, and two contracts (one linked to an invoice, one not). Every value is fake: the from-address
-// is "100 Sample St" and the Zelle number "(555) 010-0100".
+// is "100 Sample St", the Zelle number "5550100100", and her own bank account for a transfer (ACH) is "Sample Bank
+// Checking", account 000123456789, routing 000000000 (stored encrypted, exactly as Settings stores it).
 // Numbers: every sample invoice has a number from before Nora HQ (0000165 to 0000169, the end of her Skynova run; the
 // paid one is marked imported), so the sequence is untouched and the creator's first invoice in local dev is 0000170,
 // exactly as on her real first day (docs/invoicing.md "Numbers"). The smoke test relies on that.
@@ -149,10 +150,13 @@ await db.insert(schema.askMessages).values({ id: "sample-askmsg-1", askId: "samp
   };
   const token = (name: string) => `sample-invoice-${name}-`.padEnd(43, "0");
   const link = (name: string) => ({ tokenHash: createHash("sha256").update(token(name), "utf8").digest("hex"), tokenEnc: enc({ t: token(name) }) });
-  // Payment settings (merged, like every settings writer): fake From and Zelle, bank transfer on, card off, the two saved lines.
+  // Payment settings (merged, like every settings writer): fake From, Zelle and bank account, bank transfer online on,
+  // card off, the two saved lines. The account and routing numbers go in encrypted (ops-invoices readBank: { a, r }),
+  // never in plain text. No ways are ticked for new invoices: the built-in default, Zelle only, is what local dev shows.
   const settings = {
-    fromName: "Nora Chen", fromAddress: "100 Sample St\nSampleton, VA 23000", zelle: "(555) 010-0100",
+    fromName: "Nora Chen", fromAddress: "100 Sample St\nSampleton, VA 23000", zelle: "5550100100",
     checkPayee: "Nora Chen", checkAddress: "100 Sample St\nSampleton, VA 23000", venmo: "@sample-nora",
+    ownBankLabel: "Sample Bank Checking", ownBankEnc: enc({ a: "000123456789", r: "000000000" }),
     achEnabled: true, cardEnabled: false, termsDays: 0,
     savedItems: [
       { id: "package", description: "Standard Content Creation Package", unitCents: 55000 },
@@ -220,11 +224,12 @@ await db.insert(schema.askMessages).values({ id: "sample-askmsg-1", askId: "samp
       items: reel(20000), subtotalCents: 20000, totalCents: 20000, ...link("void"), sentAt: new Date(now - 15 * day), sentBy: "nora@local",
       voidedAt: new Date(now - 14 * day), voidedBy: "nora@local", voidReason: "Made twice (SAMPLE)", createdBy: "nora@local",
     });
-    // 0000168: from Taco Spot's contract, her usual two lines, Zelle or check, due in the contract's 15 days
+    // 0000168: from Taco Spot's contract, her usual two lines, due in the contract's 15 days. The one sample invoice
+    // that offers all three of her ways: bank transfer (ACH) to her account, Zelle, or a check.
     await db.insert(schema.invoices).values({
       id: "sample-inv-contract", number: "0000168", customerId: "sample-cus-taco", status: "sent", issueDate: dayOf(-2), dueDate: dayOf(13), termsDays: 15,
       items: [{ description: "Standard Content Creation Package", quantity: 1, unitCents: 55000 }, { description: "Food Stipend", quantity: 1, unitCents: 7510 }],
-      subtotalCents: 62510, totalCents: 62510, payWays: ["zelle", "check"], contractId: "sample-ctr-taco", source: "contract", lang: "en", ...link("contract"),
+      subtotalCents: 62510, totalCents: 62510, payWays: ["zelle", "ach", "check"], contractId: "sample-ctr-taco", source: "contract", lang: "en", ...link("contract"),
       sentAt: new Date(now - 2 * day), sentBy: "nora@local", createdBy: "nora@local",
     });
     // a draft: no number until a person presses Make PDF

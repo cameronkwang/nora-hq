@@ -153,7 +153,7 @@ assert.deepEqual(T.readInvoiceSettings({ payDefaults: ["check", "nope", "custom"
 assert.ok(!(T.DEFAULTABLE_PAY_WAYS as readonly string[]).includes("custom"));
 // the numbers a person types: digits, the ABA check digit, masking. The messages never repeat what was typed.
 assert.equal(T.bankDigits(" 0001 2345-6789 "), "000123456789"); assert.equal(T.bankDigits("12a4"), null); assert.equal(T.bankDigits(""), null);
-assert.equal(T.isRoutingNumber("000000000"), true); assert.equal(T.isRoutingNumber("011000015"), true, "a published Federal Reserve routing number passes");
+assert.equal(T.isRoutingNumber("000000000"), true); assert.equal(T.isRoutingNumber("999999992"), true, "a made-up number with the right check digit passes (99 is no bank's prefix)"); assert.equal(T.isRoutingNumber("999999993"), false);
 assert.equal(T.isRoutingNumber("000000001"), false); assert.equal(T.isRoutingNumber("123456789"), false); assert.equal(T.isRoutingNumber("00000000"), false); assert.equal(T.isRoutingNumber("0000000000"), false);
 assert.equal(T.bankDetailsProblem("000123456789", "000000000"), null); assert.equal(T.bankDetailsProblem("0001 2345 6789", "000-000-000"), null);
 assert.match(T.bankDetailsProblem("000123456789", "") ?? "", /both/); assert.match(T.bankDetailsProblem("", "000000000") ?? "", /both/);

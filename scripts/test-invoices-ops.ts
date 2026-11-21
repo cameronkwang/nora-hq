@@ -4,7 +4,9 @@
  * Covers: settings (merge, guards), the fast creator (context, Make PDF in one statement, the one-time ask, Same as
  * last time, drafts, numbering and the import race), ways to pay, payments and status, void, the deal write-through,
  * contracts both ways (deposit, the rest, monthly, retainer, contract from an invoice), retainers, reminders,
- * reports and CSV, the customer link, the Skynova import, the PDF, Claude's limits and the MCP tools' output.
+ * reports and CSV, the customer link, the Skynova import, the PDF, Claude's limits and the MCP tools' output, and her
+ * own bank account for the "ach" way (the one account number kept: encrypted at rest, masked on every team page,
+ * printed only on the PDF and the customer's page, never in a log, a message, the CSV or Claude's tools).
  * Prints the statement count and timing of Make PDF. All values are fake. Exits non-zero on the first wrong answer.
  */
 import assert from "node:assert/strict";
@@ -145,7 +147,7 @@ async function main() {
   assert.deepEqual(custom.payWays, ["zelle", "custom"], "shown Zelle first");
   assert.match(custom.message, /due [A-Z][a-z]{2} \d+\./, "a due date, not due on receipt");
   const pdfCustom = await ops.getInvoice(custom.id, { today });
-  assert.deepEqual(pdfCustom!.document.paymentLines, ["(555) 010-0100 [Zelle]", "Put invoice 0000177 in the Zelle memo", "Cash at the shoot is fine"]);
+  assert.deepEqual(pdfCustom!.document.paymentLines, ["Please send payment via Zelle to (555) 010-0100.", "Put invoice 0000177 in the Zelle memo", "", "Cash at the shoot is fine"]);
   ok("ways to pay: Zelle by default, others only when available, custom line, no number burnt on refusals");
 
   /* ── drafts: Save as draft, then Make PDF on it; pressing again changes nothing ── */
@@ -447,6 +449,218 @@ async function main() {
   }
   ok(`creator context (?customer=): ${ctxStatements} reads in parallel, ${ctxRuns.map((x) => x.toFixed(1)).join(", ")} ms`);
 
+  /* ── her own bank account (the "ach" way). Fake values only: account 000123456789, routing 000000000 ── */
+  const ACCT = "000123456789";
+  const ROUT = "000000000";
+  const noBank = (text: string, what: string) => assert.doesNotMatch(text, /000123456789|000987654321/, `${what} holds the account number`);
+  const rawSettings = async () => (await db.select({ value: schema.appSettings.value }).from(schema.appSettings).where(eq(schema.appSettings.key, schema.NORA_PAYMENT_KEY)))[0].value as Record<string, unknown>;
+  /** The text pdf-lib drew (Flate streams; Tj operands as hex or literal strings), one drawn string per line. */
+  const pdfDrawn = async (bytes: Uint8Array) => {
+    const zlib = await import("node:zlib");
+    const buf = Buffer.from(bytes);
+    const str = buf.toString("latin1");
+    const out: string[] = [];
+    const re = /stream\r?\n/g;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(str))) {
+      const start = m.index + m[0].length;
+      const end = str.indexOf("endstream", start);
+      if (end < 0) break;
+      let data: Buffer;
+      try { data = zlib.inflateSync(buf.subarray(start, end)); } catch { data = buf.subarray(start, end); }
+      for (const t of data.toString("latin1").matchAll(/<([0-9A-Fa-f]*)>\s*Tj|\(((?:\\.|[^\\)])*)\)\s*Tj/g)) out.push(t[1] != null ? Buffer.from(t[1], "hex").toString("latin1") : t[2].replace(/\\([()\\])/g, "$1"));
+      re.lastIndex = end;
+    }
+    return out.join("\n");
+  };
+  // Everything printed while these checks run is kept, to prove nothing logs a number.
+  const printed: string[] = [];
+  const realConsole = { log: console.log, error: console.error, warn: console.warn };
+  for (const k of ["log", "error", "warn"] as const) console[k] = (...a: unknown[]) => { printed.push(a.map((x) => (x instanceof Error ? `${x.message} ${x.stack}` : typeof x === "string" ? x : JSON.stringify(x))).join(" ")); realConsole[k](...a); };
+
+  // before it is saved: not offered, not tickable
+  assert.equal((await ops.getInvoiceCreatorContext({ today })).payWays.ach.ok, false);
+  await rejects(ops.createAndFinalizeInvoice({ billTo: { kind: "customer", id: bistro.id }, items: two, payWays: ["zelle", "ach"] }, NORA, { today }), /bank account and routing numbers in Settings/, "a bank transfer can't be chosen before its details are saved");
+  await rejects(ops.saveInvoiceSettings({ payDefaults: ["zelle", "ach"] }, NORA), /Bank transfer \(ACH\) is ticked for new invoices but isn't ready/, "nor ticked for new invoices");
+  await rejects(ops.saveInvoiceSettings({ payDefaults: ["zelle", "card"] }, NORA), /Card online is ticked for new invoices but isn't ready/, "the same rule for every way");
+  // people only
+  await rejects(ops.saveInvoiceSettings({ ownBankAccount: ACCT, ownBankRouting: ROUT }, "claude"), /Only Nora or Cameron/, "Claude never sets the bank details");
+  await rejects(ops.saveInvoiceSettings({ ownBankRemove: true }, "claude"), /Only Nora or Cameron/, "nor removes them");
+  await rejects(ops.saveInvoiceSettings({ ownBankAccount: ACCT, ownBankRouting: ROUT }, "system"), /Only Nora or Cameron/, "nor does the system");
+  // checked in plain words, never repeating what was typed
+  for (const [a, r, re] of [
+    [ACCT, "000000001", /doesn't pass the bank check/], [ACCT, "12345678", /exactly 9 digits/], [ACCT, "", /both the account number and the routing number/], ["", ROUT, /both/],
+    ["12", ROUT, /4 to 17 digits/], ["0001234567AB", ROUT, /4 to 17 digits/], ["4242 4242 4242 4242", ROUT, /card number/], [ROUT, ROUT, /are the same/],
+  ] as const) {
+    await assert.rejects(ops.saveInvoiceSettings({ ownBankAccount: a, ownBankRouting: r }, NORA), (e: Error) => re.test(e.message) && /^Not saved: /.test(e.message) && !/\d{4,}/.test(e.message), `refused without echoing it (${re})`);
+  }
+  assert.equal((await rawSettings()).ownBankEnc, undefined, "a refused save stores nothing");
+  // no encryption key (a production server without TOKEN_ENC_KEY): the numbers are refused, everything else still saves
+  const env = process.env as Record<string, string | undefined>;
+  const keep = { node: env.NODE_ENV, key: env.TOKEN_ENC_KEY };
+  env.NODE_ENV = "production";
+  delete env.TOKEN_ENC_KEY;
+  try {
+    await assert.rejects(ops.saveInvoiceSettings({ ownBankAccount: ACCT, ownBankRouting: ROUT, footer: "SAMPLE note" }, NORA), (e: Error) => /no encryption key yet \(TOKEN_ENC_KEY\)/.test(e.message) && !/\d{4,}/.test(e.message), "no key: the bank details are refused with a clear message");
+    assert.equal((await rawSettings()).ownBankEnc, undefined); assert.equal((await ops.getInvoiceSettings()).footer, null, "nothing of that save landed");
+    assert.equal((await ops.saveInvoiceSettings({ footer: "SAMPLE note" }, NORA)).footer, "SAMPLE note", "the other settings still save without the key");
+  } finally {
+    if (keep.node === undefined) delete env.NODE_ENV; else env.NODE_ENV = keep.node;
+    if (keep.key !== undefined) env.TOKEN_ENC_KEY = keep.key;
+  }
+  await ops.saveInvoiceSettings({ footer: null }, NORA);
+
+  // saved: encrypted at rest, masked in what the pages get
+  const sv = await ops.saveInvoiceSettings({ ownBankLabel: "Sample Bank Checking", ownBankAccount: " 0001 2345-6789 ", ownBankRouting: ROUT }, NORA);
+  assert.equal(sv.ownBankLabel, "Sample Bank Checking"); assert.equal(sv.ownBankLast4, "6789"); assert.equal(sv.ownBankRouting, ROUT); assert.equal(sv.ownBankUnreadable, false);
+  noBank(JSON.stringify(sv), "what Settings gets back");
+  noBank(JSON.stringify(await ops.getInvoiceSettings()), "getInvoiceSettings");
+  const raw = await rawSettings();
+  assert.match(String(raw.ownBankEnc), /^v1\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/, "stored as lib/crypto ciphertext");
+  assert.doesNotMatch(JSON.stringify(raw), /000123456789|000000000|6789/, "the stored row has neither number in plain text, not even the last digits");
+  const { decryptJson } = await import("../src/lib/crypto");
+  assert.deepEqual(decryptJson(String(raw.ownBankEnc)), { a: ACCT, r: ROUT }, "round trip with the TOKEN_ENC_KEY cipher");
+  await ops.saveInvoiceSettings({ ownBankAccount: ACCT, ownBankRouting: ROUT }, CAM);
+  assert.equal((await rawSettings()).ownBankEnc, raw.ownBankEnc, "the same numbers again: nothing is rewritten");
+  await ops.saveInvoiceSettings({ zelleName: null, termsDays: 0 }, CAM);
+  await savePaymentLine("Zelle: (555) 010-0100", NORA);
+  assert.equal((await ops.getInvoiceSettings()).ownBankLast4, "6789", "other saves (and the deal payment line) keep the bank details");
+  // a row whose ciphertext can't be read (the key changed): no way offered, Settings says to type it again, nothing throws
+  const unread = T.readInvoiceSettings({ ...raw, ownBankEnc: "v1.AAAA.BBBB.CCCC" });
+  assert.equal(unread.ownBankUnreadable, true); assert.equal(T.availablePayWays(unread, false).ach.ok, false);
+
+  // it is the ONE place: every other field still refuses a bank or card number, her own block included
+  await rejects(ops.saveInvoiceSettings({ footer: "ACH to ACCT#:000123456789" }, NORA), /card or bank/, "the default note");
+  await rejects(ops.saveInvoiceSettings({ checkAddress: "ROUTING:000000000" }, NORA), /card or bank/, "the check address");
+  await rejects(ops.saveInvoiceSettings({ zelle: "acct 000123456789" }, NORA), /card or bank/, "the Zelle setting");
+  await rejects(ops.saveInvoiceSettings({ ownBankLabel: "Sample Bank Checking 000123456789" }, NORA), /bank label is a name/, "the bank label is a name, not a number");
+  await rejects(ops.saveInvoiceSettings({ ownBankLabel: "Checking, routing 000000000" }, NORA), /card or bank|bank label is a name/, "nor a routing number");
+  await rejects(ops.saveSavedItems([{ description: "Reel, acct 000123456789", unitCents: 100 }], NORA), /card or bank/, "a saved line");
+  await rejects(ops.createAndFinalizeInvoice({ billTo: { kind: "customer", id: bistro.id }, items: two, notes: "ACH to ACCT#:000123456789" }, NORA, { today }), /card or bank/, "an invoice's notes");
+  await rejects(ops.createAndFinalizeInvoice({ billTo: { kind: "customer", id: bistro.id }, items: two, privateNotes: "routing 000000000" }, NORA, { today }), /card or bank/, "the private note");
+  await rejects(ops.createAndFinalizeInvoice({ billTo: { kind: "customer", id: bistro.id }, items: two, payWays: ["zelle", "custom"], payNote: "ACH to ACCT#:000123456789" }, NORA, { today }), /card or bank/, "the custom pay line");
+  await rejects(ops.createAndFinalizeInvoice({ billTo: { kind: "customer", id: bistro.id }, items: [{ description: "Reel, account 000123456789", quantity: 1, unitCents: 100 }] }, NORA, { today }), /card or bank/, "an invoice line");
+  await rejects(ops.createInvoiceDraft({ customerId: bistro.id, items: [{ description: "Reel", quantity: 1, unitCents: 100 }], notes: "Card 4242 4242 4242 4242" }, "claude"), /card or bank/, "a card number, from Claude too");
+  await rejects(ops.createCustomer({ name: "SAMPLE Bank Person", notes: "account 000123456789" }, NORA), /card or bank/, "a customer's notes");
+  await rejects(ops.createCustomer({ name: "SAMPLE Bank Person", billingAddress: "ROUTING:000000000" }, NORA), /card or bank/, "a customer's address");
+  await rejects(ops.recordPayment(cd.id, { amountCents: 100, paidOn: today, method: "ach", reference: "acct 000123456789" }, NORA), /card or bank/, "a payment's reference");
+  assert.ok((await ops.previewSkynovaImport("Invoice #\tCustomer\tTotal\n0000901\tSAMPLE Acct Person, acct 000123456789\t$10.00", "invoices")).invoices[0].issues.includes("card or bank number in the text"), "an import");
+
+  // ticked for new invoices: the creator starts with them, in the pickers' order
+  const sd = await ops.saveInvoiceSettings({ payDefaults: ["check", "ach", "zelle"] }, NORA);
+  assert.deepEqual(sd.payDefaults, ["zelle", "ach", "check"]);
+  const ctx3 = await ops.getInvoiceCreatorContext({ today });
+  assert.deepEqual(ctx3.defaultPayWays, ["zelle", "ach", "check"]); assert.deepEqual(ctx3.prefill.payWays, ["zelle", "ach", "check"]); assert.equal(ctx3.payWays.ach.ok, true);
+  assert.equal(T.creatorDefaultsLine({ issueDate: today, dueDate: today, payWays: ctx3.prefill.payWays, nextNumber: ctx3.nextNumber }).pay, "Zelle, bank transfer (ACH), check");
+  noBank(JSON.stringify(ctx3), "the creator's context");
+  noBank(JSON.stringify(await ops.getInvoiceEditContext(d1.id, { today })), "the edit context");
+
+  // an invoice with the three ways (none sent: the ticked ones), made from a phone (the PDF comes back with it)
+  const inv3 = await ops.createAndFinalizeInvoice({ billTo: { kind: "customer", id: bistro.id }, items: two }, NORA, { today, withPdf: true, origin: "http://localhost:3200" });
+  assert.deepEqual(inv3.payWays, ["zelle", "ach", "check"]);
+  const n3 = inv3.number;
+  const BLOCK = [
+    "Sample Bank Checking", "ACH to ACCT#:000123456789", "ROUTING:000000000",
+    "Please send payment via Zelle to (555) 010-0100.", `Put invoice ${n3} in the Zelle memo`,
+    "Checks Payable to Nora Chen", "Mail to 100 Sample St, Sampleton, VA 23000",
+  ];
+  const inOrder = (text: string, what: string) => {
+    let at = -1;
+    for (const l of BLOCK) {
+      const i = text.indexOf(l, at + 1);
+      assert.ok(i > at, `${what}: "${l}" is missing or out of order`);
+      at = i;
+    }
+  };
+  const pdf3 = await ops.invoicePdf(inv3.id, { today });
+  const drawn = await pdfDrawn(pdf3!.bytes);
+  assert.match(drawn, /PAYMENT INFORMATION:/); inOrder(drawn, "the PDF");
+  assert.doesNotMatch(drawn, /\[Zelle|Check payable to|••••/, "the old wording is gone and the PDF never prints a masked account");
+  inOrder(await pdfDrawn(Buffer.from(inv3.pdfBase64!, "base64")), "the PDF that comes back with Make PDF");
+  inOrder(await pdfDrawn((await ops.invoicePdf(inv3.id, { today, public: true }))!.bytes), "the customer's PDF");
+  // the message that goes with it names the ways, never the numbers
+  assert.match(inv3.message, new RegExp(`Bank transfer \\(ACH\\): the account details are on the PDF\\.\\nZelle: \\(555\\) 010-0100, with ${n3} in the memo\\.\\nChecks payable to Nora Chen\\.`));
+  noBank(JSON.stringify({ ...inv3, pdfBase64: null }), "the done state");
+  noBank(JSON.stringify(await ops.getInvoiceDone(inv3.id, NORA, { today })), "the done state on a reload");
+  const m3 = await ops.getInvoiceMessages(inv3.id, NORA, { today, origin: "http://localhost:3200" });
+  assert.match(m3.email.body, /How to pay:\nBank transfer \(ACH\): the account details are on the PDF\.\nPlease send payment via Zelle to \(555\) 010-0100\.\nPut invoice \d+ in the Zelle memo\nChecks Payable to Nora Chen\nMail to 100 Sample St, Sampleton, VA 23000/);
+  assert.doesNotMatch(JSON.stringify(m3), /000123456789|ACCT|ROUTING|000000000/, "the email, the reminder, the texts and the mailto links never carry the account or routing number");
+  // the team's page: the same block with the account masked, and it says so
+  const team3 = await ops.getInvoice(inv3.id, { today });
+  assert.deepEqual(team3!.document.paymentLines.slice(0, 4), ["Sample Bank Checking", "ACH to ACCT#:••••6789", "ROUTING:000000000", ""]);
+  assert.equal(team3!.document.paymentMasked, true); assert.deepEqual(team3!.payOptions.map((o) => o.way), ["ach", "zelle", "check"]);
+  noBank(JSON.stringify(team3), "the team's invoice page (and what Claude's get_invoice is built from)");
+  noBank(JSON.stringify(await ops.listInvoices({ status: "all" })), "the invoice list");
+  noBank(JSON.stringify(await ops.getCustomer(bistro.id, { today })), "the customer page");
+  // the customer's page: the real numbers, only for an invoice that chose the way
+  const link3 = await ops.getInvoiceLink(inv3.id, NORA, { origin: "http://localhost:3200" });
+  const pub3 = await ops.getInvoiceByToken(link3!.split("/i/")[1], { today });
+  assert.equal(pub3.state, "open");
+  if (pub3.state === "open") assert.deepEqual(pub3.options, [
+    { way: "ach", label: "Sample Bank Checking", account: ACCT, routing: ROUT },
+    { way: "zelle", to: "(555) 010-0100", name: null, memo: `Put invoice ${n3} in the Zelle memo` },
+    { way: "check", payee: "Nora Chen", address: "100 Sample St\nSampleton, VA 23000" },
+  ], "her order: the account number, the routing number, then Zelle, then checks");
+  const zOnly = await ops.createAndFinalizeInvoice({ billTo: { kind: "customer", id: bistro.id }, items: two, payWays: ["zelle"] }, NORA, { today });
+  const pubZ = await ops.getInvoiceByToken((await ops.getInvoiceLink(zOnly.id, NORA))!.split("/i/")[1], { today });
+  noBank(JSON.stringify(pubZ), "the page of an invoice that didn't choose a bank transfer"); assert.doesNotMatch(JSON.stringify(pubZ), /ROUTING|000000000|Sample Bank/);
+  assert.doesNotMatch(await pdfDrawn((await ops.invoicePdf(zOnly.id, { today }))!.bytes), /ACH|ROUTING|Sample Bank/, "nor its PDF");
+  // an invoice made before keeps the ways saved on it
+  assert.deepEqual((await ops.getInvoice(d1.id, { today }))!.payWays, ["zelle"], "an invoice already made keeps its own ways");
+  assert.deepEqual((await ops.getInvoice(cd.id, { today }))!.payWays, ["zelle", "check"]);
+  // a void or unknown link still reveals nothing
+  const v3 = await ops.createAndFinalizeInvoice({ billTo: { kind: "customer", id: bistro.id }, items: two }, NORA, { today });
+  const vLink = (await ops.getInvoiceLink(v3.id, NORA))!.split("/i/")[1];
+  await ops.voidInvoice(v3.id, NORA, { reason: "Made twice (SAMPLE)" });
+  assert.deepEqual(await ops.getInvoiceByToken(vLink, { today }), { state: "void", lang: null }, "a cancelled invoice's link: no ways, no numbers");
+  assert.equal(await ops.invoicePdf(v3.id, { public: true }), null); assert.deepEqual(await ops.getInvoiceByToken("A".repeat(43)), { state: "unknown" });
+  // drafts: a retainer's draft takes the ticked ways; Claude's draft too, and only as names
+  await db.update(schema.retainers).set({ lastRunMonth: null }).where(eq(schema.retainers.id, r1.id));
+  const runB = await ops.runRetainers(now);
+  const madeB = runB.created.find((c) => c.retainerId === r1.id);
+  assert.deepEqual((await ops.getInvoice(madeB!.invoiceId))!.payWays, ["zelle", "ach", "check"], "a retainer draft takes the ways ticked for new invoices");
+  await ops.deleteDraftInvoice(madeB!.invoiceId, NORA);
+  // paid by bank transfer: recorded as one, and the tax CSV says only the method
+  const paidAch = await ops.recordPayment(inv3.id, { amountCents: 10000, paidOn: today, method: "ach", reference: "SAMPLE transfer" }, NORA);
+  assert.equal(paidAch.payment.method, "ach");
+  const csv3 = (await ops.paymentsCsv({ year: Number(today.slice(0, 4)) })).csv;
+  assert.match(csv3, new RegExp(`${today},${n3},Sample Bistro,Bank transfer \\(ACH\\),SAMPLE transfer,100\\.00,,100\\.00`)); noBank(csv3, "the CSV export"); assert.doesNotMatch(csv3, /ROUTING|ACCT/);
+  noBank(JSON.stringify(await ops.invoiceReport({ today })), "the reports");
+
+  // changed, then removed: the way is unticked, invoices keep "ach" on them but print no empty block; added again
+  const ch = await ops.saveInvoiceSettings({ ownBankAccount: "000987654321", ownBankRouting: ROUT }, NORA);
+  assert.equal(ch.ownBankLast4, "4321"); assert.notEqual((await rawSettings()).ownBankEnc, raw.ownBankEnc);
+  const gone = await ops.saveInvoiceSettings({ ownBankRemove: true }, CAM);
+  assert.equal(gone.ownBankLast4, null); assert.equal(gone.ownBankRouting, null); assert.deepEqual(gone.payDefaults, ["zelle", "check"], "removing the account unticks the way that needs it");
+  assert.equal((await rawSettings()).ownBankEnc, null);
+  const after = await ops.getInvoice(inv3.id, { today });
+  assert.deepEqual(after!.payWays, ["zelle", "ach", "check"], "the invoice keeps the way saved on it"); assert.deepEqual(after!.payOptions.map((o) => o.way), ["zelle", "check"], "but nothing prints an empty way");
+  assert.doesNotMatch(await pdfDrawn((await ops.invoicePdf(inv3.id, { today }))!.bytes), /ACH|ROUTING/);
+  await ops.saveInvoiceSettings({ ownBankRemove: true }, CAM); // nothing to remove: nothing happens, nothing is logged
+  await ops.saveInvoiceSettings({ ownBankAccount: ACCT, ownBankRouting: ROUT, payDefaults: ["zelle", "ach", "check"] }, NORA); // typed and ticked in the same save
+  assert.deepEqual((await ops.getInvoiceCreatorContext({ today })).defaultPayWays, ["zelle", "ach", "check"]);
+
+  // the activity log says only THAT the bank details were added, changed or removed
+  const bankActs = await db.select({ a: schema.activity.action, s: schema.activity.summary, who: schema.activity.actor }).from(schema.activity).where(sql`${schema.activity.action} like 'invoice_settings.bank_%'`).orderBy(schema.activity.createdAt);
+  assert.deepEqual(bankActs.map((x) => [x.a, x.s]), [
+    ["invoice_settings.bank_added", "Added the bank details for bank transfer (ACH)"],
+    ["invoice_settings.bank_changed", "Changed the bank details for bank transfer (ACH)"],
+    ["invoice_settings.bank_removed", "Removed the bank details for bank transfer (ACH)"],
+    ["invoice_settings.bank_added", "Added the bank details for bank transfer (ACH)"],
+  ]);
+  // and nothing anywhere in the database holds either account number in plain text
+  const tables = (await db.execute(sql`select table_name from information_schema.tables where table_schema = 'public' and table_type = 'BASE TABLE'`)) as unknown as { rows: Array<{ table_name: string }> };
+  let scanned = 0;
+  for (const { table_name } of tables.rows) {
+    const dump = (await db.execute(sql.raw(`select coalesce(string_agg(row_to_json(t)::text, ' '), '') as j from "${table_name}" t`))) as unknown as { rows: Array<{ j: string }> };
+    noBank(dump.rows[0]?.j ?? "", `the ${table_name} table`);
+    scanned++;
+  }
+  assert.ok(scanned > 20, `every table scanned (${scanned})`);
+  for (const k of ["log", "error", "warn"] as const) console[k] = realConsole[k];
+  noBank(printed.join("\n"), "the console"); assert.doesNotMatch(printed.join("\n"), /ACCT#|ROUTING:/);
+  ok(`her bank account: people only, checked without echoing, encrypted at rest, masked for the team, real on the PDF and her customer's page only, never in a message, the CSV, a log or any of ${scanned} tables`);
+
   /* ── Claude's tools: what they return ── */
   const { McpServer } = await import("@modelcontextprotocol/sdk/server/mcp.js");
   const { registerInvoiceTools } = await import("../src/lib/mcp/tools-invoices");
@@ -459,9 +673,11 @@ async function main() {
     const out = await fn!(args, {});
     return { text: out.content[0].text, error: !!out.isError };
   };
-  const all = [await call("list_invoices", {}), await call("get_invoice", { id: dep.id }), await call("list_customers", {}), await call("get_invoice", { id: d1.id })];
+  const all = [await call("list_invoices", {}), await call("get_invoice", { id: dep.id }), await call("list_customers", {}), await call("get_invoice", { id: d1.id }), await call("get_invoice", { id: inv3.id }), await call("list_invoices", { customer_id: bistro.id })];
+  assert.match(all[4].text, /"pay_ways":"Zelle, Bank transfer \(ACH\), Check"/, "Claude sees which ways an invoice offers, by name");
   for (const o of all) {
     assert.equal(o.error, false, o.text);
+    assert.doesNotMatch(o.text, /000123456789|000000000|ACCT|ROUTING|••••|6789|Sample Bank/i, `never her bank details, not even masked: ${o.text.slice(0, 120)}`);
     assert.doesNotMatch(o.text, /token|tokenHash|tokenEnc|stripe|ctr_|contract/i, `no links, Stripe or contracts in Claude's output: ${o.text.slice(0, 120)}`);
     assert.doesNotMatch(o.text, /\/i\//, "never a customer link");
   }
@@ -471,12 +687,22 @@ async function main() {
   assert.equal(bad.error, true);
   const twoWho = await call("create_draft_invoice", { client_id: "poke-bros", customer_id: bistro.id, lines: [{ description: "x", unit_cents: 100 }] });
   assert.equal(twoWho.error, true);
-  ok("MCP: reads without links / Stripe / contracts; create_draft_invoice makes a draft, refuses card");
+  // no tool reads or changes how she gets paid, and a draft made without pay_ways takes the ticked ways as names only
+  assert.deepEqual(Object.keys(tools).sort(), ["create_draft_invoice", "get_invoice", "list_customers", "list_invoices"], "no settings tool");
+  for (const [name, t] of Object.entries(tools)) assert.doesNotMatch(JSON.stringify({ name, t }), /ownBank|bank_account|routing_number|account_number/i, `${name} takes no bank detail`);
+  const mk3 = await call("create_draft_invoice", { customer_id: bistro.id, lines: [{ description: "Instagram Reel", unit_cents: 45000 }] });
+  assert.equal(mk3.error, false, mk3.text); assert.match(mk3.text, /"pay_ways":"zelle, ach, check"/);
+  const mkBad = await call("create_draft_invoice", { customer_id: bistro.id, lines: [{ description: "Reel", unit_cents: 100 }], notes: "ACH to ACCT#:000123456789" });
+  assert.equal(mkBad.error, true); assert.match(mkBad.text, /card or bank/); assert.doesNotMatch(mkBad.text, /000123456789/, "the refusal doesn't repeat it");
+  for (const o of [mk, bad, twoWho, mk3, mkBad]) assert.doesNotMatch(o.text, /000123456789|000000000|••••|Sample Bank/, "nor does any other answer");
+  ok("MCP: reads without links / Stripe / contracts / bank details; create_draft_invoice makes a draft, refuses card; no settings tool");
 
-  /* ── activity log: never an amount, a link or the Zelle number ── */
+  /* ── activity log: never an amount, a link, the Zelle number or a bank number ── */
   const acts = await db.select({ s: schema.activity.summary }).from(schema.activity).where(sql`${schema.activity.action} like 'invoice%' or ${schema.activity.action} like 'customer%' or ${schema.activity.action} like 'retainer%'`);
-  for (const a of acts) assert.doesNotMatch(a.s, /\$\d|\/i\/|010-0100/, `activity "${a.s}"`);
-  ok(`activity: ${acts.length} invoicing entries, none with an amount, link or Zelle number`);
+  for (const a of acts) assert.doesNotMatch(a.s, /\$\d|\/i\/|010-0100|000123456789|000987654321|000000000|6789|4321/, `activity "${a.s}"`);
+  const everyAct = await db.select({ s: schema.activity.summary, a: schema.activity.action, e: schema.activity.entityId }).from(schema.activity);
+  assert.doesNotMatch(JSON.stringify(everyAct), /000123456789|000987654321|000000000/, "no activity row at all holds an account or routing number");
+  ok(`activity: ${acts.length} invoicing entries, none with an amount, link, Zelle number or bank number`);
 
   console.log("all invoicing ops checks passed");
 }
