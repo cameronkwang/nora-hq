@@ -493,6 +493,8 @@ people only: no Claude tool reads, makes or links contracts**, and invoice tools
     `contractNextSteps`).
   - The invoice page shows its contract ("Contract Nov 20 · Download again", `InvoiceDetail.contract` +
     `contractRefLabel`; Download again rebuilds the PDF in the browser from `fields`, lazy-loaded) or "Make contract".
+    The same is in the line under the invoice's number at the top of the page ("Contract Nov 20", which jumps to that
+    section, or "Make contract"), so the other half of the pair is one tap from the top on a phone too.
   - The customer page lists both: invoices and contracts (`CustomerDetail.contracts`, each with its invoices and next
     steps).
   - A deal page shows both: its invoices (`invoicesForDeal`) and its contracts (`contractsForDeal`).
@@ -883,3 +885,49 @@ no invoice yet, for trying "Make deposit invoice". **The creator's next number i
 `/i/sample-invoice-contract-0000000000000000000`. The sample deal "Sample Pizzeria" has no invoice, for trying Make
 invoice. To try the creator's one-time ask, clear From and Zelle in Settings. Use Stripe test keys (`sk_test_…`) and
 `stripe listen --forward-to localhost:3200/api/stripe/webhook` to try Pay online.
+
+### Testing
+
+Test a production build, not `next dev` (several times faster, no dev-server restarts):
+
+```
+pkill -f next-server; rm -rf .data public/uploads && npm run -s dev:sample-data && npx next build && npm run start:test
+BASE_URL=http://localhost:3200 MCP_TOKEN=test CRON_SECRET=test NODE_PATH=$(npm root -g) node scripts/smoke.mjs invoicing
+```
+
+- `npm run start:test` is `next start -p 3200` with throwaway test values: `MCP_TOKEN=test`, `CRON_SECRET=test`,
+  `STRIPE_WEBHOOK_SECRET=whsec_test`, and the `AUTH_SECRET`, `APP_USERS` (cameron@local, nora@local) and
+  `TOKEN_ENC_KEY` a production build needs (in `next dev` those have built-in defaults). Because that `AUTH_SECRET`
+  is written in the repo, the script also blanks `DATABASE_URL` (the server can only open the embedded sample
+  database in `./.data`, never the real one) and listens on 127.0.0.1 only. `next start` runs as a process named
+  `next-server`, so `pkill -f "next start"` does not stop it; `pkill -f next-server` does.
+- **Signing in.** A production build checks the real password's built-in hash (`src/lib/team.ts`), so the local
+  password "dev" does not work on its sign-in form, and no test should know the real one. Tests sign themselves in
+  with a session cookie made from the test server's own `AUTH_SECRET`: `scripts/test-login.mjs` (`signIn(context,
+  base, "nora@local")`; `node scripts/test-login.mjs nora@local` prints the cookie for curl). The app has no special
+  case for this; a server with any other `AUTH_SECRET` ignores the cookie. On `next dev` the same helper uses the form.
+- **Sections.** `node scripts/smoke.mjs list` prints them. One or more names run just those: `invoicing`, `v6`
+  (deals), `v8` (navigation, schedule), `v10` (settings, payment text), or by feature: `deals`, `contracts`,
+  `settings`, `navigation`, `schedule`. No name runs `all` (the crawl and every flow). `responsive` is the long page
+  audit and only runs when named.
+- **Sizes.** The crawls run in dark mode only (both themes share one layout), at every distinct iPhone screen from
+  the iPhone 14 on (390 x 844, 393 x 852, 402 x 874, 420 x 912, 428 x 926, 430 x 932, 440 x 956, and the folding
+  iPhone Duo's 466 x 678 and 626 x 890), the iPad Pro 11-inch (834 x 1194) and a 1080p desktop; each is named by its
+  models in the output (`DEVICE_SIZES` in the script). `SMOKE_FULL=1` adds the old generic widths and light mode.
+  `SMOKE_SIZES=393x852,ipad,desktop` and `SMOKE_ROUTES=/invoices,/i/` narrow a run to some sizes or routes.
+- **Two things only a production build shows.** (1) `next start` serves the public folder as it was at start, so a
+  file uploaded during a run (`public/uploads`, the local stand-in for Vercel Blob) answers 404; the smoke test
+  skips that one console error on the test server and says how many it skipped. (2) **A known issue, older than
+  invoicing and on main too:** now and then React reports hydration error #418 while a page loads, throws away the
+  server's HTML and draws the page again in the browser. The page works afterwards. It happens on every page (signed
+  in or not), never on `next dev`. What sets it off: React starts on the page before all of the page's data has
+  arrived (a long page's data comes in several pieces, and a list's later rows are among the last), and its second
+  try, when the rest arrives, fails. So it is rare on a fast connection (none in hundreds of loads with one browser,
+  about 1 load in 75 with four browsers at once) and common on a slow one: at 400 kbit/s, 3 to 20% of loads across
+  pages and about 1 in 4 on the invoice list; holding the app's main script back until the page has fully arrived
+  makes it go away (0 in 30). `node scripts/hydration-check.mjs` measures it. The page crawls load such a page again
+  and count it (a note at the end) instead of failing; the same error on every load of a page is still a failure.
+  It needs its own decision: a newer React / Next if they fixed it, or a loading boundary around the page content
+  (which changes how pages appear: the frame first, then the content).
+- The overflow check looks at what is cut off, not at sideways scrolling: `html` and `body` clip sideways overflow
+  (`overflow-x: clip`), so the page never scrolls sideways and `documentElement.scrollWidth` alone would never fail.

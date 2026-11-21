@@ -1,19 +1,76 @@
 // Smoke test for Nora HQ. Usage:
-//   BASE_URL=http://localhost:3200 NODE_PATH=$(npm root -g) node scripts/smoke.mjs [crawl|flows|all|responsive|nora|v6|v7|v8|v10|invoicing]
+//   BASE_URL=http://localhost:3200 MCP_TOKEN=test CRON_SECRET=test NODE_PATH=$(npm root -g) node scripts/smoke.mjs [section ...]
+// Sections: one or more names, separated by spaces or commas (`node scripts/smoke.mjs list` prints them):
+//   crawl · basics · nora · v6 · v7 · v8 · v10 · invoicing · responsive
+//   groups: `flows` = every flow section; `all` (the default) = crawl + flows. `responsive` only runs when named.
+//   by feature: deals (v6, v10) · contracts (invoicing) · settings (v10, invoicing) · navigation (v8) · schedule (v8, v10)
+//   · onboarding (v7) · collabs (nora, v6). Example: node scripts/smoke.mjs invoicing navigation deals
+// Run it against a production build, not `next dev` (several times faster, and no dev-server restarts):
+//   rm -rf .data public/uploads && npm run -s dev:sample-data && npx next build && npm run start:test
+// `npm run start:test` is `next start` on 127.0.0.1:3200 with throwaway test values (MCP_TOKEN=test, CRON_SECRET=test,
+// STRIPE_WEBHOOK_SECRET=whsec_test, the AUTH_SECRET / APP_USERS / TOKEN_ENC_KEY a production build needs before
+// cameron@local and nora@local can exist, and a blank DATABASE_URL so it only ever opens the embedded sample database).
+// The sign-in form of a production build checks the real password's hash, so there the test signs itself in with a
+// session cookie (scripts/test-login.mjs); on `next dev` it uses the form. Stop the server with `pkill -f next-server`.
+// The page crawls (crawl, responsive) run in DARK MODE ONLY, at the sizes in DEVICE_SIZES below: every distinct iPhone
+// screen size from the iPhone 14 on, the iPad Pro 11-inch (2021) and a 1080p desktop. SMOKE_FULL=1 brings back the old
+// full matrix as well (the generic 375 to 1920 widths, and light as well as dark at every size).
+// SMOKE_SIZES=393x852,ipad,desktop limits the responsive crawl to some sizes; SMOKE_ROUTES=/invoices,/i/ limits the
+// crawls to routes containing one of those pieces (for a quick check of one area). SMOKE_WORKERS=2 is how many sizes
+// the responsive crawl runs at once (each in its own headless browser; a browser that dies is run again once).
 // V10_SHOTS=/path saves the enhancements 2–12 screenshots (device scale 2) during the v10 flows. v10 reads the reminder
-// wording from /api/cron/reminders?preview=1: start the dev server with CRON_SECRET=test (or set the same CRON_SECRET here).
+// wording from /api/cron/reminders?preview=1: start the server with CRON_SECRET=test (or set the same CRON_SECRET here).
 // V8_SHOTS=/path saves the nav / schedule / business-tools screenshots (device scale 2) during the v8 flows.
 // V7_SHOTS=/path saves the onboarding-form screenshots (device scale 2) during the v7 flows.
 // Optional: SHOTS_DIR=/path to save screenshots, MCP_TOKEN=... to exercise /api/mcp in the flows.
-// invoicing: start the dev server with STRIPE_WEBHOOK_SECRET=whsec_test (or set SMOKE_STRIPE_WEBHOOK_SECRET to the server's)
+// invoicing: start the server with STRIPE_WEBHOOK_SECRET=whsec_test (or set SMOKE_STRIPE_WEBHOOK_SECRET to the server's)
 // and CRON_SECRET; on fresh sample data (`rm -rf .data && npm run dev:sample-data`) the first invoice must be 0000170.
 // SMOKE_DEBUG_DIR=/path saves a screenshot when an end-to-end invoicing step fails.
 import { createRequire } from "node:module";
 const require = createRequire(import.meta.url);
-const { chromium } = require("playwright");
+const { chromium, devices } = require("playwright");
+import { signIn, signInMode } from "./test-login.mjs";
 
 const BASE = (process.env.BASE_URL ?? "http://localhost:3200").replace(/\/$/, "");
-const MODE = process.argv[2] ?? "all";
+/** The sections, in the order they run. `responsive` is the long page audit: it only runs when it is named. */
+const SECTION_NAMES = ["crawl", "basics", "nora", "v6", "v7", "v8", "v10", "invoicing", "responsive"];
+const SECTION_ABOUT = {
+  crawl: "every route loads (dark; iPhone 15 Pro and desktop 1080): HTTP 200, no console error, no sideways scroll",
+  basics: "the first flows: asks, tasks, review, calendar, creators, leads, MCP basics, capture keys",
+  nora: "collab form, Nora's section, quick onboarding",
+  v6: "deals, notify/calendar, replies, review, kit, reports",
+  v7: "services and plans, client onboarding form",
+  v8: "Claude's business tools, Nora's schedule, navigation",
+  v10: "outreach profile, Google status, plan subsections, schedule reminders, payment text, launch kit, drop link, send mode, client health, make it a deal",
+  invoicing: "invoices end to end: fast creator, PDF, pay page, payments, contracts both ways, retainers, Stripe webhook, import, CSV, Claude's tools",
+  responsive: "every page at every size in DEVICE_SIZES, dark, as Cameron, as Nora and logged out: overflow, 16px inputs, 40px targets, tab bar",
+};
+const SECTION_GROUPS = {
+  flows: ["basics", "nora", "v6", "v7", "v8", "v10", "invoicing"],
+  all: ["crawl", "basics", "nora", "v6", "v7", "v8", "v10", "invoicing"],
+  // by feature: the sections that exercise it
+  deals: ["v6", "v10"], contracts: ["invoicing"], invoices: ["invoicing"], settings: ["v10", "invoicing"], navigation: ["v8"], nav: ["v8"],
+  schedule: ["v8", "v10"], onboarding: ["v7"], collabs: ["nora", "v6"],
+};
+const SECTIONS = (() => {
+  const asked = process.argv.slice(2).flatMap((a) => a.split(",")).map((a) => a.trim().toLowerCase()).filter(Boolean);
+  if (asked.some((a) => ["list", "help", "--list", "--help", "-h"].includes(a))) {
+    console.log("Sections:\n" + SECTION_NAMES.map((n) => `  ${n.padEnd(11)} ${SECTION_ABOUT[n]}`).join("\n"));
+    console.log("Groups:\n" + Object.entries(SECTION_GROUPS).map(([g, list]) => `  ${g.padEnd(11)} ${list.join(", ")}`).join("\n"));
+    process.exit(0);
+  }
+  const want = new Set();
+  for (const a of asked.length ? asked : ["all"]) {
+    if (SECTION_NAMES.includes(a)) want.add(a);
+    else if (SECTION_GROUPS[a]) for (const n of SECTION_GROUPS[a]) want.add(n);
+    else { console.error(`Unknown section "${a}". Sections: ${SECTION_NAMES.join(", ")}. Groups: ${Object.keys(SECTION_GROUPS).join(", ")}.`); process.exit(2); }
+  }
+  return SECTION_NAMES.filter((n) => want.has(n));
+})();
+const FULL = process.env.SMOKE_FULL === "1";
+/** SMOKE_ROUTES=/invoices,/i/ keeps only the routes containing one of those pieces (crawl and responsive). */
+const ROUTE_FILTER = (process.env.SMOKE_ROUTES ?? "").split(",").map((x) => x.trim()).filter(Boolean);
+const wanted = (routes) => (ROUTE_FILTER.length ? routes.filter((r) => ROUTE_FILTER.some((f) => r.includes(f))) : routes);
 // Cameron by default: since #21 and #25 he is the one who sees everything (the review queue, every business, the
 // sidebar's business list); Nora's own HQ shows only her things. Steps about Nora's view sign in as Nora explicitly.
 const EMAIL = process.env.SMOKE_EMAIL ?? "cameron@local";
@@ -53,29 +110,124 @@ const INVOICE_PUBLIC_ROUTES = HAS_SAMPLE_INVOICES
     ]
   : (console.log("  note: no sample invoice links (run npm run dev:sample-data); /i/<token> not crawled"), []);
 const PUBLIC_ROUTES = ["/collab", "/start/smoke-not-a-real-token", "/start/smoke-not-a-real-token?lang=zh-Hans", "/start/smoke-not-a-real-token?lang=zh-Hant", ...INVOICE_PUBLIC_ROUTES];
-const VIEWPORTS = [{ name: "desktop", width: 1280, height: 900 }, { name: "mobile", width: 390, height: 844 }];
+/**
+ * The sizes the page crawls check (Cameron's testing plan, Nov 2026): "all iPhones from 14+", then the iPad Pro 2021,
+ * then desktop 1080. Many iPhones share a screen, so each DISTINCT screen size is checked once, named by its models.
+ * `device` is Playwright's own descriptor for one of those models: touch, device scale 3, the iOS Safari user agent,
+ * and the page Safari shows on that screen with its bars up (a little shorter than the screen: the `page` printed in
+ * the output). A size Playwright has no descriptor for uses the screen size itself as the viewport.
+ *
+ * The 2026 iPhones: the 17e (Playwright's "iPhone 17e" descriptor) is the 390 x 844 screen; the 18 Pro (2622 x 1206
+ * pixels at 460 ppi) and 18 Pro Max (2868 x 1320 at 460 ppi) are the 402 x 874 and 440 x 956 screens already here
+ * (pixels divided by the 3x scale; Apple's tech specs, apple.com/iphone-18-pro/specs). The folding iPhone Duo has two
+ * new ones: its outer screen is 1398 x 2034 pixels at 460 ppi and its inner screen 1878 x 2670 at 430 ppi (Apple's
+ * tech specs, apple.com/iphone-duo/specs, read through a web search on 2026-11-21 because apple.com is not reachable
+ * from the build machine); divided by 3 that is 466 x 678 and 626 x 890 points. Apple publishes pixels, not points,
+ * so check these two against a real Duo if one ever matters.
+ *
+ * Cameron and Nora use the iPhone 15 Pro (393 x 852) and 15 Pro Max (430 x 932).
+ */
+const DEVICE_SIZES = [
+  { key: "390x844", models: "iPhone 14, 16e, 17e", device: "iPhone 14" },
+  { key: "393x852", models: "iPhone 14 Pro, 15, 15 Pro, 16", device: "iPhone 15 Pro" },
+  { key: "402x874", models: "iPhone 16 Pro, 17, 17 Pro, 18 Pro", device: "iPhone 17 Pro" },
+  { key: "420x912", models: "iPhone Air", device: "iPhone Air" },
+  { key: "428x926", models: "iPhone 14 Plus", device: "iPhone 14 Plus" },
+  { key: "430x932", models: "iPhone 14 Pro Max, 15 Plus, 15 Pro Max, 16 Plus", device: "iPhone 15 Pro Max" },
+  { key: "440x956", models: "iPhone 16 Pro Max, 17 Pro Max, 18 Pro Max", device: "iPhone 17 Pro Max" },
+  { key: "466x678", models: "iPhone Duo, closed (outer screen)", width: 466, height: 678, phone: true },
+  { key: "626x890", models: "iPhone Duo, open (inner screen)", width: 626, height: 890, phone: true },
+  { key: "834x1194", alias: "ipad", models: "iPad Pro 11-inch (2021)", device: "iPad Pro 11" },
+  { key: "1920x1080", alias: "desktop", models: "desktop 1080p", width: 1920, height: 1080 },
+].map((d) => {
+  const desc = d.device ? devices[d.device] : null;
+  if (d.device && !desc) throw new Error(`Playwright has no "${d.device}" descriptor: update Playwright or give ${d.key} a width and height`);
+  const [sw, sh] = d.key.split("x").map(Number);
+  // No descriptor: the exact screen size as the viewport; a phone gets touch, device scale 3 and the iOS Safari user agent.
+  const context = desc
+    ? { viewport: desc.viewport, screen: desc.screen ?? { width: sw, height: sh }, deviceScaleFactor: desc.deviceScaleFactor, isMobile: desc.isMobile, hasTouch: desc.hasTouch, userAgent: desc.userAgent }
+    : d.phone
+      ? { viewport: { width: d.width, height: d.height }, screen: { width: d.width, height: d.height }, deviceScaleFactor: 3, isMobile: true, hasTouch: true, userAgent: devices["iPhone 17 Pro"].userAgent }
+      : { viewport: { width: d.width, height: d.height }, deviceScaleFactor: 1 };
+  const page = `${context.viewport.width} x ${context.viewport.height}`;
+  const screen = `${sw} x ${sh}`;
+  return { key: d.key, alias: d.alias ?? null, touch: !!context.hasTouch, context, label: `${screen} · ${d.models}${page === screen ? "" : ` (page ${page})`}` };
+});
+const sizeByKey = (key) => DEVICE_SIZES.find((d) => d.key === key || d.alias === key);
+/** The old generic widths (device scale 1, no user agent), kept for SMOKE_FULL=1. */
+const OLD_SIZES = [
+  { name: "375", width: 375, height: 667, touch: true },
+  { name: "390", width: 390, height: 844, touch: true },
+  { name: "430", width: 430, height: 932, touch: true },
+  { name: "768", width: 768, height: 1024 },
+  { name: "1024", width: 1024, height: 768 },
+  { name: "1280", width: 1280, height: 800 },
+  { name: "1920", width: 1920, height: 1080 },
+].map((v) => ({
+  key: `old-${v.name}`, alias: null, touch: !!v.touch, label: `${v.width} x ${v.height} · generic ${v.touch ? "phone" : "window"} (old matrix)`,
+  context: { viewport: { width: v.width, height: v.height }, deviceScaleFactor: 1, isMobile: !!v.touch, hasTouch: !!v.touch },
+}));
+/**
+ * The plain crawl: the phone Cameron and Nora carry and the desktop, dark. SMOKE_FULL=1 adds the old pair (1280 and
+ * 390, light).
+ */
+const VIEWPORTS = [
+  { name: "desktop 1080p, dark", context: { ...sizeByKey("desktop").context, colorScheme: "dark" } },
+  { name: "iPhone 15 Pro, dark", context: { ...sizeByKey("393x852").context, colorScheme: "dark" } },
+  ...(FULL ? [
+    { name: "desktop 1280, light (old)", context: { viewport: { width: 1280, height: 900 }, deviceScaleFactor: 1, colorScheme: "light" } },
+    { name: "mobile 390, light (old)", context: { viewport: { width: 390, height: 844 }, deviceScaleFactor: 1, colorScheme: "light" } },
+  ] : []),
+];
 
 const failures = [];
 const fail = (msg) => { failures.push(msg); console.log("  FAIL " + msg); };
 const ok = (msg) => console.log("  ok   " + msg);
 
+/**
+ * Signs a browser context in. `next dev`: the sign-in form with the local password. A production build started with
+ * `npm run start:test`: the session cookie, signed with that test server's AUTH_SECRET (see scripts/test-login.mjs
+ * for why the form can't be used there).
+ */
 async function login(context, email = EMAIL) {
   await waitForServer();
-  const page = await context.newPage();
-  await page.goto(`${BASE}/login`);
-  await page.fill("#email", email);
-  await page.fill("#password", PASSWORD);
-  await Promise.all([page.waitForURL((u) => !u.pathname.startsWith("/login"), { timeout: 60000 }), page.click("button:has-text('Sign in')")]);
-  await page.close();
+  await signIn(context, BASE, email, PASSWORD);
 }
 
 /** When a page last saw the dev server drop a connection (`next dev` restarts itself near its memory limit). */
 let lastBlip = 0;
 const noteBlip = (text) => { if (DEV_BLIP.test(String(text ?? ""))) lastBlip = Date.now(); };
 
+/**
+ * `next start` serves the public folder as it was when the server started, so a file uploaded during the run
+ * (public/uploads, the local stand-in for Vercel Blob) answers 404 there. `next dev` serves it, and so does the real
+ * site (Vercel Blob). On the production test server that one console error is not an app bug: it is counted and
+ * said once at the end instead of failing the step.
+ */
+let PROD_TEST = false; // set before the sections run: the server is a production build started with `npm run start:test`
+let uploadMisses = 0;
+/**
+ * A known, intermittent error on PRODUCTION builds only (never seen on `next dev`): now and then React reports
+ * hydration error #418 while a page loads and draws the page again in the browser. It happens on every page, on main
+ * too, and more often the slower the page arrives (scripts/hydration-check.mjs measures it). It is not something one
+ * page's code does, so the page crawls load such a page again: clean the second time = counted and said at the end;
+ * the error every time = a real mismatch in that page, and a failure.
+ */
+const HYDRATION_418 = /Minified React error #418|Hydration failed because the server rendered/;
+let hydrationRetries = 0;
+const onlyHydration418 = (list) => PROD_TEST && list.length > 0 && list.every((e) => HYDRATION_418.test(e));
+function isLocalUploadMiss(m) {
+  if (!PROD_TEST || !/Failed to load resource/.test(m.text())) return false;
+  let path = "";
+  try { path = new URL(m.location()?.url ?? "", BASE).pathname; } catch {}
+  if (!path.startsWith("/uploads/")) return false;
+  uploadMisses++;
+  return true;
+}
+
 function watch(page, label) {
   const errors = [];
-  page.on("console", (m) => { if (m.type() === "error") { noteBlip(m.text()); errors.push(`console: ${m.text()}`); } });
+  page.on("console", (m) => { if (m.type() === "error" && !isLocalUploadMiss(m)) { noteBlip(m.text()); errors.push(`console: ${m.text()}`); } });
   page.on("pageerror", (e) => { noteBlip(e.message); errors.push(`pageerror: ${e.message}`); });
   return { errors, label };
 }
@@ -88,6 +240,7 @@ async function checkPage(page, path, label, errs) {
     try {
       res = await page.goto(BASE + path, { waitUntil: "networkidle", timeout: 90000 });
       if (attempt < 2 && errs.slice(before).some((e) => DEV_BLIP.test(e.replace(/^(console|pageerror): /, "")))) { errs.length = before; await waitForServer(); continue; }
+      if (attempt < 2 && onlyHydration418(errs.slice(before))) { errs.length = before; hydrationRetries++; continue; }
       break;
     } catch (e) {
       const msg = e.message.split("\n")[0];
@@ -103,32 +256,22 @@ async function checkPage(page, path, label, errs) {
     const txt = await page.evaluate(() => document.querySelector("nextjs-portal")?.shadowRoot?.textContent?.slice(0, 300) ?? "");
     if (/error/i.test(txt)) fail(`${label} ${path}: Next error overlay: ${txt}`);
   }
-  const { sw, iw } = await page.evaluate(() => ({ sw: document.documentElement.scrollWidth, iw: window.innerWidth }));
-  if (sw > iw + 1) {
-    const culprit = await page.evaluate(() => {
-      const w = window.innerWidth; const out = [];
-      for (const el of document.querySelectorAll("body *")) {
-        const r = el.getBoundingClientRect();
-        if (r.right > w + 1 && r.width > 0) out.push(`${el.tagName.toLowerCase()}.${String(el.className).slice(0, 60)} right=${Math.round(r.right)}`);
-        if (out.length > 4) break;
-      }
-      return out.join(" | ");
-    });
-    fail(`${label} ${path}: horizontal overflow ${sw} > ${iw} (${culprit})`);
-  }
+  // the same overflow check as the responsive audit (content cut off at the right edge counts: html and body clip it)
+  const { overflow } = await page.evaluate(auditPage, false);
+  if (overflow) fail(`${label} ${path}: horizontal overflow ${overflow}`);
   await page.waitForTimeout(150);
   for (const e of errs.slice(before)) fail(`${label} ${path}: ${e}`);
-  if (status === 200 && errs.length === before && sw <= iw + 1) ok(`${label} ${path}`);
+  if (status === 200 && errs.length === before && !overflow) ok(`${label} ${path}`);
 }
 
 async function crawl(browser) {
   for (const vp of VIEWPORTS) {
-    console.log(`\n== crawl ${vp.name} ${vp.width}px`);
-    const context = await browser.newContext({ viewport: { width: vp.width, height: vp.height }, deviceScaleFactor: 1 });
+    console.log(`\n== crawl ${vp.name} (${vp.context.viewport.width} x ${vp.context.viewport.height})`);
+    const context = await browser.newContext(vp.context);
     await login(context);
     const page = await context.newPage();
     const { errors } = watch(page);
-    for (const path of ROUTES) await checkPage(page, path, vp.name, errors);
+    for (const path of wanted(ROUTES)) await checkPage(page, path, vp.name, errors);
     // first creator / draft / task / ask / post detail pages, if any exist
     for (const [list, sel] of [["/creators", "a[href^='/creators/']:not([href='/creators/new']):not([href^='/creators/export']):not([href^='/creators/import'])"], ["/tasks?status=all", "a[href^='/tasks/']:not([href^='/tasks/import']):not([href^='/tasks/export'])"], ["/asks", "a[href^='/asks/']:not([href='/asks/new'])"], ["/calendar", "a[href^='/calendar/']:not([href^='/calendar/new'])"], ["/leads", "a[href^='/leads/']:not([href='/leads/new']):not([href^='/leads/import']):not([href^='/leads/export'])"], ["/collabs", "a[href^='/collabs/']"], ["/deals", "a[href^='/deals/']"], ["/deals", "a[href$='/visit']"]]) {
       const before = errors.length;
@@ -139,10 +282,10 @@ async function crawl(browser) {
     }
     await context.close();
     // public pages, logged out
-    const pub = await browser.newContext({ viewport: { width: vp.width, height: vp.height }, deviceScaleFactor: 1 });
+    const pub = await browser.newContext(vp.context);
     const pp = await pub.newPage();
     const pw = watch(pp);
-    for (const path of PUBLIC_ROUTES) await checkPage(pp, path, `${vp.name} logged-out`, pw.errors);
+    for (const path of wanted(PUBLIC_ROUTES)) await checkPage(pp, path, `${vp.name} logged-out`, pw.errors);
     await pub.close();
   }
 }
@@ -151,12 +294,12 @@ async function shots(browser, dir) {
   const fs = await import("node:fs");
   fs.mkdirSync(dir, { recursive: true });
   for (const vp of VIEWPORTS) {
-    const context = await browser.newContext({ viewport: { width: vp.width, height: vp.height }, deviceScaleFactor: 1 });
+    const context = await browser.newContext(vp.context);
     await login(context);
     const page = await context.newPage();
     for (const [name, path] of [["home", "/"], ["business", "/clients/crab-o-clock"], ["review", "/review"], ["creators", "/creators"]]) {
       await page.goto(BASE + path, { waitUntil: "networkidle" });
-      await page.screenshot({ path: `${dir}/${name}-${vp.width}.png`, fullPage: true });
+      await page.screenshot({ path: `${dir}/${name}-${vp.context.viewport.width}-${vp.context.colorScheme}.png`, fullPage: true });
     }
     await context.close();
   }
@@ -2085,16 +2228,6 @@ async function v7Flows(browser) {
   await context.close();
 }
 
-const RESP_VIEWPORTS = [
-  { name: "375", width: 375, height: 667, touch: true },
-  { name: "390", width: 390, height: 844, touch: true },
-  { name: "430", width: 430, height: 932, touch: true },
-  { name: "768", width: 768, height: 1024 },
-  { name: "1024", width: 1024, height: 768 },
-  { name: "1280", width: 1280, height: 800 },
-  { name: "1920", width: 1920, height: 1080 },
-];
-
 /** Nora's sample list, read from the parser test so the two never drift apart. */
 async function scheduleSample() {
   const fs = await import("node:fs");
@@ -2249,8 +2382,8 @@ async function v8Flows(browser) {
     await login(pctx);
     const pp = await pctx.newPage();
     await pp.goto(`${BASE}/calendar?month=${month}`, { waitUntil: "networkidle" });
-    const { sw, iw } = await pp.evaluate(() => ({ sw: document.documentElement.scrollWidth, iw: window.innerWidth }));
-    if (sw > iw + 1) throw new Error(`overflow ${sw} > ${iw}`);
+    const { overflow } = await pp.evaluate(auditPage, false);
+    if (overflow) throw new Error(`overflow ${overflow}`);
     if (!/Sometime in November/.test(await pp.locator("main").innerText())) throw new Error("no Sometime group on phone");
     if (SHOTS) await pp.screenshot({ path: `${SHOTS}/schedule-nov-390.png` });
     await pctx.close();
@@ -3418,15 +3551,23 @@ function auditPage(touch) {
     return `${el.tagName.toLowerCase()}${el.id ? "#" + el.id : ""}${t ? ` "${t}"` : ""}`;
   };
   const res = { overflow: null, smallFonts: [], smallTargets: [], covered: null };
-  const sw = document.documentElement.scrollWidth, iw = window.innerWidth;
+  // html and body clip sideways overflow (globals.css: overflow-x: clip), so the page itself never scrolls sideways and
+  // documentElement.scrollWidth always equals the window: what sticks out is CUT OFF instead. body.scrollWidth still
+  // counts it. Content inside its own sideways scroller (a table wrapper, a tab strip) is fine and is not counted.
+  const iw = window.innerWidth;
+  const sw = Math.max(document.documentElement.scrollWidth, document.body.scrollWidth);
   if (sw > iw + 1) {
+    const inScroller = (el) => {
+      for (let a = el.parentElement; a && a !== document.body; a = a.parentElement) if (getComputedStyle(a).overflowX !== "visible") return true;
+      return false;
+    };
     const culprits = [];
     for (const el of document.querySelectorAll("body *")) {
       const r = el.getBoundingClientRect();
-      if (r.right > iw + 1 && r.width > 0 && vis(el)) culprits.push(`${desc(el)} .${String(el.className).slice(0, 50)} right=${Math.round(r.right)}`);
+      if (r.right > iw + 1 && r.width > 0 && vis(el) && !inScroller(el)) culprits.push(`${desc(el)} .${String(el.className).slice(0, 50)} right=${Math.round(r.right)}`);
       if (culprits.length > 2) break;
     }
-    res.overflow = `${sw} > ${iw}: ${culprits.join(" | ")}`;
+    if (culprits.length || document.documentElement.scrollWidth > iw + 1) res.overflow = `${sw} > ${iw}: ${culprits.join(" | ")}`;
   }
   if (!touch) return res;
   for (const el of document.querySelectorAll("input, select, textarea")) {
@@ -3586,13 +3727,14 @@ async function invoicingFlows(browser) {
     await page.waitForLoadState("networkidle");
   });
 
-  await step("creator at 390 with touch: no sideways scroll, Make PDF in reach above the tab bar", async () => {
-    const m = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+  await step("creator on an iPhone 15 Pro (dark, touch): nothing cut off sideways, 16px inputs, Make PDF in reach above the tab bar", async () => {
+    const m = await browser.newContext({ ...sizeByKey("393x852").context, colorScheme: "dark" });
     await login(m, "nora@local");
     const p = await m.newPage();
     await p.goto(`${BASE}/invoices/new?customer=sample-cus-taco`, { waitUntil: "networkidle" });
-    const a = await p.evaluate(() => ({ sw: document.documentElement.scrollWidth, iw: innerWidth }));
-    if (a.sw > a.iw + 1) throw new Error(`overflow ${a.sw} > ${a.iw}`);
+    const a = await p.evaluate(auditPage, true);
+    if (a.overflow) throw new Error(`overflow ${a.overflow}`);
+    if (a.smallFonts.length) throw new Error(`input under 16px: ${a.smallFonts.join(", ")}`);
     const box = await p.getByRole("button", { name: /^Make PDF/ }).boundingBox();
     const bar = await p.locator(".tabbar").boundingBox();
     if (!box || !bar || box.y + box.height > bar.y + 1 || box.height < 44) throw new Error("Make PDF is not a 44px button above the tab bar");
@@ -3914,6 +4056,8 @@ async function invoicingEndToEnd(browser) {
 
   await st("invoice → contract: Make contract opens /contracts pre-filled; the saved contract links back; Past contracts show the invoice", async () => {
     await go(`/invoices/${inv1}`);
+    // one tap from the top of the invoice page too (the Contract section sits under Send it, Record payment and Remind)
+    must(/^\/contracts\?invoice=/.test((await page.locator(".page-head").getByRole("link", { name: "Make contract" }).getAttribute("href")) ?? ""), "the invoice's head has no Make contract");
     await page.locator("section, .card").filter({ has: page.getByRole("heading", { name: "Contract" }) }).getByRole("link", { name: "Make contract" }).first().click();
     await page.waitForURL(/\/contracts\?invoice=/);
     await page.waitForLoadState("networkidle");
@@ -3925,6 +4069,8 @@ async function invoicingEndToEnd(browser) {
     const sec = page.locator("section, .card").filter({ has: page.getByRole("heading", { name: "Contract" }) }).first();
     must(/Contract \w{3} \d+/.test(await sec.innerText()), "the invoice doesn't show its contract");
     must(await sec.getByRole("button", { name: "Download again" }).count(), "no Download again");
+    must(/^Contract \w{3} \d+/.test(await page.locator(".page-head a[href='#contract']").innerText()), "the invoice's head doesn't name its contract");
+    must(!(await page.locator(".page-head").getByRole("link", { name: "Make contract" }).count()), "the head still offers Make contract once a contract is linked");
     await go("/contracts");
     const row = page.locator("#past-contracts li", { hasText: "SNF Kingdom" }).first();
     must((await row.innerText()).includes(`${num1} · Paid`), `Past contracts row: ${(await row.innerText()).slice(0, 160)}`);
@@ -4154,73 +4300,108 @@ async function waitForServer() {
   }
 }
 
+/** A headless browser that died under load (not an app bug): the size is run again in a fresh browser. */
+const BROWSER_DIED = /Target page, context or browser has been closed|Target closed|Browser closed|browser has been closed|Protocol error|Failed to find context|Connection closed|crashed/i;
+
+/**
+ * The page audit at every size (see DEVICE_SIZES), dark only: no sideways scroll, 16px inputs and 40px tap targets on
+ * touch, nothing under the tab bar, no console error, as Cameron, as Nora and logged out. SMOKE_FULL=1 adds the old
+ * generic widths and runs every size in light as well. Each size runs in its own headless browser, two sizes at a
+ * time (the machine has 4 CPUs and the server needs its share), so one browser dying under load costs one size, which
+ * is then run once more, not the whole run.
+ */
 async function responsive(browser) {
-  console.log("\n== responsive");
-  const v10 = await v10Routes(browser);
-  const routes = [...ROUTES, ...(await detailRoutes(browser)), ...v10.app];
-  const publicRoutes = [...PUBLIC_ROUTES, ...v10.pub];
+  const sizeFilter = (process.env.SMOKE_SIZES ?? "").split(",").map((x) => x.trim().toLowerCase()).filter(Boolean);
+  const sizes = [...DEVICE_SIZES, ...(FULL ? OLD_SIZES : [])].filter((d) => !sizeFilter.length || sizeFilter.includes(d.key) || (d.alias && sizeFilter.includes(d.alias)));
+  const schemes = FULL ? ["dark", "light"] : ["dark"];
+  console.log(`\n== responsive: ${sizes.length} sizes, ${FULL ? "dark and light (SMOKE_FULL=1: the old full matrix too)" : "dark only"}${ROUTE_FILTER.length ? `, only routes with ${ROUTE_FILTER.join(" or ")}` : ""}`);
+  if (!sizes.length) { fail(`responsive: SMOKE_SIZES=${process.env.SMOKE_SIZES} matches no size (${DEVICE_SIZES.map((d) => d.alias ?? d.key).join(", ")})`); return; }
+  // The launch-kit sample screens are set up through MCP and the app; a route filter that can't match them skips that.
+  const v10 = ROUTE_FILTER.length && !ROUTE_FILTER.some((f) => /clients|review|drop/.test(f)) ? { app: [], pub: [] } : await v10Routes(browser);
+  const routes = wanted([...ROUTES, ...(await detailRoutes(browser)), ...v10.app]);
+  const noraRoutes = wanted(NORA_ROUTES);
   const kitLive = (await fetch(`${BASE}/kit`)).status === 200;
-  const found = new Map(); // message -> Set(viewport)
-  const note = (msg, where) => { if (!found.has(msg)) found.set(msg, new Set()); found.get(msg).add(where); };
+  const publicRoutes = wanted([...PUBLIC_ROUTES, ...v10.pub, ...(kitLive ? ["/kit"] : [])]);
+  const found = new Map(); // message -> Set(where)
   let pages = 0;
-  const combos = RESP_VIEWPORTS.flatMap((vp) => ["light", "dark"].map((scheme) => ({ vp, scheme })));
-  const runCombo = async ({ vp, scheme }) => {
-    const context = await browser.newContext({
-      viewport: { width: vp.width, height: vp.height }, deviceScaleFactor: 1, colorScheme: scheme,
-      isMobile: !!vp.touch, hasTouch: !!vp.touch,
-    });
-    const pub = await browser.newContext({
-      viewport: { width: vp.width, height: vp.height }, deviceScaleFactor: 1, colorScheme: scheme,
-      isMobile: !!vp.touch, hasTouch: !!vp.touch,
-    });
+  const combos = sizes.flatMap((vp) => schemes.map((scheme) => ({ vp, scheme })));
+  const runCombo = async ({ vp, scheme }, own) => {
+    const notes = []; // [message, where]: kept apart until the size finished, so a size that is run again isn't counted twice
+    let loads = 0;
+    const note = (msg, where) => notes.push([msg, where]);
+    const opts = { ...vp.context, colorScheme: scheme };
+    const context = await own.newContext(opts);
+    const pub = await own.newContext(opts);
     // Nora's own HQ too (since #20 and #25 her Home, Calendar, workspace and ask pages differ from Cameron's), and she
     // is the phone-first user: her pages get the same audit, signed in as her.
-    const noraCtx = await browser.newContext({
-      viewport: { width: vp.width, height: vp.height }, deviceScaleFactor: 1, colorScheme: scheme,
-      isMobile: !!vp.touch, hasTouch: !!vp.touch,
-    });
+    const noraCtx = await own.newContext(opts);
     await login(context, "cameron@local");
     await login(noraCtx, "nora@local");
-    for (const [ctx, list, who] of [[context, routes, "cameron"], [noraCtx, NORA_ROUTES, "nora"], [pub, [...publicRoutes, ...(kitLive ? ["/kit"] : [])], "logged out"]]) {
-    const page = await ctx.newPage();
-    const errs = [];
-    page.on("console", (m) => { if (m.type() === "error") errs.push(m.text().slice(0, 200)); });
-    page.on("pageerror", (e) => errs.push(e.message.slice(0, 200)));
-    for (const path of list) {
-      const where = `${vp.name}${scheme === "dark" ? "d" : ""} ${who}`;
-      let res, a, navErr = null;
-      // `next dev` restarts itself when it nears its memory limit; that drops connections mid-run.
-      // Wait for it to come back and retry the page instead of reporting a dev-server blip as an app bug.
-      for (let attempt = 0; attempt < 3; attempt++) {
-        errs.length = 0; navErr = null;
-        try {
-          res = await page.goto(BASE + path, { waitUntil: "networkidle", timeout: 90000 });
-          await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
-          await page.waitForTimeout(120);
-          a = await page.evaluate(auditPage, !!vp.touch);
-        } catch (e) { navErr = e.message.split("\n")[0]; }
-        const blip = (navErr && DEV_BLIP.test(navErr)) || errs.some((e) => DEV_BLIP.test(e));
-        if (!blip) break;
-        await waitForServer();
+    for (const [ctx, list, who] of [[context, routes, "cameron"], [noraCtx, noraRoutes, "nora"], [pub, publicRoutes, "logged out"]]) {
+      const page = await ctx.newPage();
+      const errs = [];
+      page.on("console", (m) => { if (m.type() === "error" && !isLocalUploadMiss(m)) errs.push(m.text().slice(0, 200)); });
+      page.on("pageerror", (e) => errs.push(e.message.slice(0, 200)));
+      for (const path of list) {
+        const where = `${vp.key}${schemes.length > 1 ? ` ${scheme}` : ""} ${who}`;
+        let res, a, navErr = null;
+        // `next dev` restarts itself when it nears its memory limit; that drops connections mid-run.
+        // Wait for it to come back and retry the page instead of reporting a dev-server blip as an app bug.
+        for (let attempt = 0; attempt < 3; attempt++) {
+          errs.length = 0; navErr = null;
+          try {
+            res = await page.goto(BASE + path, { waitUntil: "networkidle", timeout: 90000 });
+            await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+            await page.waitForTimeout(120);
+            a = await page.evaluate(auditPage, vp.touch);
+          } catch (e) {
+            navErr = e.message.split("\n")[0];
+            if (BROWSER_DIED.test(navErr) && !DEV_BLIP.test(navErr)) throw e; // the whole size is run again
+          }
+          const blip = (navErr && DEV_BLIP.test(navErr)) || errs.some((e) => DEV_BLIP.test(e));
+          if (!blip && !navErr && attempt < 2 && onlyHydration418(errs)) { hydrationRetries++; continue; } // see HYDRATION_418
+          if (!blip) break;
+          await waitForServer();
+        }
+        if (navErr) { note(`${path}: navigation ${navErr}`, where); continue; }
+        if (res?.status() !== 200) note(`${path}: HTTP ${res?.status()}`, where);
+        loads++;
+        if (a.overflow) note(`${path}: horizontal overflow ${a.overflow.replace(/\d+ > \d+: /, "")}`, where);
+        for (const f of a.smallFonts) note(`${path}: input font < 16px: ${f}`, where);
+        for (const t of a.smallTargets) note(`${path}: tap target < 40px: ${t}`, where);
+        if (a.covered) note(`${path}: tab bar covers content: ${a.covered.replace(/bottom=\d+ > tabbar top=\d+/, "")}`, where);
+        for (const e of errs) note(`${path}: console error: ${e}`, where);
       }
-      if (navErr) { note(`${path}: navigation ${navErr}`, where); continue; }
-      if (res?.status() !== 200) note(`${path}: HTTP ${res?.status()}`, where);
-      pages++;
-      if (a.overflow) note(`${path}: horizontal overflow ${a.overflow.replace(/\d+ > \d+: /, "")}`, where);
-      for (const f of a.smallFonts) note(`${path}: input font < 16px: ${f}`, where);
-      for (const t of a.smallTargets) note(`${path}: tap target < 40px: ${t}`, where);
-      if (a.covered) note(`${path}: tab bar covers content: ${a.covered.replace(/bottom=\d+ > tabbar top=\d+/, "")}`, where);
-      for (const e of errs) note(`${path}: console error: ${e}`, where);
     }
-    }
-    await context.close();
-    await noraCtx.close();
-    await pub.close();
+    return { notes, loads };
   };
   const queue = [...combos];
-  await Promise.all(Array.from({ length: 4 }, async () => { while (queue.length) await runCombo(queue.shift()); }));
-  for (const [msg, where] of found) fail(`responsive ${msg} [${[...where].join(",")}]`);
-  console.log(`  checked ${pages} page loads (${routes.length} routes as Cameron + ${NORA_ROUTES.length} as Nora + ${publicRoutes.length} logged-out × ${combos.length} viewport/scheme combos)`);
+  const worker = async () => {
+    while (queue.length) {
+      const combo = queue.shift();
+      const name = `${combo.vp.label}${schemes.length > 1 ? `, ${combo.scheme}` : ""}`;
+      for (let attempt = 0; ; attempt++) {
+        const own = await chromium.launch();
+        try {
+          const { notes, loads } = await runCombo(combo, own);
+          for (const [msg, where] of notes) { if (!found.has(msg)) found.set(msg, new Set()); found.get(msg).add(where); }
+          pages += loads;
+          console.log(`  ${notes.length ? "seen" : "ok  "} ${name}: ${loads} page loads${notes.length ? `, ${notes.length} finding(s), listed below` : ""}`);
+          break;
+        } catch (e) {
+          const msg = e.message.split("\n")[0];
+          if (attempt === 0 && BROWSER_DIED.test(msg)) { console.log(`  note: the headless browser died at ${name} (${msg.slice(0, 120)}); running that size again`); continue; }
+          fail(`responsive ${name}: ${msg}`);
+          break;
+        } finally {
+          await own.close().catch(() => {});
+        }
+      }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(Number(process.env.SMOKE_WORKERS ?? 2), combos.length) }, worker));
+  for (const [msg, where] of found) fail(`responsive ${msg} [${[...where].join(", ")}]`);
+  console.log(`  checked ${pages} page loads (${routes.length} routes as Cameron + ${noraRoutes.length} as Nora + ${publicRoutes.length} logged-out × ${combos.length} size${schemes.length > 1 ? "/scheme" : ""} combos)`);
 }
 
 const browser = await chromium.launch();
@@ -4233,19 +4414,27 @@ const browser = await chromium.launch();
     return ctx;
   };
 }
+const RUN = {
+  crawl: () => crawl(browser),
+  basics: () => flows(browser),
+  nora: () => noraFlows(browser),
+  v6: () => v6Flows(browser),
+  v7: () => v7Flows(browser),
+  v8: () => v8Flows(browser),
+  v10: () => v10Flows(browser),
+  invoicing: async () => { await invoicingEndToEnd(browser); await invoicingFlows(browser); },
+  responsive: () => responsive(browser),
+};
+await waitForServer();
+PROD_TEST = (await signInMode(BASE)) === "cookie";
+console.log(`sections: ${SECTIONS.join(", ")} · ${BASE} · signing in by ${PROD_TEST ? "session cookie (production test server)" : "the sign-in form (next dev)"}`);
 try {
-  if (MODE === "crawl" || MODE === "all") await crawl(browser);
-  if (MODE === "flows" || MODE === "all") await flows(browser);
-  if (MODE === "flows" || MODE === "all" || MODE === "nora") await noraFlows(browser);
-  if (MODE === "flows" || MODE === "all" || MODE === "v6") await v6Flows(browser);
-  if (MODE === "flows" || MODE === "all" || MODE === "v7") await v7Flows(browser);
-  if (MODE === "flows" || MODE === "all" || MODE === "v8") await v8Flows(browser);
-  if (MODE === "flows" || MODE === "all" || MODE === "v10") await v10Flows(browser);
-  if (MODE === "flows" || MODE === "all" || MODE === "invoicing") { await invoicingEndToEnd(browser); await invoicingFlows(browser); }
-  if (MODE === "responsive") await responsive(browser);
+  for (const name of SECTIONS) await RUN[name]();
   if (process.env.SHOTS_DIR) await shots(browser, process.env.SHOTS_DIR);
 } finally {
   await browser.close();
 }
+if (hydrationRetries) console.log(`\n  note: ${hydrationRetries} page load(s) hit React's hydration error #418 and were clean when loaded again: the known intermittent error of production builds (also on main; see scripts/hydration-check.mjs). Not counted as failures.`);
+if (uploadMisses) console.log(`\n  note: ${uploadMisses} request(s) for files uploaded during this run answered 404 and were not counted: \`next start\` only serves the public folder as it was at start (next dev and Vercel Blob serve them)`);
 console.log(`\n${failures.length ? `${failures.length} FAILURE(S)` : "ALL PASSED"}`);
 process.exit(failures.length ? 1 : 0);

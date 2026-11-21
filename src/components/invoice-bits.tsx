@@ -98,7 +98,7 @@ export function InvoiceRows({ rows, showCustomer = true, empty }: { rows: Invoic
               {/* A draft has no number yet: its status says Draft (on one customer's list the number is the title, so it says Draft). */}
               <span className="inv-c-num num">{r.number ?? (showCustomer ? "" : "Draft")}</span>
               {showCustomer && <span className="inv-c-who row-title">{r.customerName}</span>}
-              <span className="inv-c-due meta">{dueText(r)}</span>
+              <span className={cx("inv-c-due meta", r.display === "overdue" && "is-late")}>{dueText(r)}</span>
               <span className={cx("inv-c-amt num", r.status === "void" && "is-void")}>
                 {moneyShort(owed)}
                 {r.status === "partially_paid" && <span className="meta"> of {moneyShort(r.totalCents)}</span>}

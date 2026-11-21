@@ -10,6 +10,7 @@ import {
   PAYMENT_METHOD_LABEL,
   PAY_WAY_METHOD,
   centsToDollarsInput,
+  contractRefLabel,
   dueLabel,
   invoicePdfPath,
   isOpenStatus,
@@ -92,6 +93,7 @@ export default async function InvoicePage({ params, searchParams }: { params: Pr
   const err = one(sp.error);
   const firstWay = inv.payWays[0] ?? "zelle";
   const method = (MANUAL_PAYMENT_METHODS as readonly string[]).includes(PAY_WAY_METHOD[firstWay]) ? (PAY_WAY_METHOD[firstWay] as ManualPaymentMethod) : "zelle";
+  const makeContract = inv.nextSteps.find((s) => s.kind === "make_contract");
   const reminded = inv.lastRemindedAt ? `Reminded ${formatDate(inv.lastRemindedAt)}${inv.reminderCount > 1 ? ` (${inv.reminderCount} times)` : ""}` : null;
 
   return (
@@ -107,6 +109,12 @@ export default async function InvoicePage({ params, searchParams }: { params: Pr
             {!draft && inv.issueDate && inv.dueDate && inv.status !== "paid" && inv.status !== "void" && <span>{dueLabel(inv.issueDate, inv.dueDate)}{inv.dueDate > inv.issueDate ? "" : ` (${shortDate(inv.dueDate)})`}</span>}
             {inv.paidAt && <span>Paid {formatDate(inv.paidAt)}</span>}
             {inv.viewedAt && <span>Viewed {formatDate(inv.viewedAt)}</span>}
+            {/* The other half of the pair, one tap from the top: its contract, or Make contract. */}
+            {inv.contract ? (
+              <a href="#contract" className="link">{contractRefLabel(inv.contract)}</a>
+            ) : makeContract ? (
+              <Link href={makeContract.href} className="link">Make contract</Link>
+            ) : null}
           </span>
         }
         actions={
@@ -167,16 +175,19 @@ export default async function InvoicePage({ params, searchParams }: { params: Pr
             </section>
           )}
 
-          <Card title="Contract" className="inv-side-sec">
-            {inv.contract ? (
-              <ContractLine contract={inv.contract} />
-            ) : (
-              <div className="grid gap-2">
-                <p className="meta">No contract for this invoice yet.</p>
-                <NextSteps steps={inv.nextSteps} skip={["record_payment", "remind"]} />
-              </div>
-            )}
-          </Card>
+          <section id="contract" className="sec inv-side-sec scroll-mt-4">
+            <header className="sec-head"><h2 className="title">Contract</h2></header>
+            <div className="sec-body">
+              {inv.contract ? (
+                <ContractLine contract={inv.contract} />
+              ) : (
+                <div className="grid gap-2">
+                  <p className="meta">No contract for this invoice yet.</p>
+                  <NextSteps steps={inv.nextSteps} skip={["record_payment", "remind"]} />
+                </div>
+              )}
+            </div>
+          </section>
         </div>
 
         <div className="is-main">
