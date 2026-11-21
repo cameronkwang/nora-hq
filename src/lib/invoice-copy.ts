@@ -9,7 +9,9 @@
  *
  * `share` is the link text and the text sent WITH THE PDF (the fast creator's done state copies it; lib/ops-invoices
  * builds the messages from it). `page` is the customer's page: title, labels, status lines, the invoice's ways to pay
- * with the Zelle memo line, Pay online, the PDF, the paid and void notices and the Pay online errors.
+ * (her bank account for a transfer, Zelle with the memo line, checks), Pay online, the PDF, the paid and void notices
+ * and the Pay online errors. The message sent with the PDF names the ways chosen but never repeats the bank account
+ * or routing number: the PDF carries them.
  * Never a surcharge or fee for any way to pay, in any language: Pay online says "No extra fee" instead.
  */
 
@@ -45,8 +47,12 @@ export type PdfShareArgs = {
   dueDate: string;
   /** Due the same day as the invoice date. */
   dueOnReceipt: boolean;
+  /** Bank transfer (ACH) to her own account is one of the invoice's ways. Never the numbers: the PDF carries them. */
+  ach: boolean;
   /** The Zelle number or email, when Zelle is one of the invoice's ways. */
   zelle: string | null;
+  /** Who checks are made out to, when check is one of the invoice's ways. */
+  checkPayee: string | null;
   /** The pay link, only when an online way (bank transfer, card) is on. */
   url: string | null;
 };
@@ -84,13 +90,22 @@ const en = {
       const hi = firstName(a.contactName) ? `Hi ${firstName(a.contactName)}!` : "Hi!";
       return `${hi} Here is invoice ${a.number} from ${a.from} for ${a.business}: ${a.amount}, due ${shortDue("en", a.dueDate)}. You can see it and pay here:\n\n${a.url}\n\nThank you!`;
     },
-    /** "Hi Sam! Here is invoice 0000170 for $625.10, due on receipt. The PDF is attached.\n\nZelle: (555) 010-0100, with 0000170 in the memo.\n\nThank you!" */
+    /**
+     * "Hi Sam! Here is invoice 0000170 for $625.10, due on receipt. The PDF is attached.\n\nZelle: 5550100100, with 0000170 in the memo.\n\nThank you!"
+     * With more ways, one line each, in the PDF's order: "Bank transfer (ACH): the account details are on the PDF.",
+     * the Zelle line, "Checks payable to Nora Chen.", "Pay online: <link>".
+     */
     pdfMessage: (a: PdfShareArgs) => {
       const hi = firstName(a.contactName) ? `Hi ${firstName(a.contactName)}!` : "Hi!";
       const due = a.dueOnReceipt ? "due on receipt" : `due ${shortDue("en", a.dueDate)}`;
       return join(
         `${hi} Here is invoice ${a.number} for ${a.amount}, ${due}. The PDF is attached.`,
-        [a.zelle ? `Zelle: ${a.zelle}, with ${a.number} in the memo.` : null, a.url ? `Pay online: ${a.url}` : null],
+        [
+          a.ach ? "Bank transfer (ACH): the account details are on the PDF." : null,
+          a.zelle ? `Zelle: ${a.zelle}, with ${a.number} in the memo.` : null,
+          a.checkPayee ? `Checks payable to ${a.checkPayee}.` : null,
+          a.url ? `Pay online: ${a.url}` : null,
+        ],
         "Thank you!",
       );
     },
@@ -126,7 +141,9 @@ const en = {
       shownAs: (name: string) => `Zelle shows ${name}`,
       memo: (number: string) => `Put invoice ${number} in the Zelle memo`,
     },
-    check: { title: "Check", payable: (payee: string) => `Make it payable to ${payee}`, mailTo: "Mail it to" },
+    /** A transfer from the customer's bank straight to her account: the bank label, then the two numbers to copy. */
+    ach: { title: "Bank transfer (ACH)", account: "Account number", routing: "Routing number" },
+    check: { title: "Check", payable: (payee: string) => `Checks Payable to ${payee}`, mailTo: "Mail to" },
     venmo: "Venmo",
     paypal: "PayPal",
     custom: "Other",
@@ -142,7 +159,7 @@ const en = {
     copy: "Copy",
     copied: "Copied",
     copyFailed: "Select and copy",
-    /** The copy button's spoken name: "Copy (555) 010-0100". */
+    /** The copy button's spoken name: "Copy 5550100100". */
     copyWhat: (what: string) => `Copy ${what}`,
     thanks: "Thank you! Card payments show here right away; bank transfers in a few days.",
     questions: (name: string) => `Questions? Contact ${name}.`,
@@ -168,7 +185,12 @@ const zhHans: InvoiceCopy = {
     pdfMessage: (a) =>
       join(
         `${a.business}，您好！附上账单 ${a.number}（PDF），金额 ${a.amount}，${a.dueOnReceipt ? "收到即付" : `请在 ${shortDue("zh-Hans", a.dueDate)}前付款`}。`,
-        [a.zelle ? `Zelle：${a.zelle}，备注请写 ${a.number}。` : null, a.url ? `在线付款：${a.url}` : null],
+        [
+          a.ach ? "银行转账（ACH）：账户信息在 PDF 上。" : null,
+          a.zelle ? `Zelle：${a.zelle}，备注请写 ${a.number}。` : null,
+          a.checkPayee ? `支票抬头请写 ${a.checkPayee}。` : null,
+          a.url ? `在线付款：${a.url}` : null,
+        ],
         "谢谢！",
       ),
   },
@@ -202,6 +224,7 @@ const zhHans: InvoiceCopy = {
       shownAs: (name) => `Zelle 上显示为 ${name}`,
       memo: (number) => `Zelle 备注请写账单号 ${number}`,
     },
+    ach: { title: "银行转账（ACH）", account: "账号（Account number）", routing: "路由号码（Routing number）" },
     check: { title: "支票", payable: (payee) => `抬头写 ${payee}`, mailTo: "寄到" },
     venmo: "Venmo",
     paypal: "PayPal",
@@ -241,7 +264,12 @@ const zhHant: InvoiceCopy = {
     pdfMessage: (a) =>
       join(
         `${a.business}，您好！附上帳單 ${a.number}（PDF），金額 ${a.amount}，${a.dueOnReceipt ? "收到即付" : `請在 ${shortDue("zh-Hant", a.dueDate)}前付款`}。`,
-        [a.zelle ? `Zelle：${a.zelle}，備註請寫 ${a.number}。` : null, a.url ? `線上付款：${a.url}` : null],
+        [
+          a.ach ? "銀行轉帳（ACH）：帳戶資訊在 PDF 上。" : null,
+          a.zelle ? `Zelle：${a.zelle}，備註請寫 ${a.number}。` : null,
+          a.checkPayee ? `支票抬頭請寫 ${a.checkPayee}。` : null,
+          a.url ? `線上付款：${a.url}` : null,
+        ],
         "謝謝！",
       ),
   },
@@ -275,6 +303,7 @@ const zhHant: InvoiceCopy = {
       shownAs: (name) => `Zelle 上顯示為 ${name}`,
       memo: (number) => `Zelle 備註請寫帳單號 ${number}`,
     },
+    ach: { title: "銀行轉帳（ACH）", account: "帳號（Account number）", routing: "路由號碼（Routing number）" },
     check: { title: "支票", payable: (payee) => `抬頭寫 ${payee}`, mailTo: "寄到" },
     venmo: "Venmo",
     paypal: "PayPal",

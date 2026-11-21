@@ -18,6 +18,7 @@ import { expireCheckoutSession, stripeConfigured } from "./stripe";
 import { renderInvoicePdf } from "./invoice-pdf";
 import { importedLine, parseImport } from "./invoice-import";
 import {
+  DEFAULTABLE_PAY_WAYS,
   DEFAULT_PAY_WAYS,
   FIRST_INVOICE_NUMBER,
   INVOICE_NUMBER_DIGITS,
@@ -29,13 +30,18 @@ import {
   MAX_SAVED_ITEMS,
   MAX_TERMS_DAYS,
   MONTHLY_SERVICE_LINE,
+  OWN_BANK_ENC_KEY,
   PAYMENT_METHOD_LABEL,
   PAY_WAYS,
+  PAY_WAY_LABEL,
   PDF_LETTERS,
   RETAINER_MAX_DAY,
   addDaysYmd,
   availablePayWays,
   balanceCents,
+  bankDetailsProblem,
+  bankDigits,
+  bankLabelHoldsNumber,
   checkPayWays,
   contractFieldsFromInvoice,
   contractNextSteps,
@@ -44,6 +50,7 @@ import {
   customerNameKey,
   daysBetween,
   daysOverdue,
+  defaultPayWays,
   formatCents,
   formatInvoiceNumber,
   hasOnlineWay,
@@ -57,14 +64,17 @@ import {
   invoicePdfPath,
   invoiceSetupMissing,
   invoiceTotals,
+  isBankAccountNumber,
   isOpenStatus,
   isQuantity,
+  isRoutingNumber,
   isYmd,
   looksLikeCardOrBankNumber,
   mainLineCents,
+  maskedBankDetails,
   overpaidCents,
   payOptions,
-  paymentInfoLines,
+  paymentMessageLines,
   pdfPrintsEmpty,
   readInvoiceSettings,
   retainerDue,
@@ -74,6 +84,7 @@ import {
   shortDate,
   sortPayWays,
   toCsv,
+  type BankDetails,
   type BillToOption,
   type ContractInvoiceRef,
   type ContractPart,
@@ -129,9 +140,15 @@ import {
  *
  * Neon over HTTP has no interactive transactions: anything that must be atomic is ONE statement (docs/invoicing.md
  * "Atomic statements": the number taken in the finalize UPDATE or the create-and-finalize INSERT, the sequence moves,
- * payment recompute, retainer claim). Reads run in parallel. Nothing here is ever on Nora's schedule, no card or bank
- * number, password or Stripe key is stored, the activity log never holds an amount, a link or a Zelle number, and no
- * way to pay ever adds a fee or surcharge.
+ * payment recompute, retainer claim). Reads run in parallel. Nothing here is ever on Nora's schedule, no password,
+ * Stripe key, card number or CUSTOMER bank detail is stored, the activity log never holds an amount, a link, a Zelle
+ * number or a bank number, and no way to pay ever adds a fee or surcharge.
+ *
+ * The one bank account kept is Nora's OWN receiving account, for the "ach" way ("Bank transfer (ACH)": she prints it
+ * on her invoices). A person types it in Settings; it is stored encrypted (lib/crypto, TOKEN_ENC_KEY) under the
+ * settings row's ownBankEnc key and decrypted only here (`paySetup`). The real numbers go to exactly two places: the
+ * PDF (invoicePdf, the done state's PDF) and the customer's pay page (getInvoiceByToken). Every team page, message,
+ * log line, error, CSV row and Claude tool gets the account masked ("••••6789") or nothing at all.
  */
 
 /* ───────────────────────── Input ───────────────────────── */
@@ -297,8 +314,21 @@ export const InvoiceSettingsInput = z.object({
   checkAddress: block(300),
   venmo: line(80),
   paypal: line(200),
+  /** Bank transfer (ACH) to her own account: the free-text label printed above the numbers ("Sample Bank Checking"). */
+  ownBankLabel: line(80),
+  /**
+   * Her own account and routing numbers, typed together (digits; spaces and dashes are dropped). Checked by
+   * invoices-types bankDetailsProblem, stored encrypted, never echoed. Empty or left out = keep what is saved:
+   * replacing them means typing both again.
+   */
+  ownBankAccount: z.string().max(60, "That account number is too long.").nullish(),
+  ownBankRouting: z.string().max(60, "That routing number is too long.").nullish(),
+  /** Remove the saved bank details (and untick the way that needs them). */
+  ownBankRemove: z.boolean(),
   achEnabled: z.boolean(),
   cardEnabled: z.boolean(),
+  /** The ways ticked for new invoices. Each must have its details filled in; none ticked = the built-in default, Zelle. */
+  payDefaults: z.array(z.enum(PAY_WAYS)).max(PAY_WAYS.length),
   termsDays: z.number().int().min(0).max(MAX_TERMS_DAYS),
   footer: block(500),
   savedItems: SavedItemsInput,
@@ -323,8 +353,12 @@ function rowsOf<T>(r: unknown): T[] {
   return ((r as { rows?: T[] }).rows ?? (r as T[])) ?? [];
 }
 
-const CARD_REFUSAL = "Not saved: that looks like a card or bank account number. Nora HQ never stores those; Stripe's own page takes them.";
-/** Refuses card or bank numbers (and passwords, where `secrets`) in free text a person typed. */
+const CARD_REFUSAL = "Not saved: that looks like a card or bank account number. Nora HQ never stores a customer's card or bank details (Stripe's own page takes them), and your own account number goes only in Settings, under Bank transfer (ACH).";
+/**
+ * Refuses card or bank numbers (and passwords, where `secrets`) in free text a person typed: notes, references,
+ * customers, lines, the custom pay line and every text setting. The one place a bank account number is allowed is
+ * saveInvoiceSettings' ownBankAccount / ownBankRouting, which never come through here.
+ */
 function guardText(fields: Array<[string, string | null | undefined]>, opts: { secrets?: boolean } = {}) {
   for (const [label, v] of fields) {
     if (!v) continue;
@@ -462,12 +496,41 @@ async function settingsValue(): Promise<Record<string, unknown> | null> {
   return row?.value ?? null;
 }
 
+/**
+ * The settings, plus Nora's own bank details DECRYPTED. `bank` is for the PDF and the customer's pay page only; a team
+ * page, a message or a tool uses `settings` (which holds the account's last digits, never the number) and
+ * maskedBankDetails(settings).
+ */
+type PaySetup = { settings: InvoiceSettings; bank: BankDetails | null };
+
+/** Her account and routing numbers out of the stored row. null when none are saved or they can't be read. Never logs. */
+function readBank(value: Record<string, unknown> | null | undefined): BankDetails | null {
+  const enc = value?.[OWN_BANK_ENC_KEY];
+  if (typeof enc !== "string" || !enc) return null;
+  try {
+    const { a, r } = decryptJson<{ a?: unknown; r?: unknown }>(enc);
+    return typeof a === "string" && isBankAccountNumber(a) && typeof r === "string" && isRoutingNumber(r) ? { account: a, routing: r } : null;
+  } catch {
+    return null; // TOKEN_ENC_KEY missing or changed: Settings says "type them again" (settings.ownBankUnreadable)
+  }
+}
+
+function paySetupOf(value: Record<string, unknown> | null | undefined): PaySetup {
+  const bank = readBank(value);
+  return { settings: readInvoiceSettings(value, bank), bank };
+}
+
+async function paySetup(): Promise<PaySetup> {
+  return paySetupOf(await settingsValue());
+}
+
+/** The settings as every page may see them: the bank account masked to its last digits, never the number. */
 export async function getInvoiceSettings(): Promise<InvoiceSettings> {
-  return readInvoiceSettings(await settingsValue());
+  return (await paySetup()).settings;
 }
 
 /** ONE statement: value = coalesce(value, '{}') || patch. Returns the merged settings. */
-async function mergeSettings(patch: Record<string, unknown>, actor: string): Promise<InvoiceSettings> {
+async function mergeSettings(patch: Record<string, unknown>, actor: string): Promise<PaySetup> {
   const db = await getDb();
   const now = new Date();
   const [row] = await db.insert(schema.appSettings).values({ key: schema.NORA_PAYMENT_KEY, value: patch, updatedBy: actor, updatedAt: now })
@@ -476,7 +539,7 @@ async function mergeSettings(patch: Record<string, unknown>, actor: string): Pro
       set: { value: sql`coalesce(${schema.appSettings.value}, '{}'::jsonb) || excluded.value`, updatedBy: actor, updatedAt: now },
     })
     .returning({ value: schema.appSettings.value });
-  return readInvoiceSettings(row?.value);
+  return paySetupOf(row?.value);
 }
 
 function savedItemsOut(items: z.output<typeof SavedItemsInput>): SavedItem[] {
@@ -489,7 +552,12 @@ function savedItemsOut(items: z.output<typeof SavedItemsInput>): SavedItem[] {
   });
 }
 
-const SETTINGS_TEXT_KEYS = ["line", "fromName", "fromEmail", "fromPhone", "fromAddress", "zelle", "zelleName", "checkPayee", "checkAddress", "venmo", "paypal", "footer"] as const;
+const SETTINGS_TEXT_KEYS = ["line", "fromName", "fromEmail", "fromPhone", "fromAddress", "zelle", "zelleName", "checkPayee", "checkAddress", "venmo", "paypal", "ownBankLabel", "footer"] as const;
+
+const NO_ENC_KEY =
+  "Not saved: bank details are stored encrypted, and this server has no encryption key yet (TOKEN_ENC_KEY). Add the key, then type them again. " +
+  "Everything else still works: clear the account and routing boxes to save the rest.";
+const BANK_LABEL_REFUSAL = "Not saved: the bank label is a name, like “Sample Bank Checking”. The account and routing numbers go in their own boxes.";
 
 export async function saveInvoiceSettings(input: InvoiceSettingsInputT, actor: string): Promise<InvoiceSettings> {
   people(actor, "change how Nora gets paid");
@@ -499,7 +567,9 @@ export async function saveInvoiceSettings(input: InvoiceSettingsInputT, actor: s
     if (v[k] === undefined) continue;
     patch[k] = v[k] ?? null;
   }
+  // Every text setting still refuses a card or bank number: the account number has ONE home, its own box (below).
   guardText(SETTINGS_TEXT_KEYS.map((k) => [`the ${k} setting`, (patch[k] as string | null | undefined) ?? null]), { secrets: true });
+  if (bankLabelHoldsNumber(patch.ownBankLabel as string | null | undefined)) throw new OpsError(BANK_LABEL_REFUSAL);
   if (v.achEnabled !== undefined) patch.achEnabled = v.achEnabled;
   if (v.cardEnabled !== undefined) patch.cardEnabled = v.cardEnabled;
   if (v.termsDays !== undefined) patch.termsDays = v.termsDays;
@@ -507,11 +577,60 @@ export async function saveInvoiceSettings(input: InvoiceSettingsInputT, actor: s
     patch.savedItems = savedItemsOut(v.savedItems);
     guardText((patch.savedItems as SavedItem[]).map((i) => ["a saved line", i.description]));
   }
+
+  /* Her own bank account: typed as a pair, checked without ever repeating it, stored encrypted. */
+  const typedAccount = (v.ownBankAccount ?? "").trim();
+  const typedRouting = (v.ownBankRouting ?? "").trim();
+  let typed: BankDetails | null = null;
+  if (typedAccount || typedRouting) {
+    const problem = bankDetailsProblem(typedAccount, typedRouting);
+    if (problem) throw new OpsError(`Not saved: ${problem}`);
+    typed = { account: bankDigits(typedAccount)!, routing: bankDigits(typedRouting)! };
+  }
+  const touchesBank = !!typed || v.ownBankRemove === true;
+  const current = touchesBank || v.payDefaults !== undefined ? await settingsValue() : null;
+  const had = typeof current?.[OWN_BANK_ENC_KEY] === "string" && !!current[OWN_BANK_ENC_KEY];
+  const before = touchesBank || v.payDefaults !== undefined ? readBank(current) : null;
+  let bankChange: "added" | "changed" | "removed" | null = null;
+  let after = before; // her bank details once this save lands
+  if (typed) {
+    if (!before || before.account !== typed.account || before.routing !== typed.routing) {
+      try {
+        patch[OWN_BANK_ENC_KEY] = encryptJson({ a: typed.account, r: typed.routing });
+      } catch {
+        throw new OpsError(NO_ENC_KEY); // never the cause: it could carry what was typed
+      }
+      bankChange = had ? "changed" : "added";
+      after = typed;
+    }
+  } else if (v.ownBankRemove === true && had) {
+    patch[OWN_BANK_ENC_KEY] = null;
+    bankChange = "removed";
+    after = null;
+  }
+
+  /* The ways ticked for new invoices: each needs its details filled in, as they will be once this save lands. */
+  if (v.payDefaults !== undefined) {
+    const ways = DEFAULTABLE_PAY_WAYS.filter((w) => v.payDefaults!.includes(w));
+    const next = readInvoiceSettings({ ...(current ?? {}), ...patch }, after);
+    const avail = availablePayWays(next, stripeConfigured());
+    for (const w of ways) if (!avail[w].ok) throw new OpsError(`Not saved: ${PAY_WAY_LABEL[w]} is ticked for new invoices but isn't ready. ${avail[w].why} Or untick it.`);
+    patch.payDefaults = ways;
+  } else if (bankChange === "removed") {
+    const ticked = readInvoiceSettings(current).payDefaults;
+    if (ticked.includes("ach")) patch.payDefaults = ticked.filter((w) => w !== "ach");
+  }
+
   if (!Object.keys(patch).length) return getInvoiceSettings();
   const out = await mergeSettings(patch, actor);
-  // Never the values: the settings hold a phone number and an address.
-  await logActivity({ actor, action: "invoice_settings.saved", entityType: "app_setting", entityId: schema.NORA_PAYMENT_KEY, summary: `Updated the invoice settings (${Object.keys(patch).length} ${Object.keys(patch).length === 1 ? "field" : "fields"})` });
-  return out;
+  // Never the values: the settings hold a phone number, an address and (encrypted) her bank account. The log says
+  // only THAT the bank details were added, changed or removed.
+  const others = Object.keys(patch).filter((k) => k !== OWN_BANK_ENC_KEY).length;
+  await Promise.all([
+    others ? logActivity({ actor, action: "invoice_settings.saved", entityType: "app_setting", entityId: schema.NORA_PAYMENT_KEY, summary: `Updated the invoice settings (${others} ${others === 1 ? "field" : "fields"})` }) : null,
+    bankChange ? logActivity({ actor, action: `invoice_settings.bank_${bankChange}`, entityType: "app_setting", entityId: schema.NORA_PAYMENT_KEY, summary: `${bankChange === "added" ? "Added" : bankChange === "changed" ? "Changed" : "Removed"} the bank details for bank transfer (ACH)` }) : null,
+  ]);
+  return out.settings;
 }
 
 export async function getSavedItems(): Promise<SavedItem[]> {
@@ -524,7 +643,7 @@ export async function saveSavedItems(items: SavedItemInputT[], actor: string): P
   guardText(list.map((i) => ["a saved line", i.description]));
   const out = await mergeSettings({ savedItems: list }, actor);
   await logActivity({ actor, action: "invoice_settings.saved_items", entityType: "app_setting", entityId: schema.NORA_PAYMENT_KEY, summary: `Updated the saved invoice lines (${list.length})` });
-  return out.savedItems;
+  return out.settings.savedItems;
 }
 
 /** The creator's one-time ask (From and Zelle) → a settings patch, or null when nothing was typed. */
@@ -928,6 +1047,11 @@ function dealLine(kinds: readonly string[]): string {
   return labels.length ? `Collab: ${labels.join(", ")}` : "Collab";
 }
 
+/** What a new invoice starts with: the ways ticked in Settings that are available right now, else Zelle. */
+function newInvoiceWays(settings: InvoiceSettings): PayWay[] {
+  return defaultPayWays(settings, availablePayWays(settings, stripeConfigured()));
+}
+
 function blankPrefill(settings: InvoiceSettings, today: string): InvoicePrefill {
   return {
     billTo: null,
@@ -935,7 +1059,7 @@ function blankPrefill(settings: InvoiceSettings, today: string): InvoicePrefill 
     lines: [],
     issueDate: today,
     dueDate: addDaysYmd(today, settings.termsDays),
-    payWays: [...DEFAULT_PAY_WAYS],
+    payWays: newInvoiceWays(settings),
     payNote: null,
     notes: settings.footer,
     lang: null,
@@ -1133,6 +1257,7 @@ export async function getInvoiceCreatorContext(opts: {
     setupMissing: invoiceSetupMissing(settings),
     savedItems: settings.savedItems,
     payWays: availablePayWays(settings, stripeReady),
+    defaultPayWays: newInvoiceWays(settings),
     stripeReady,
     billTo,
     prefill: prefill ?? { ...blankPrefill(settings, today), last: null },

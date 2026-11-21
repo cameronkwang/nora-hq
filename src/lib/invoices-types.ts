@@ -28,13 +28,13 @@ export type InvoiceStatus = (typeof INVOICE_STATUSES)[number];
 export const INVOICE_DISPLAY_STATUSES = ["draft", "sent", "partially_paid", "overdue", "paid", "void"] as const;
 export type InvoiceDisplayStatus = (typeof INVOICE_DISPLAY_STATUSES)[number];
 
-export const PAYMENT_METHODS = ["zelle", "check", "cash", "stripe_ach", "stripe_card", "paypal", "venmo", "other"] as const;
+export const PAYMENT_METHODS = ["zelle", "ach", "check", "cash", "stripe_ach", "stripe_card", "paypal", "venmo", "other"] as const;
 export type PaymentMethod = (typeof PAYMENT_METHODS)[number];
 /** Stripe payments are recorded by the Stripe webhook only. */
 export const STRIPE_PAYMENT_METHODS = ["stripe_ach", "stripe_card"] as const satisfies readonly PaymentMethod[];
 export type StripePaymentMethod = (typeof STRIPE_PAYMENT_METHODS)[number];
 /** What a person can pick in "Record payment". */
-export const MANUAL_PAYMENT_METHODS = ["zelle", "check", "cash", "paypal", "venmo", "other"] as const satisfies readonly PaymentMethod[];
+export const MANUAL_PAYMENT_METHODS = ["zelle", "ach", "check", "cash", "paypal", "venmo", "other"] as const satisfies readonly PaymentMethod[];
 export type ManualPaymentMethod = (typeof MANUAL_PAYMENT_METHODS)[number];
 
 /** Where an invoice came from. "claude" = a draft Claude made because a person asked. "contract" = made from one. */
@@ -162,6 +162,7 @@ export const INVOICE_STATUS_TONE: Record<InvoiceDisplayStatus, StatusTone> = {
 
 export const PAYMENT_METHOD_LABEL: Record<PaymentMethod, string> = {
   zelle: "Zelle",
+  ach: "Bank transfer (ACH)",
   check: "Check",
   cash: "Cash",
   stripe_ach: "Bank transfer (Stripe)",
@@ -354,18 +355,33 @@ export function retainerItemDescription(description: string, month: string): str
 /* ───────────────────────── Ways to pay (per invoice) ───────────────────────── */
 
 /**
- * How one invoice asks to be paid (invoices.payWays). Display order: Zelle first, then the other free ways, then the
- * online ones (Stripe Checkout). Zelle unless a person chose otherwise ("Claude may set them on a draft only when
- * Nora or Cameron said so"). "custom" prints the invoice's payNote as its own line.
+ * How one invoice asks to be paid (invoices.payWays), in the order the pickers list them (the creator's chooser, the
+ * tick boxes in Settings): Zelle first, then the other free ways, then the online ones (Stripe Checkout). Zelle unless
+ * a person chose otherwise ("Claude may set them on a draft only when Nora or Cameron said so"). "custom" prints the
+ * invoice's payNote as its own line.
+ *
+ * Two bank transfers, never to be mixed up:
+ * - "ach"  = "Bank transfer (ACH)": the customer sends it from their own bank straight to NORA'S OWN account, using
+ *            the account and routing numbers her invoice prints (Settings, saved encrypted). Free, nothing connected.
+ * - "bank" = "Bank transfer online": the customer pays on Stripe's page (Stripe Checkout). Needs STRIPE_SECRET_KEY.
  */
-export const PAY_WAYS = ["zelle", "check", "venmo", "paypal", "custom", "bank", "card"] as const;
+export const PAY_WAYS = ["zelle", "ach", "check", "venmo", "paypal", "custom", "bank", "card"] as const;
 export type PayWay = (typeof PAY_WAYS)[number];
+/** The built-in default for a new invoice, until a person ticks other ways in Settings (InvoiceSettings.payDefaults). */
 export const DEFAULT_PAY_WAYS: readonly PayWay[] = ["zelle"];
+/**
+ * The order the PDF's PAYMENT INFORMATION block, the pay page and the messages print the chosen ways in, as Nora
+ * writes her invoices: her bank account first, then Zelle, then checks; then the rest as before.
+ */
+export const PAY_WAY_PRINT_ORDER = ["ach", "zelle", "check", "venmo", "paypal", "custom", "bank", "card"] as const satisfies readonly PayWay[];
 /** Pay online through Stripe Checkout: bank transfer (ACH, the online option) and card (off unless turned on in Settings). */
 export const ONLINE_PAY_WAYS = ["bank", "card"] as const satisfies readonly PayWay[];
+/** The ways that can be ticked as a default for new invoices: every way but "custom" (its line is typed per invoice). */
+export const DEFAULTABLE_PAY_WAYS = PAY_WAYS.filter((w): w is Exclude<PayWay, "custom"> => w !== "custom");
 
 export const PAY_WAY_LABEL: Record<PayWay, string> = {
   zelle: "Zelle",
+  ach: "Bank transfer (ACH)",
   check: "Check",
   venmo: "Venmo",
   paypal: "PayPal",
@@ -377,6 +393,7 @@ export const PAY_WAY_LABEL: Record<PayWay, string> = {
 /** What "Record payment" offers first for an invoice paid this way. */
 export const PAY_WAY_METHOD: Record<PayWay, PaymentMethod> = {
   zelle: "zelle",
+  ach: "ach",
   check: "check",
   venmo: "venmo",
   paypal: "paypal",
@@ -387,11 +404,17 @@ export const PAY_WAY_METHOD: Record<PayWay, PaymentMethod> = {
 
 export const isPayWay = (v: unknown): v is PayWay => typeof v === "string" && (PAY_WAYS as readonly string[]).includes(v);
 
-/** Unique known ways in display order (Zelle first). Unknown values are dropped; nothing left → Zelle. */
+/** Unique known ways in the pickers' order (Zelle first). Unknown values are dropped; nothing left → Zelle. */
 export function sortPayWays(ways: readonly unknown[] | null | undefined): PayWay[] {
   const set = new Set((ways ?? []).filter(isPayWay));
   const out = PAY_WAYS.filter((w) => set.has(w));
   return out.length ? out : [...DEFAULT_PAY_WAYS];
+}
+
+/** The same ways in the order they are PRINTED (the PDF, the pay page, the messages): bank account, Zelle, check, … */
+export function printPayWays(ways: readonly unknown[] | null | undefined): PayWay[] {
+  const set = new Set(sortPayWays(ways));
+  return PAY_WAY_PRINT_ORDER.filter((w) => set.has(w));
 }
 
 export function hasOnlineWay(ways: readonly PayWay[]): boolean {
@@ -399,9 +422,9 @@ export function hasOnlineWay(ways: readonly PayWay[]): boolean {
 }
 
 /** The same names mid-sentence (proper names keep their capitals). */
-const PAY_WAY_INLINE: Record<PayWay, string> = { zelle: "Zelle", check: "check", venmo: "Venmo", paypal: "PayPal", custom: "other", bank: "bank transfer online", card: "card online" };
+const PAY_WAY_INLINE: Record<PayWay, string> = { zelle: "Zelle", ach: "bank transfer (ACH)", check: "check", venmo: "Venmo", paypal: "PayPal", custom: "other", bank: "bank transfer online", card: "card online" };
 
-/** The pay part of the creator's quiet line: ["zelle"] → "Zelle"; ["zelle", "check", "bank"] → "Zelle, check, bank transfer online". */
+/** The pay part of the creator's quiet line: ["zelle"] → "Zelle"; ["zelle", "ach", "check"] → "Zelle, bank transfer (ACH), check". */
 export function payWaysLabel(ways: readonly PayWay[]): string {
   const text = sortPayWays(ways).map((w) => PAY_WAY_INLINE[w]).join(", ");
   return text.charAt(0).toUpperCase() + text.slice(1);
@@ -411,14 +434,16 @@ export function payWaysLabel(ways: readonly PayWay[]): string {
 export type PayWayAvailability = Record<PayWay, { ok: boolean; why: string | null }>;
 
 /**
- * Zelle, check, Venmo, PayPal need their details in Settings; custom always works (it needs its line typed);
- * bank transfer needs Stripe set up (STRIPE_SECRET_KEY) and bank transfer on; card needs Stripe and card turned ON
- * in Settings (off by default). No way ever adds a fee.
+ * Zelle, bank transfer (ACH), check, Venmo, PayPal need their details in Settings (for ACH: the account and routing
+ * numbers); custom always works (it needs its line typed); bank transfer online needs Stripe set up
+ * (STRIPE_SECRET_KEY) and bank transfer on; card needs Stripe and card turned ON in Settings (off by default). No way
+ * ever adds a fee.
  */
 export function availablePayWays(s: InvoiceSettings, stripeReady: boolean): PayWayAvailability {
   const need = (ok: boolean, why: string) => ({ ok, why: ok ? null : why });
   return {
     zelle: need(!!s.zelle, "Add your Zelle number in Settings."),
+    ach: need(!!s.ownBankLast4 && !!s.ownBankRouting, s.ownBankUnreadable ? "Type your bank account and routing numbers again in Settings." : "Add your bank account and routing numbers in Settings."),
     check: need(!!s.checkPayee, "Add who checks are made out to in Settings."),
     venmo: need(!!s.venmo, "Add your Venmo in Settings."),
     paypal: need(!!s.paypal, "Add your PayPal in Settings."),
@@ -441,9 +466,28 @@ export function zelleMemo(number: string | null): string {
   return number ? `Put invoice ${number} in the Zelle memo` : "Put the invoice number in the Zelle memo";
 }
 
-/** One way to pay as the PDF and the pay page show it (only the invoice's chosen ways, in display order). */
+/**
+ * Ways ticked in Settings for new invoices, as a new invoice may use them right now: the saved ticks that are still
+ * available, in the pickers' order. None saved, or none left → the built-in default, Zelle only.
+ */
+export function defaultPayWays(s: Pick<InvoiceSettings, "payDefaults">, avail: PayWayAvailability): PayWay[] {
+  const ways = DEFAULTABLE_PAY_WAYS.filter((w) => s.payDefaults.includes(w) && avail[w].ok);
+  return ways.length ? ways : [...DEFAULT_PAY_WAYS];
+}
+
+/**
+ * Nora's OWN receiving account for the "ach" way: the two numbers her invoice prints so a customer can send a bank
+ * transfer. SERVER ONLY, and only where a customer needs them: ops-invoices decrypts them for the PDF and the
+ * customer's pay page. Everything else (the team's pages, the messages, Claude) gets `maskedBankDetails`, or nothing.
+ * Never logged, never in the activity log, an error message, the CSV or MCP output.
+ */
+export type BankDetails = { account: string; routing: string };
+
+/** One way to pay as the PDF and the pay page show it (only the invoice's chosen ways, in print order). */
 export type PayOption =
   | { way: "zelle"; to: string; name: string | null; memo: string }
+  /** `account` is the full number only on the PDF and the customer's page; everywhere else it is masked ("••••6789"). */
+  | { way: "ach"; label: string | null; account: string; routing: string }
   | { way: "check"; payee: string; address: string | null }
   | { way: "venmo"; handle: string }
   | { way: "paypal"; handle: string }
@@ -452,13 +496,16 @@ export type PayOption =
   | { way: "card" };
 
 /**
- * The invoice's chosen ways with their details, Zelle first. A way whose details are gone from Settings (or bank /
- * card while Stripe isn't set up or that way is off) is left out, so the page and PDF never print an empty way.
+ * The invoice's chosen ways with their details, in print order (her bank account, Zelle, check, …). A way whose
+ * details are gone from Settings (or bank / card while Stripe isn't set up or that way is off) is left out, so the
+ * page and PDF never print an empty way. `bank` is her own account for the "ach" way: the real numbers for the PDF
+ * and the customer's page, `maskedBankDetails(s)` for anything a team page or a message shows, null to leave it out.
  */
-export function payOptions(s: InvoiceSettings, inv: { number: string | null; payWays: readonly PayWay[]; payNote: string | null }, stripeReady: boolean): PayOption[] {
+export function payOptions(s: InvoiceSettings, inv: { number: string | null; payWays: readonly PayWay[]; payNote: string | null }, stripeReady: boolean, bank: BankDetails | null): PayOption[] {
   const out: PayOption[] = [];
-  for (const w of sortPayWays(inv.payWays)) {
+  for (const w of printPayWays(inv.payWays)) {
     if (w === "zelle" && s.zelle) out.push({ way: "zelle", to: s.zelle, name: s.zelleName, memo: zelleMemo(inv.number) });
+    else if (w === "ach" && bank) out.push({ way: "ach", label: s.ownBankLabel, account: bank.account, routing: bank.routing });
     else if (w === "check" && s.checkPayee) out.push({ way: "check", payee: s.checkPayee, address: s.checkAddress });
     else if (w === "venmo" && s.venmo) out.push({ way: "venmo", handle: s.venmo });
     else if (w === "paypal" && s.paypal) out.push({ way: "paypal", handle: s.paypal });
@@ -475,24 +522,54 @@ export function noPayOptions(o: readonly PayOption[]): boolean {
 }
 
 /**
- * The lines under "PAYMENT INFORMATION:" on the PDF, in her Skynova wording:
- *   "(555) 010-0100 [Zelle]", "Put invoice 0000170 in the Zelle memo", "Check payable to Nora Chen, mail to …",
- *   "@nora [Venmo]", "paypal.me/nora [PayPal]", the custom line, "Pay online by bank transfer: <link>".
- * The online line needs the customer link (payUrl); without one it is left out.
+ * Each chosen way as its own block of lines, worded the way Nora writes her invoices (fake values here):
+ *
+ *   Sample Bank Checking                             (the bank label, when there is one)
+ *   ACH to ACCT#:000123456789                        (no space after the colons, as she writes them)
+ *   ROUTING:000000000
+ *
+ *   Please send payment via Zelle to 5550100100.     (the Zelle value exactly as typed in Settings)
+ *   Put invoice 0000170 in the Zelle memo            ("Zelle shows <name>" under it only when that name is set)
+ *
+ *   Checks Payable to Nora Chen
+ *   Mail to 100 Sample St, Sampleton, VA 23000       (only when a mailing address is saved for checks)
+ *
+ * then "@nora [Venmo]", "paypal.me/nora [PayPal]", the custom line and "Pay online by bank transfer: <link>", each
+ * its own block. The online line needs the customer link (payUrl); without one it is left out.
+ * `ach: "pointer"` is for a message a person sends WITH the PDF: the bank transfer is named, the account and routing
+ * numbers are not repeated (the PDF carries them).
  */
-export function paymentInfoLines(options: readonly PayOption[], payUrl: string | null): string[] {
-  const out: string[] = [];
+function paymentBlocks(options: readonly PayOption[], payUrl: string | null, ach: "numbers" | "pointer"): string[][] {
+  const out: string[][] = [];
   const bank = options.some((o) => o.way === "bank");
   const card = options.some((o) => o.way === "card");
   for (const o of options) {
-    if (o.way === "zelle") out.push(`${o.to} [Zelle${o.name ? `: ${o.name}` : ""}]`, o.memo);
-    else if (o.way === "check") out.push(`Check payable to ${o.payee}${o.address ? `, mail to ${oneLineAddress(o.address)}` : ""}`);
-    else if (o.way === "venmo") out.push(`${o.handle} [Venmo]`);
-    else if (o.way === "paypal") out.push(`${o.handle} [PayPal]`);
-    else if (o.way === "custom") out.push(o.text);
+    if (o.way === "ach") out.push(ach === "pointer" ? ["Bank transfer (ACH): the account details are on the PDF."] : [...(o.label ? [o.label] : []), `ACH to ACCT#:${o.account}`, `ROUTING:${o.routing}`]);
+    else if (o.way === "zelle") out.push([`Please send payment via Zelle to ${o.to}.`, o.memo, ...(o.name ? [`Zelle shows ${o.name}`] : [])]);
+    else if (o.way === "check") out.push([`Checks Payable to ${o.payee}`, ...(o.address ? [`Mail to ${oneLineAddress(o.address)}`] : [])]);
+    else if (o.way === "venmo") out.push([`${o.handle} [Venmo]`]);
+    else if (o.way === "paypal") out.push([`${o.handle} [PayPal]`]);
+    else if (o.way === "custom") out.push([o.text]);
   }
-  if ((bank || card) && payUrl) out.push(`Pay online by ${bank && card ? "bank transfer or card" : bank ? "bank transfer" : "card"}: ${payUrl}`);
+  if ((bank || card) && payUrl) out.push([`Pay online by ${bank && card ? "bank transfer or card" : bank ? "bank transfer" : "card"}: ${payUrl}`]);
   return out;
+}
+
+/**
+ * The lines under "PAYMENT INFORMATION:" on the PDF: the blocks above with ONE blank line ("") between them. With
+ * the real BankDetails in the options this holds her account number: it is for the PDF (and the team's preview, which
+ * is built from masked details). Never put it in a message, a log or MCP output: use paymentMessageLines there.
+ */
+export function paymentInfoLines(options: readonly PayOption[], payUrl: string | null): string[] {
+  return paymentBlocks(options, payUrl, "numbers").flatMap((block, i) => (i ? ["", ...block] : block));
+}
+
+/**
+ * The same ways for a message a person sends with the PDF (the email, the reminder): worded like the PDF, one line
+ * after the other, but a bank transfer only points at the PDF. Never an account or routing number.
+ */
+export function paymentMessageLines(options: readonly PayOption[], payUrl: string | null): string[] {
+  return paymentBlocks(options, payUrl, "pointer").flat();
 }
 
 /* ───────────────────────── Saved line items (one-tap chips) ───────────────────────── */
@@ -551,7 +628,10 @@ export function readyItems(lines: readonly CreatorLine[]): { items: InvoiceItem[
 
 /**
  * How Nora gets paid and what every invoice prints. Stored in the existing app_settings row schema.NORA_PAYMENT_KEY
- * next to its `line` (the deal "Request payment" text). People only; never a password, card or bank account number.
+ * next to its `line` (the deal "Request payment" text). People only; never a password or a card number, and never a
+ * CUSTOMER's bank details. The one bank account allowed is Nora's OWN receiving account (she prints it on her
+ * invoices): a person types it in Settings, it is stored ENCRYPTED under the row's `ownBankEnc` key (lib/crypto,
+ * TOKEN_ENC_KEY), and this object never holds the account number: only its last digits, for the masked display.
  * Stripe keys are NOT here: they live only in the STRIPE_SECRET_KEY / STRIPE_WEBHOOK_SECRET env vars. The next
  * invoice number is NOT here either: it is the SEQUENCE (ops-invoices nextInvoiceNumber / setNextInvoiceNumber).
  */
@@ -574,9 +654,25 @@ export type InvoiceSettings = {
   /** Plain instructions only (a handle or a paypal.me link); nothing is connected. */
   venmo: string | null;
   paypal: string | null;
+  /**
+   * Bank transfer (ACH) straight to her OWN account: the "ach" way (not the online "bank" way below, which is Stripe).
+   * The label is free text printed above the numbers ("Sample Bank Checking").
+   */
+  ownBankLabel: string | null;
+  /**
+   * Filled by ops-invoices from the encrypted pair, never stored in plain text and never by the browser: the last
+   * digits of the account number (the masked display, "••••6789") and the routing number (it may be shown). Both
+   * null when no bank details are saved. The full account number is never in this object.
+   */
+  ownBankLast4: string | null;
+  ownBankRouting: string | null;
+  /** Bank details are stored but can't be read (TOKEN_ENC_KEY is missing or changed): Settings asks to type them again. */
+  ownBankUnreadable: boolean;
   /** Pay online (Stripe Checkout). Only matters when STRIPE_SECRET_KEY is set. Bank transfer on, card OFF by default. */
   achEnabled: boolean;
   cardEnabled: boolean;
+  /** The ways ticked for new invoices, in the pickers' order. Empty = the built-in default, Zelle (defaultPayWays). */
+  payDefaults: PayWay[];
   /** Default days until due for new invoices: 0 = due on receipt. */
   termsDays: number;
   /** Default note printed under NOTES on new invoices (empty by default). */
@@ -597,8 +693,13 @@ export const DEFAULT_INVOICE_SETTINGS: InvoiceSettings = {
   checkAddress: null,
   venmo: null,
   paypal: null,
+  ownBankLabel: null,
+  ownBankLast4: null,
+  ownBankRouting: null,
+  ownBankUnreadable: false,
   achEnabled: true,
   cardEnabled: false,
+  payDefaults: [],
   termsDays: DEFAULT_TERMS_DAYS,
   footer: null,
   savedItems: DEFAULT_SAVED_ITEMS.map((i) => ({ ...i })),
@@ -621,9 +722,17 @@ function readSavedItems(v: unknown): SavedItem[] {
   return out;
 }
 
-/** app_settings value (any shape, from any version) → InvoiceSettings. Never throws. */
-export function readInvoiceSettings(value: Record<string, unknown> | null | undefined): InvoiceSettings {
+/** The app_settings key that holds her account and routing numbers, encrypted (lib/crypto encryptJson({ a, r })). */
+export const OWN_BANK_ENC_KEY = "ownBankEnc";
+
+/**
+ * app_settings value (any shape, from any version) → InvoiceSettings. Never throws. `bank` is her own account as
+ * ops-invoices decrypted it (server only): without it the settings read as "no bank details" and the "ach" way is
+ * off. Only the last digits of the account number are copied in.
+ */
+export function readInvoiceSettings(value: Record<string, unknown> | null | undefined, bank: BankDetails | null = null): InvoiceSettings {
   const v = value ?? {};
+  const stored = typeof v[OWN_BANK_ENC_KEY] === "string" && !!v[OWN_BANK_ENC_KEY];
   const days = typeof v.termsDays === "number" && Number.isInteger(v.termsDays) && v.termsDays >= 0 && v.termsDays <= MAX_TERMS_DAYS ? v.termsDays : DEFAULT_TERMS_DAYS;
   return {
     line: textOrNull(v.line),
@@ -637,8 +746,13 @@ export function readInvoiceSettings(value: Record<string, unknown> | null | unde
     checkAddress: textOrNull(v.checkAddress),
     venmo: textOrNull(v.venmo),
     paypal: textOrNull(v.paypal),
+    ownBankLabel: textOrNull(v.ownBankLabel),
+    ownBankLast4: bank ? accountLastDigits(bank.account) : null,
+    ownBankRouting: bank ? bank.routing : null,
+    ownBankUnreadable: stored && !bank,
     achEnabled: v.achEnabled !== false,
     cardEnabled: v.cardEnabled === true,
+    payDefaults: Array.isArray(v.payDefaults) ? DEFAULTABLE_PAY_WAYS.filter((w) => (v.payDefaults as unknown[]).includes(w)) : [],
     termsDays: days,
     footer: textOrNull(v.footer),
     savedItems: readSavedItems(v.savedItems),
@@ -657,12 +771,76 @@ export function invoiceSetupMissing(s: InvoiceSettings): InvoiceSetupField[] {
 /** The inline ask's prefill: her legal name, already the contracts' default (lib/contract CREATOR_LEGAL_NAME). */
 export const SETUP_PREFILL = { fromName: CREATOR_LEGAL_NAME } as const;
 
+/* ───────────────────────── Her own bank account (the "ach" way) ───────────────────────── */
+
+/** Digits only, or null when the text holds anything but digits, spaces and dashes (how people type these numbers). */
+export function bankDigits(text: string | null | undefined): string | null {
+  const t = (text ?? "").trim();
+  return /^[\d -]+$/.test(t) ? t.replace(/\D/g, "") : null;
+}
+
+/** A US routing number: 9 digits whose ABA check digit holds (3·(d1+d4+d7) + 7·(d2+d5+d8) + (d3+d6+d9) ends in 0). */
+export function isRoutingNumber(digits: string): boolean {
+  if (!/^\d{9}$/.test(digits)) return false;
+  const d = [...digits].map(Number);
+  return (3 * (d[0] + d[3] + d[6]) + 7 * (d[1] + d[4] + d[7]) + (d[2] + d[5] + d[8])) % 10 === 0;
+}
+
+/** A US bank account number: 4 to 17 digits. */
+export function isBankAccountNumber(digits: string): boolean {
+  return /^\d{4,17}$/.test(digits);
+}
+
+/** A card number typed where an account number belongs: card length, a card network's first digits, and the Luhn check. */
+export function looksLikeCardNumber(digits: string): boolean {
+  return /^\d{13,19}$/.test(digits) && /^(4|5[1-5]|2[2-7]|3[0-9]|6(011|5|4[4-9]|2))/.test(digits) && luhn(digits);
+}
+
+/**
+ * Why the account and routing numbers a person typed can't be saved, in plain words, or null when they can. The
+ * messages NEVER repeat what was typed (they are shown on the page and may end up in a screenshot).
+ */
+export function bankDetailsProblem(account: string | null | undefined, routing: string | null | undefined): string | null {
+  const a = bankDigits(account);
+  const r = bankDigits(routing);
+  if (!(account ?? "").trim() || !(routing ?? "").trim()) return "Type both the account number and the routing number.";
+  if (a == null || !isBankAccountNumber(a)) return "That account number doesn't look right: it should be 4 to 17 digits, with no letters.";
+  if (looksLikeCardNumber(a)) return "That looks like a card number, not a bank account number. Nora HQ never stores card numbers.";
+  if (r == null || !/^\d{9}$/.test(r)) return "A routing number has exactly 9 digits. Check it and type it again.";
+  if (!isRoutingNumber(r)) return "That routing number doesn't pass the bank check (its last digit doesn't match the others). Check it against a check or your bank's app and type it again.";
+  if (a === r) return "The account number and the routing number are the same. Check which is which.";
+  return null;
+}
+
+/** The end of an account number for the masked display: its last 4 digits (its last 2 when it is shorter than 8). */
+export function accountLastDigits(account: string): string {
+  const d = account.replace(/\D/g, "");
+  return d.slice(d.length >= 8 ? -4 : -2);
+}
+
+/** "••••6789": how every team page shows the account number. The full number is only on the PDF and the customer's page. */
+export function maskAccountNumber(lastDigits: string): string {
+  return `••••${lastDigits}`;
+}
+
+/** Her bank details as a team page or a message may show them: the account masked, the routing number as it is. */
+export function maskedBankDetails(s: Pick<InvoiceSettings, "ownBankLast4" | "ownBankRouting">): BankDetails | null {
+  return s.ownBankLast4 && s.ownBankRouting ? { account: maskAccountNumber(s.ownBankLast4), routing: s.ownBankRouting } : null;
+}
+
+/** A bank label is a name ("Sample Bank Checking"), never where a number goes. */
+export function bankLabelHoldsNumber(label: string | null | undefined): boolean {
+  return /\d[\d -]{3,}\d/.test(label ?? "");
+}
+
 /* ───────────────────────── Card / bank number guard ───────────────────────── */
 
 /**
  * A card number (13 to 19 digits passing the Luhn check) or a bank routing / account number written next to the
- * word routing, account, acct or ABA. Used to refuse these in payment settings, notes and imports: Nora HQ never
- * stores card or bank details. A phone number, a check number or an amount does not match.
+ * word routing, account, acct or ABA. Used to refuse these in every free-text field (notes, references, customers,
+ * lines, imports, the custom pay line and the other settings): Nora HQ never stores a customer's card or bank
+ * details, and Nora's own account number goes in ONE place only, its own boxes in Settings (bankDetailsProblem),
+ * never in free text. A phone number, a check number or an amount does not match.
  */
 export function looksLikeCardOrBankNumber(text: string | null | undefined): boolean {
   const s = text ?? "";
@@ -775,7 +953,7 @@ export const PDF_LETTERS = {
  *   Standard Content Creation Package       550.00       1.00   550.00
  *   Food Stipend                             75.10       1.00    75.10
  *   NOTES: PAYMENT INFORMATION:
- *   (555) 010-0100 [Zelle]
+ *   Please send payment via Zelle to 5550100100.
  *   Put invoice 0000170 in the Zelle memo
  *                                                     Subtotal       625.10
  *                                                     Total          625.10
@@ -795,7 +973,13 @@ export type InvoiceDocument = {
   /** The invoice's own note, printed after "NOTES:" (null: "NOTES: PAYMENT INFORMATION:" on one line, as hers). */
   notes: string | null;
   paymentHeading: "PAYMENT INFORMATION:";
+  /** paymentInfoLines: one block per chosen way, "" between blocks (a blank line). */
   paymentLines: string[];
+  /**
+   * True when the lines show her bank account masked ("ACH to ACCT#:••••6789"): the team's preview. The PDF itself is
+   * always built with the real number (ops-invoices invoicePdf) and has this false.
+   */
+  paymentMasked: boolean;
   /** Bottom right, in order. Discount only when there is one; Balance Due is the last row and has the $. */
   totals: Array<{ label: string; value: string; strong?: boolean }>;
   fileName: string;
@@ -811,10 +995,12 @@ export function invoiceDocument(
   inv: Pick<Invoice, "number" | "status" | "issueDate" | "dueDate" | "termsDays" | "items" | "subtotalCents" | "discountCents" | "discountLabel" | "totalCents" | "paidCents" | "notes" | "payWays" | "payNote">,
   customer: Pick<Customer, "name" | "billingAddress">,
   settings: InvoiceSettings,
-  opts: { stripeReady: boolean; payUrl: string | null; today: string },
+  /** `bank`: her own account for the "ach" way. The real numbers for the PDF; maskedBankDetails(settings) for a team page. */
+  opts: { stripeReady: boolean; payUrl: string | null; today: string; bank: BankDetails | null },
 ): InvoiceDocument {
   const dates = resolveInvoiceDates(inv, opts.today);
-  const options = payOptions(settings, inv, opts.stripeReady);
+  const options = payOptions(settings, inv, opts.stripeReady, opts.bank);
+  const ach = options.find((o) => o.way === "ach");
   const totals: InvoiceDocument["totals"] = [{ label: "Subtotal", value: pdfAmount(inv.subtotalCents) }];
   if (inv.discountCents > 0) totals.push({ label: inv.discountLabel ? `Discount (${inv.discountLabel})` : "Discount", value: `-${pdfAmount(inv.discountCents)}` });
   totals.push(
@@ -837,6 +1023,7 @@ export function invoiceDocument(
     notes: inv.notes?.trim() || null,
     paymentHeading: "PAYMENT INFORMATION:",
     paymentLines: paymentInfoLines(options, opts.payUrl),
+    paymentMasked: !!ach && ach.way === "ach" && ach.account.includes("•"),
     totals,
     fileName: invoiceFileName(inv.number, customer.name),
   };
@@ -956,6 +1143,8 @@ export type InvoiceCreatorContext = {
   setupMissing: InvoiceSetupField[];
   savedItems: SavedItem[];
   payWays: PayWayAvailability;
+  /** What a new, blank invoice starts with: the ways ticked in Settings that are available (defaultPayWays), else Zelle. */
+  defaultPayWays: PayWay[];
   stripeReady: boolean;
   billTo: BillToOption[];
   prefill: InvoicePrefill;
@@ -1394,7 +1583,8 @@ export type PublicInvoice = {
 
 /**
  * "unknown": never a link (the page answers 404). "void": the invoice was cancelled (a short notice, no amounts).
- * "open": the invoice (paid ones included: they show "Paid, thank you") and exactly its chosen ways, Zelle first.
+ * "open": the invoice (paid ones included: they show "Paid, thank you") and exactly its chosen ways in print order
+ * (her bank account, Zelle, check, …). This is the one page that gets the real account number, next to the PDF.
  */
 export type PublicInvoiceState =
   | { state: "unknown" }

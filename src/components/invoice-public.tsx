@@ -9,9 +9,11 @@ import { addressLines, formatCents, type PayOption, type PublicInvoice } from "@
 /**
  * The customer's invoice page (/i/<token>): no app chrome, one column on paper, in English, 简体 or 繁體.
  * Shows only this invoice: who it's from, the number, the status line, Bill to, the lines and totals, the notes, and
- * then How to pay with EXACTLY the invoice's chosen ways (PayOption[], already Zelle first), Pay online only when
- * the invoice has bank transfer or card and Stripe is set up (the page's one primary button, cinnabar as on every
- * page without the app shell), and Download PDF. Never the private note, the deal, the contract or anything else.
+ * then How to pay with EXACTLY the invoice's chosen ways (PayOption[], already in the PDF's order: her bank account
+ * for a transfer, with Copy buttons for the account and the routing number, then Zelle, then checks), Pay online only
+ * when the invoice has bank transfer online or card and Stripe is set up (the page's one primary button, cinnabar as
+ * on every page without the app shell), and Download PDF. Never the private note, the deal, the contract or anything
+ * else.
  * Server component; the Copy buttons are the only client bits (invoice-public-copy). Styles: the ps- classes of the
  * other public pages plus the few ip- rules below (tokens only, so Light / Dark follow the theme).
  */
@@ -130,6 +132,18 @@ function CopyRow({ P, value, copyValue }: { P: InvoiceCopy["page"]; value: React
 
 function Way({ P, o, number }: { P: InvoiceCopy["page"]; o: PayOption; number: string }) {
   switch (o.way) {
+    case "ach":
+      // Her own account, for a transfer from the customer's bank: the label, then each number with its own Copy.
+      return (
+        <div>
+          <h3 className="ip-way-title">{P.ach.title}</h3>
+          {o.label && <p className="mt-1">{o.label}</p>}
+          <p className="meta mt-3">{P.ach.account}</p>
+          <CopyRow P={P} value={o.account} copyValue={o.account} />
+          <p className="meta mt-3">{P.ach.routing}</p>
+          <CopyRow P={P} value={o.routing} copyValue={o.routing} />
+        </div>
+      );
     case "zelle":
       return (
         <div>
