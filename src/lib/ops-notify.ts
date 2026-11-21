@@ -1,6 +1,6 @@
 import "server-only";
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
-import { and, asc, desc, eq, gte, isNotNull, isNull, lt, lte, ne, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, isNotNull, isNull, lt, lte, ne, sql } from "drizzle-orm";
 import { z } from "zod";
 import { getDb, schema } from "./db";
 import { newId } from "./ids";
@@ -14,6 +14,8 @@ import { personEmail, sendToUser, type PushPayload } from "./notify";
 import { dealsMadeFromSchedule, reelsToPost, scheduleOn } from "./ops-schedule";
 import { scheduleNameKey } from "./schedule-parse";
 import { NOTIFY_TOPICS, type NotifyTopic } from "./schema";
+import { invoiceReminders, runRetainers } from "./ops-invoices";
+import type { InvoiceListRow, RunRetainersResult } from "./invoices-types";
 
 /**
  * Phone notifications (device subscriptions + topics) and the private calendar feed.
@@ -295,8 +297,11 @@ const isMonday = (ymd: string) => new Date(`${ymd}T12:00:00Z`).getUTCDay() === 1
 const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? "" : "s"}`;
 
 /**
- * Once a day (first sync run after 8am NY), all to Nora:
- *  - payments overdue (deals);
+ * Once a day (first sync run after 8am NY):
+ *  - first the monthly retainers (lib/ops-invoices runRetainers): one DRAFT invoice per retainer that is due, never
+ *    finalized (a person presses Make PDF); then, all to Nora:
+ *  - payments overdue: invoices and deals in one push (a deal whose payment an invoice tracks counts once, as its
+ *    invoice), invoices due tomorrow, and the retainer drafts made today ("Invoice ready");
  *  - tomorrow's deal visits (with address);
  *  - tomorrow's jobs on her schedule that a deal visit doesn't already cover ("Tomorrow: S&F · 📸 reel to post");
  *  - on Mondays, how many reels are still to post from jobs that have happened (dated today or earlier, or with
@@ -323,8 +328,13 @@ export async function runDailyReminders(now = new Date(), opts: { force?: boolea
       .returning({ key: schema.appSettings.key });
     if (!claimed.length) return { ok: true, skipped: "already_ran" as const };
   }
+  // Retainers first: this month's drafts, so the push below can say they're ready. (Preview makes nothing.)
+  const retainers: RunRetainersResult = await runRetainers(now, { dryRun: preview }).catch((e) => {
+    console.error("[notify] retainer drafts skipped", e);
+    return { created: [], failed: 0 };
+  });
   const nora = personEmail("nora");
-  if (!nora) return { ok: true, skipped: "no_nora" as const };
+  if (!nora) return { ok: true, skipped: "no_nora" as const, retainerDrafts: retainers.created.length };
   // Every reminder goes through here, so a preview sees exactly what a real run would send.
   const messages: Array<PushPayload & { topic: NotifyTopic }> = [];
   const push = async (topic: NotifyTopic, payload: PushPayload) => {
@@ -333,19 +343,58 @@ export async function runDailyReminders(now = new Date(), opts: { force?: boolea
     return { sent: 0, removed: 0, failed: 0 };
   };
 
-  const overdue = await db.select().from(schema.deals).where(and(
+  const overdueDeals = await db.select().from(schema.deals).where(and(
     eq(schema.deals.paymentStatus, "requested"), isNotNull(schema.deals.paymentDueDate), lt(schema.deals.paymentDueDate, day), ne(schema.deals.status, "cancelled"),
   )).orderBy(asc(schema.deals.paymentDueDate));
+  // Invoices (lib/ops-invoices). If they can't be read, the deal reminders still go out.
+  const invoices = await invoiceReminders(day, retainers).catch((e) => {
+    console.error("[notify] invoice reminders skipped", e);
+    return { dueTomorrow: [] as InvoiceListRow[], overdue: [] as InvoiceListRow[], readyToSend: [] as InvoiceListRow[] };
+  });
+  // A deal whose payment is tracked by an invoice is counted once, as its invoice.
+  const invoiced = overdueDeals.length
+    ? new Set((await db.select({ dealId: schema.invoices.dealId }).from(schema.invoices)
+      .where(and(inArray(schema.invoices.dealId, overdueDeals.map((d) => d.id)), inArray(schema.invoices.status, ["sent", "partially_paid", "paid"])))).map((r) => r.dealId))
+    : new Set<string | null>();
+  const overdue = overdueDeals.filter((d) => !invoiced.has(d.id));
+  const lateItems = [
+    ...invoices.overdue.map((i) => ({ text: `${i.customerName} ${money(i.balanceCents)} (due ${shortDate(i.dueDate!)})`, url: `/invoices/${encodeURIComponent(i.id)}` })),
+    ...overdue.map((d) => ({ text: `${d.businessName}${money(d.amountCents) ? ` ${money(d.amountCents)}` : ""} (due ${shortDate(d.paymentDueDate!)})`, url: dealHref(d.id) })),
+  ];
   let paymentSent = 0;
-  if (overdue.length) {
-    const list = overdue.slice(0, 4).map((d) => `${d.businessName}${money(d.amountCents) ? ` ${money(d.amountCents)}` : ""} (due ${shortDate(d.paymentDueDate!)})`).join(" · ");
+  if (lateItems.length) {
+    const list = lateItems.slice(0, 4).map((x) => x.text).join(" · ");
     const r = await push("payment_overdue", {
-      title: overdue.length === 1 ? "Payment overdue" : `${overdue.length} payments overdue`,
-      body: overdue.length > 4 ? `${list} · +${overdue.length - 4} more` : list,
-      url: overdue.length === 1 ? dealHref(overdue[0].id) : "/deals",
+      title: lateItems.length === 1 ? "Payment overdue" : `${lateItems.length} payments overdue`,
+      body: lateItems.length > 4 ? `${list} · +${lateItems.length - 4} more` : list,
+      url: lateItems.length === 1 ? lateItems[0].url : invoices.overdue.length ? "/invoices?status=overdue" : "/deals",
       tag: `payment-overdue-${day}`,
     });
     paymentSent = r.sent;
+  }
+  if (invoices.dueTomorrow.length) {
+    const one = invoices.dueTomorrow.length === 1 ? invoices.dueTomorrow[0] : null;
+    const r = await push("payment_overdue", {
+      title: one ? `Due tomorrow: ${one.customerName} ${money(one.balanceCents)}` : `${invoices.dueTomorrow.length} invoices due tomorrow`,
+      body: one ? `Invoice ${one.number ?? ""}`.trim() : invoices.dueTomorrow.slice(0, 4).map((i) => `${i.customerName} ${money(i.balanceCents)}`).join(" · "),
+      url: one ? `/invoices/${encodeURIComponent(one.id)}` : "/invoices?status=open",
+      tag: `invoice-due-${day}`,
+    });
+    paymentSent += r.sent;
+  }
+  // Retainer drafts made just now (a preview lists what it WOULD make: those have no id yet).
+  const ready = preview
+    ? retainers.created.map((c) => ({ id: "", customerName: c.customerName, cents: c.amountCents }))
+    : invoices.readyToSend.map((i) => ({ id: i.id, customerName: i.customerName, cents: i.totalCents }));
+  if (ready.length) {
+    const one = ready.length === 1 ? ready[0] : null;
+    const r = await push("payment_overdue", {
+      title: one ? `Invoice ready: ${one.customerName} ${money(one.cents)}` : `${ready.length} invoices ready`,
+      body: one ? "Tap to make the PDF" : `${ready.slice(0, 4).map((x) => `${x.customerName} ${money(x.cents)}`).join(" · ")} · tap to make the PDFs`,
+      url: one && one.id ? `/invoices/${encodeURIComponent(one.id)}` : "/invoices?status=draft",
+      tag: `invoice-ready-${day}`,
+    });
+    paymentSent += r.sent;
   }
 
   const tomorrow = addDaysYmd(day, 1);
@@ -412,7 +461,8 @@ export async function runDailyReminders(now = new Date(), opts: { force?: boolea
     }
   }
   return {
-    ok: true, overdue: overdue.length, visitsTomorrow: visits.length, scheduleTomorrow: rest.length,
+    ok: true, overdue: overdue.length + invoices.overdue.length, invoicesDueTomorrow: invoices.dueTomorrow.length, retainerDrafts: retainers.created.length,
+    visitsTomorrow: visits.length, scheduleTomorrow: rest.length,
     ...(reelsOwed === undefined ? {} : { reelsOwed }),
     sent: paymentSent + visitSent + scheduleSent + reelsSent,
     ...(preview ? { preview: true as const, day, messages } : {}),

@@ -3,13 +3,15 @@ import { SESSION_COOKIE, verifySession } from "@/lib/session";
 
 // Routes that authenticate themselves (bearer tokens / cron secret) or are public.
 // "/api/calendar/" (trailing slash): private iCal feeds authenticate by the token in the URL. "/sw.js": the push service worker script.
-const PUBLIC_PREFIXES = ["/login", "/api/mcp", "/api/cron", "/api/asks/capture", "/api/calendar/", "/sw.js", "/_next", "/favicon", "/manifest", "/icon"];
+// "/api/stripe/webhook": Stripe's events; the route trusts only a valid Stripe-Signature (lib/ops-stripe).
+const PUBLIC_PREFIXES = ["/login", "/api/mcp", "/api/cron", "/api/asks/capture", "/api/calendar/", "/api/stripe/webhook", "/sw.js", "/_next", "/favicon", "/manifest", "/icon"];
 /**
  * Public pages matched by whole path segment, so "/collab" is public but "/collabs" (Nora's inbox) is not.
  * "/start/<token>": client onboarding form (private link). "/drop/<token>": a business owner's private drop link
- * (send a flyer or photo; the page and its upload route check the token themselves).
+ * (send a flyer or photo; the page and its upload route check the token themselves). "/i/<token>": a customer's
+ * invoice (its page, /pdf and /pay check the token themselves; "/invoices" is the team's and stays signed-in).
  */
-const PUBLIC_PAGES = ["/collab", "/kit", "/start", "/drop"];
+const PUBLIC_PAGES = ["/collab", "/kit", "/start", "/drop", "/i"];
 const isPublicPage = (pathname: string) => PUBLIC_PAGES.some((p) => pathname === p || pathname.startsWith(`${p}/`));
 
 export async function middleware(req: NextRequest) {

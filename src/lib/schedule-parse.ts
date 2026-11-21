@@ -1,10 +1,10 @@
 /**
- * Parses Nora's schedule as she keeps it in her notes app, e.g.
+ * Parses Nora's schedule as she keeps it in her notes app, e.g. (invented names and amounts)
  *
  *   November
- *   9. 11/04 | Antonelli’s - FREE 📸
- *   11. 11/11 | TLJ (DC) - $600.00 () 📸 🚩
- *   20. 11/XX | Charles Chocolates - $250.00 () 📸
+ *   9. 11/04 | Marcello’s - FREE 📸
+ *   11. 11/11 | Pan Pan (DC) - $525.00 () 📸 🚩
+ *   20. 11/XX | Cocoa House - $200.00 () 📸
  *
  * Keeps only what the app tracks: the date (or "no set day"), the business, FREE and 📸 (a reel to post).
  * Money is never kept: amounts, (Check)/(Zelle), 🚩 and anything after it are dropped — and no output
@@ -86,7 +86,7 @@ function monthHeader(line: string): { month: number; year: number | null } | nul
   return { month: idx + 1, year: m[2] ? Number(m[2]) : null };
 }
 
-/** "Antonelli’s - FREE 📸" → { name: "Antonelli’s", isFree: true }. */
+/** "Marcello’s - FREE 📸" → { name: "Marcello’s", isFree: true }. */
 function splitBusiness(rest: string): { name: string; isFree: boolean } {
   let s = rest;
   const flag = s.search(FLAG);
@@ -224,8 +224,8 @@ const tokens = (s: string) => scheduleNameKey(s).split(" ").filter((t) => t && !
 const compact = (s: string) => scheduleNameKey(s).replace(/\s+/g, "");
 
 /**
- * Finds the business a schedule name refers to. "Crab O’Clock" ↔ "Crab O Clock" (same letters);
- * "Massage Kingdom" ↔ "SNF Massage Kingdom" at Richmond (every word of one is in the other).
+ * Finds the business a schedule name refers to. "Noodle O’Clock" ↔ "Noodle O Clock" (same letters);
+ * "Lotus Spa" ↔ "ABC Lotus Spa" at Sampleton (every word of one is in the other).
  * Returns null when nothing — or more than one business equally — matches.
  */
 export function matchBusiness<T extends { id: string; name: string; location?: string | null }>(name: string, clients: T[]): T | null {
@@ -241,7 +241,7 @@ export function matchBusiness<T extends { id: string; name: string; location?: s
     const theirs = tokens(`${x.name} ${x.location ?? ""}`);
     const nameOnly = tokens(x.name);
     const [small, big] = mine.length <= nameOnly.length ? [mine, theirs] : [nameOnly, mine];
-    if (!small.length || small.join("").length < 5) continue; // "NUE" alone is too short to guess from
+    if (!small.length || small.join("").length < 5) continue; // "ZAO" alone is too short to guess from
     if (small.every((t) => big.includes(t))) scored.push({ client: x, extra: Math.abs(big.length - small.length) });
   }
   if (!scored.length) return null;

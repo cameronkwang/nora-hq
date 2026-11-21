@@ -38,6 +38,8 @@ Set these under **Vercel → Project → Settings → Environment Variables** (P
 | `OUTREACH_FROM_NAME` | e.g. `Nora` (optional) |
 | `OUTREACH_FOOTER` | Optional. See step 7 |
 | `INTAKE_ACCESS_EMAIL` | Optional. The email new clients add as a manager on their Google Business Profile and Meta accounts in the onboarding form (`/start/<token>`). Defaults to Nora HQ's own account, `noraeatsgood.manager@gmail.com`; set it only to use a different address. |
+| `STRIPE_SECRET_KEY` | Optional. Turns on **Pay online** for invoices that ask for it (Stripe Checkout: bank transfer, and card only if turned on in Settings). Without it invoices offer Zelle and the other ways only. See "Stripe (Pay online)" below |
+| `STRIPE_WEBHOOK_SECRET` | Optional, needed with `STRIPE_SECRET_KEY`: the webhook's signing secret (`whsec_…`), so Stripe can tell Nora HQ a payment came in. See "Stripe (Pay online)" below |
 
 `DATABASE_URL` and `BLOB_READ_WRITE_TOKEN` come from step 2. Now deploy.
 
@@ -175,6 +177,21 @@ This uses the same Meta app as the businesses (step 5). It only asks for read ac
 Notes:
 - TikTok's API has no audience, reach or daily views. "Views, 28 days" for TikTok is the growth in total views across Nora's latest ~60 videos, measured from the daily snapshots. It becomes accurate after about four weeks of syncing.
 - On each post in **Top posts**, pick a business to tag it as a collab. Claude can read all of these numbers through the connector (`get_creator_stats`) when drafting pitches.
+
+## Stripe (Pay online)
+
+Optional. Invoices are paid by Zelle or a check by mail unless an invoice also offers paying online. Nora HQ makes its own invoices (no
+monthly fee) and uses Stripe only to take a payment online through Stripe's hosted Checkout page. The whole setup
+(a free account, the payout bank, ACH Direct Debit, the two keys, the webhook URL and its events, test mode first, and
+the fees) is in [`docs/stripe-setup.md`](stripe-setup.md). In short:
+
+1. Stripe account with `noraeatsgood.manager@gmail.com`, Nora's payout bank added, **ACH Direct Debit** turned on (card can stay off).
+2. `STRIPE_SECRET_KEY` and `STRIPE_WEBHOOK_SECRET` in Vercel (test keys first), then redeploy.
+3. Webhook endpoint `${APP_URL}/api/stripe/webhook` with `checkout.session.completed`,
+   `checkout.session.async_payment_succeeded`, `checkout.session.async_payment_failed` and `checkout.session.expired`.
+
+Settings → Invoices and payments then shows Pay online "On (test mode)" until the live key is in. No fee is ever added
+for the customer.
 
 ## Changing the sign-in password
 

@@ -23,6 +23,8 @@ export const ENV_VARS: EnvVar[] = [
   { name: "OUTREACH_FOOTER", group: "Google", required: false, purpose: "Custom outreach email footer (opt-out + address)", doc: "7. Gmail outreach" },
   { name: "TIKTOK_CLIENT_KEY", group: "TikTok", required: false, purpose: "TikTok app client key (Nora's own stats)", doc: "Nora's own stats (@noraeatsgood)" },
   { name: "TIKTOK_CLIENT_SECRET", group: "TikTok", required: false, purpose: "TikTok app client secret", doc: "Nora's own stats (@noraeatsgood)" },
+  { name: "STRIPE_SECRET_KEY", group: "Payments", required: false, purpose: "Pay online on invoices (Stripe Checkout: bank transfer, card if turned on). Without it invoices offer Zelle and the other ways only", doc: "Stripe (Pay online)" },
+  { name: "STRIPE_WEBHOOK_SECRET", group: "Payments", required: false, purpose: "Lets Stripe tell Nora HQ a payment came in (webhook signing secret, whsec_…)", doc: "Stripe (Pay online)" },
 ];
 
 export function envStatus(): Array<EnvVar & { set: boolean }> {

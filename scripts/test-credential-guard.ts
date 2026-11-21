@@ -5,9 +5,9 @@
 import { hasSecret, looksLikeSecret, looksLikeTypedSecret, maskSecret, redactSecrets } from "../src/lib/credential-guard";
 
 const SECRET = [
-  "Tanklin1991!!",
-  "5006688@Fff",
-  "IG login: Tanklin1991!!",
+  "Wokstar2020!!",
+  "8112233@Ggg",
+  "IG login: Wokstar2020!!",
   "password: hunter2",
   "Password - sunshine",
   "pw hunter2",
@@ -15,15 +15,15 @@ const SECRET = [
   "pass=Secret99",
   "login: owner@goldenwok.com",
   "The wifi password is Noodle2024",
-  "FB passwords: Tanklin",
+  "FB passwords: Wokstar",
   "Instagram 密码：abc12345",
   "店的密碼 shrimp888",
-  "Owner said use (Tanklin1991!!) for both",
+  "Owner said use (Wokstar2020!!) for both",
   // Full-width characters from a Chinese keyboard, and a password with Chinese straight after it.
   "密码：１２３４５６",
   "ｐａｓｓｗｏｒｄ：ｈｕｎｔｅｒ２",
-  "密码是Tanklin1991!!谢谢",
-  "密码是我的生日19880808",
+  "密码是Wokstar2020!!谢谢",
+  "密码是我的生日19850505",
 ];
 
 const CLEAN = [
@@ -32,9 +32,9 @@ const CLEAN = [
   "goldenwok.com/menu",
   "$1,000.00",
   "$20/person, 3x/week",
-  "@sf.massage.kingdom",
-  "1-804-301-4537",
-  "+1 (804) 301-4537",
+  "@golden.wok.kitchen",
+  "1-804-555-0137",
+  "+1 (804) 555-0137",
   "Mon–Fri 11am–9pm",
   "Sat 11:30am-10pm!",
   "2026-11-13",
@@ -153,14 +153,14 @@ const TYPED_CLEAN_PROSE = [
 ];
 // A real password is still refused, in every box.
 const TYPED_SECRET = [
-  "our ig password: Tanklin1991!!",
-  "IG login: Tanklin1991!!",
+  "our ig password: Wokstar2020!!",
+  "IG login: Wokstar2020!!",
   "password: hunter2",
   "pw hunter2",
   "pass=Secret99",
   "The wifi password is Noodle2024",
   "Instagram 密码：abc12345",
-  "Instagram的密码是Tanklin1991!!",
+  "Instagram的密码是Wokstar2020!!",
   "臉書密碼：Shrimp888",
   "店的密碼 shrimp888",
   "账号密码: golden/Wok2024",
@@ -173,7 +173,7 @@ const TYPED_SECRET = [
   "password: Goldenwok",
   "passcode: sesame",
   "Facebook\nusername: goldenwok\npassword: woaini",
-  "Instagram账号是pokebros，密码是woaini",
+  "Instagram账号是pokeplace，密码是woaini",
   // The same with "is" in place of the colon.
   "our ig password is goldenwok",
   "IG password is woaini",
@@ -183,35 +183,35 @@ const TYPED_SECRET = [
   // Full-width characters, and a password with Chinese straight after it.
   "密码：１２３４５６",
   "ｐａｓｓｗｏｒｄ：ｇｏｌｄｅｎｗｏｋ",
-  "密码是Tanklin1991!!谢谢",
-  "密码是我的Tanklin1991!!",
+  "密码是Wokstar2020!!谢谢",
+  "密码是我的Wokstar2020!!",
   // A password-shaped word right after an account: refused in the deal / anything-else boxes and the drop note too.
   "IG: goldenwok / Wok2020!",
   "ig goldenwok/Wok2020!",
   "our ig is goldenwok pass Wok2020!",
   "ig goldenwok pass Wok2020!",
   "IG login: goldenwok / Wok2020!",
-  "账号密码：pokebros Tanklin1991!!",
-  "账号密码：craboclock Tanklin1991!!",
-  "IG login: pokebros@gmail.com / Tanklin1991!!",
-  "login: craboclock@gmail.com / Tanklin1991!!",
-  "our instagram login: craboclock / Tanklin1991!!",
-  "FB login craboclock@gmail.com Tanklin1991!!",
-  "账号 craboclock@gmail.com Tanklin1991!!",
-  "账号pokebros密码Tanklin1991!!",
-  "username: pokebros Tanklin1991!!",
-  "pokebros@gmail.com Tanklin1991!!",
-  "the password to our IG is Tanklin1991!!",
+  "账号密码：pokeplace Wokstar2020!!",
+  "账号密码：craboclock Wokstar2020!!",
+  "IG login: pokeplace@example.com / Wokstar2020!!",
+  "login: crabshack@example.com / Wokstar2020!!",
+  "our instagram login: craboclock / Wokstar2020!!",
+  "FB login crabshack@example.com Wokstar2020!!",
+  "账号 crabshack@example.com Wokstar2020!!",
+  "账号pokeplace密码Wokstar2020!!",
+  "username: pokeplace Wokstar2020!!",
+  "pokeplace@example.com Wokstar2020!!",
+  "the password to our IG is Wokstar2020!!",
   "password for the wifi: Wok2020!",
-  "密码：我们店的是 Tanklin1991!!",
+  "密码：我们店的是 Wokstar2020!!",
   "login goldenwok Wok2020!",
   "账号：goldenwok Wok2020!",
   "微信号 goldenwok88 / Wok2020!",
-  "IG account: Tanklin1991!!",
+  "IG account: Wokstar2020!!",
   "account: goldenwok Wok2020!",
 ];
 // Outside the prose boxes a bare password-shaped word is refused too.
-const TYPED_SECRET_TOKEN = ["Tanklin1991!!", "use 5006688@Fff for both"];
+const TYPED_SECRET_TOKEN = ["Wokstar2020!!", "use 8112233@Ggg for both"];
 
 let failed = 0;
 for (const t of TYPED_CLEAN) {
@@ -247,15 +247,15 @@ for (const t of CLEAN) {
   else console.log(`✓ clean  ${JSON.stringify(t)}`);
 }
 // What Claude and phones read (redactSecrets, the jumpy check): no password a public form could have let through.
-const PASSWORDS = ["Tanklin1991", "Wok2020", "Wok2024", "woaini", "dragonwok", "sesame", "hunter2", "Secret99", "Noodle2024", "abc12345", "hrimp888", "１２３４５６", "ｇｏｌｄｅｎｗｏｋ", "Goldenwok", "goldenwok"];
+const PASSWORDS = ["Wokstar2020", "Wok2020", "Wok2024", "woaini", "dragonwok", "sesame", "hunter2", "Secret99", "Noodle2024", "abc12345", "hrimp888", "１２３４５６", "ｇｏｌｄｅｎｗｏｋ", "Goldenwok", "goldenwok"];
 const READ_MASKED: [string, string][] = [
   ...TYPED_SECRET.map((t): [string, string] => [t, PASSWORDS.find((p) => t.includes(p)) ?? t]),
   // What the calm form check lets through on purpose is still masked on the way out.
   ["password: goldenwok thanks", "goldenwok"],
   ["密码：woaini，谢谢", "woaini"],
   ["pass: goldenwok", "goldenwok"],
-  ["IG: pokebros Tanklin1991!!", "Tanklin1991"],
-  ["use Tanklin1991!! for both", "Tanklin1991"],
+  ["IG: pokeplace Wokstar2020!!", "Wokstar2020"],
+  ["use Wokstar2020!! for both", "Wokstar2020"],
   ["Password: Google", "Google"],
   ["password is gmail", "gmail"],
 ];
@@ -267,9 +267,9 @@ for (const [t, secret] of READ_MASKED) {
 // Only the password is swapped; everything else stays exactly as typed (full-width punctuation included).
 const READ_EXACT: [string, string][] = [
   ["密码：１２３４５６", "密码：[password removed: １••••６]"],
-  ["Instagram账号是pokebros，密码是woaini。谢谢！", "Instagram账号是pokebros，密码是[password removed: w••••i]。谢谢！"],
-  ["密码是Tanklin1991!!谢谢", "密码是[password removed: T••••••••!]谢谢"],
-  ["密码是我的生日19880808", "密码是我的生日[password removed: 1••••••8]"],
+  ["Instagram账号是pokeplace，密码是woaini。谢谢！", "Instagram账号是pokeplace，密码是[password removed: w••••i]。谢谢！"],
+  ["密码是Wokstar2020!!谢谢", "密码是[password removed: W••••••••!]谢谢"],
+  ["密码是我的生日19850505", "密码是我的生日[password removed: 1••••••5]"],
   // Jumpy on purpose: a deal written as one word is masked too (the team still sees it as typed).
   ["Buy1Get1! on Tuesdays", "[password removed: B•••••••!] on Tuesdays"],
   ["小籠包、牛肉麵；周一到周五午餐特价 Buy1Get1! on Tuesdays, 2for$10! lunch", "小籠包、牛肉麵；周一到周五午餐特价 [password removed: B•••••••!] on Tuesdays, [password removed: 2••••••!] lunch"],
@@ -293,10 +293,10 @@ for (const t of READ_AS_TYPED) {
   else console.log(`✓ Claude reads as typed ${JSON.stringify(t)}`);
 }
 // Hints never contain the whole secret.
-for (const m of looksLikeSecret("password: Tanklin1991!! and 5006688@Fff")) {
+for (const m of looksLikeSecret("password: Wokstar2020!! and 8112233@Ggg")) {
   if (m.hint.includes(m.text)) { failed++; console.error(`✗ hint leaks the secret: ${m.hint}`); }
 }
-if (maskSecret("Tanklin1991!!") !== "T••••••••!") { failed++; console.error(`✗ mask: ${maskSecret("Tanklin1991!!")}`); }
+if (maskSecret("Wokstar2020!!") !== "W••••••••!") { failed++; console.error(`✗ mask: ${maskSecret("Wokstar2020!!")}`); }
 if (hasSecret("") || hasSecret(null)) { failed++; console.error("✗ empty input"); }
 
 if (failed) {

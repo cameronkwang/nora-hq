@@ -8,7 +8,7 @@ import { Suspense } from "react";
  * Sections group several existing pages under one sidebar entry. Every page keeps its own URL;
  * the layout renders these tabs at the top of each member page so you can hop between them.
  */
-export type SectionKey = "inbox" | "outreach" | "insights";
+export type SectionKey = "inbox" | "outreach" | "insights" | "invoices";
 type CountKey = "newAsks" | "needsReview";
 type SectionTab = { key: string; label: string; href: string; path: string; count?: CountKey };
 
@@ -39,10 +39,20 @@ export const SECTIONS: Record<SectionKey, { label: string; tabs: SectionTab[] }>
       { key: "reviews", label: "Google reviews", href: "/reviews", path: "/reviews" },
     ],
   },
+  // Invoicing (docs/invoicing.md): both Cameron and Nora see all three. /invoices/new and an invoice's own page are
+  // detail pages of the section (no tab row), like /asks/new.
+  invoices: {
+    label: "Invoices",
+    tabs: [
+      { key: "invoices", label: "Invoices", href: "/invoices", path: "/invoices" },
+      { key: "customers", label: "Customers", href: "/invoices/customers", path: "/invoices/customers" },
+      { key: "inv-reports", label: "Reports", href: "/invoices/reports", path: "/invoices/reports" },
+    ],
+  },
 };
 
-/** The tabs Nora sees: her asks, plus her own collab requests and stats. */
-const NORA_TABS = new Set(["todo", "ideas", "done", "collabs", "stats"]);
+/** The tabs Nora sees: her asks, plus her own collab requests and stats, and all of invoicing (it is her money). */
+const NORA_TABS = new Set(["todo", "ideas", "done", "collabs", "stats", "invoices", "customers", "inv-reports"]);
 
 const under = (path: string, base: string) => path === base || path.startsWith(`${base}/`);
 
@@ -51,6 +61,7 @@ export function sectionOf(path: string): SectionKey | null {
   if (under(path, "/inbox")) return "inbox";
   if (under(path, "/outreach")) return "outreach";
   if (under(path, "/insights")) return "insights";
+  if (under(path, "/invoices")) return "invoices";
   for (const key of Object.keys(SECTIONS) as SectionKey[]) {
     if (SECTIONS[key].tabs.some((t) => under(path, t.path))) return key;
   }

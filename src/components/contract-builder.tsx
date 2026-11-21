@@ -12,8 +12,11 @@ import {
   type ContractFields,
   type ContractKind,
 } from "@/lib/contract";
+import { contractFeeCents, type ContractInvoiceRef, type NextStep } from "@/lib/invoices-types";
 import { deleteContractAction, saveContractAction } from "@/app/(app)/contracts/actions";
-import { Button, Card, Status, cx } from "./ui";
+import { ContractInvoiceLinks, NextSteps } from "./invoice-bits";
+import { MonthlyInvoicesButton } from "./invoice-contract-bits";
+import { Button, Card, LinkButton, Status, cx } from "./ui";
 
 /** A past contract as the page hands it over (dates as strings so it crosses the server/client line). */
 export type PastContract = {
@@ -26,7 +29,13 @@ export type PastContract = {
   createdBy: string;
   createdAt: string;
   fields: ContractFields;
+  /** Its invoices ("0000170 · Paid") and the one-tap next step ("Make invoice", "Invoice the rest"…), from invoicing. */
+  invoices?: ContractInvoiceRef[];
+  nextSteps?: NextStep[];
 };
+
+/** What the builder offers once a contract downloaded and saved (docs/invoicing.md "Contract to invoice"). */
+type Saved = { id: string; kind: ContractKind; fee: number; business: string };
 
 async function downloadPdf(fields: ContractFields) {
   const { contractPdf } = await import("@/lib/contract-pdf");
@@ -50,12 +59,15 @@ export function ContractBuilder({
   businesses,
   initial,
   dealId,
+  invoiceId,
   history,
 }: {
   today: string;
   businesses: string[];
   initial?: Partial<ContractFields>;
   dealId?: string | null;
+  /** Made from this invoice (/contracts?invoice=<id>): the saved contract links back to it. */
+  invoiceId?: string | null;
   history: PastContract[];
 }) {
   const [f, setF] = useState<ContractFields>(() => ({ ...defaultFields(today), ...initial }));
@@ -64,6 +76,7 @@ export function ContractBuilder({
   const [showPreview, setShowPreview] = useState(false);
   const [error, setError] = useState("");
   const [note, setNote] = useState("");
+  const [saved, setSaved] = useState<Saved | null>(null);
 
   useEffect(() => {
     try {
@@ -74,15 +87,22 @@ export function ContractBuilder({
     }
   }, []);
 
-  const set = <K extends keyof ContractFields>(k: K, v: ContractFields[K]) => setF((p) => ({ ...p, [k]: v }));
+  // Changing the form after a download: what was saved is no longer what the form shows, so the "next step" (the
+  // invoice for the SAVED contract) steps aside until she downloads again. Its Past contracts row keeps the step.
+  const set = <K extends keyof ContractFields>(k: K, v: ContractFields[K]) => {
+    setSaved(null);
+    setF((p) => ({ ...p, [k]: v }));
+  };
 
-  const setKind = (kind: ContractKind) =>
+  const setKind = (kind: ContractKind) => {
+    setSaved(null);
     setF((p) => ({
       ...p,
       kind,
       // Swap the example deliverables only if she hasn't written her own.
       deliverables: p.deliverables === DEFAULT_DELIVERABLES[p.kind] ? DEFAULT_DELIVERABLES[kind] : p.deliverables,
     }));
+  };
 
   const doc = useMemo(() => buildContract(f), [f]);
   const missing = missingFields(f);
@@ -98,9 +118,11 @@ export function ContractBuilder({
         /* ignore */
       }
       // Save first so history matches what she sends; a failed save still lets her download.
-      const saved = await saveContractAction({ ...f }, dealId ?? null).catch(() => ({ ok: false as const, error: "Couldn't save it to history." }));
+      setSaved(null);
+      const res = await saveContractAction({ ...f }, dealId ?? null, invoiceId ?? null).catch(() => ({ ok: false as const, error: "Couldn't save it to history." }));
       await downloadPdf(f);
-      setNote(saved.ok ? "Downloaded and saved to Past contracts." : `Downloaded. ${saved.error}`);
+      setNote(res.ok ? (invoiceId ? "Downloaded, saved to Past contracts and linked to the invoice." : "Downloaded and saved to Past contracts.") : `Downloaded. ${res.error}`);
+      if (res.ok) setSaved({ id: res.id, kind: f.kind, fee: contractFeeCents(f.fee), business: f.clientBusiness.trim() });
     } catch (e) {
       setError(e instanceof Error ? e.message : "Couldn't make the PDF.");
     } finally {
@@ -110,12 +132,23 @@ export function ContractBuilder({
 
   /** "Start from this": load a past contract into the form with today's date. */
   function startFrom(c: PastContract) {
+    setSaved(null);
     setF({ ...defaultFields(today), ...c.fields, agreementDate: today });
     setNote(`Loaded ${c.clientBusiness}. Change what's different, then download.`);
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
   const collab = f.kind === "collab";
+  // The next step once it downloaded and saved, one tap: back to the invoice it was made from, or the invoice it asks
+  // for (nothing for a free collab). On a wide screen it sits under the form's Download button; under 1200px it takes
+  // the fixed bar, where Download was, so it is on the screen the moment the download lands.
+  const nextStep = !saved
+    ? null
+    : invoiceId
+      ? { href: `/invoices/${encodeURIComponent(invoiceId)}`, label: "Back to the invoice" }
+      : saved.fee > 0
+        ? { href: `/invoices/new?contract=${encodeURIComponent(saved.id)}`, label: "Make the invoice" }
+        : null;
 
   return (
     <div className="grid gap-10 max-md:gap-8 min-[1200px]:grid-cols-[minmax(0,26rem)_minmax(0,1fr)] min-[1200px]:gap-x-16">
@@ -262,11 +295,21 @@ export function ContractBuilder({
           {missing.length > 0 && <p><Status tone="warn" small className="whitespace-normal">Still blank: {missing.join(", ")}. The PDF shows [brackets] there.</Status></p>}
           {error && <p role="alert"><Status tone="danger" small className="whitespace-normal">{error}</Status></p>}
           {note && <p role="status"><Status tone="ok" small className="whitespace-normal">{note}</Status></p>}
+          {/* The next step, one tap: the invoice this contract asks for (and monthly invoices for a monthly one).
+              Wide screens only: under 1200px it is in the fixed bar below, never a screen or two down the page. */}
+          {saved && nextStep && (
+            <div className="inv-steps max-[1199px]:hidden">
+              <LinkButton href={nextStep.href} size={invoiceId ? "sm" : "md"}>{nextStep.label}</LinkButton>
+              {saved.kind === "monthly" && !invoiceId && <MonthlyInvoicesButton contractId={saved.id} size="md" />}
+            </div>
+          )}
           <p className="meta">This is a plain-English starting template, not legal advice. Have a lawyer look it over once before you use it widely.</p>
         </div>
       </div>
 
-      {/* Live preview: the same text the PDF uses. */}
+      {/* Live preview: the same text the PDF uses. The wrapper is the sticky box's containing block on a wide screen,
+          so the preview never slides over Past contracts (and its buttons) below it; on a phone it is no box at all. */}
+      <div className="min-w-0 max-[1199px]:contents">
       <section
         id="contract-preview"
         aria-label="Preview"
@@ -308,32 +351,54 @@ export function ContractBuilder({
           ))}
         </div>
       </section>
+      </div>
 
       <PastContracts history={history} onStartFrom={startFrom} />
 
-      {/* Phones: Preview + Download stay in reach above the bottom tab bar while she scrolls the form. */}
+      {/* Phones and tablets: Preview + Download stay in reach above the bottom tab bar while she scrolls the form.
+          Once it downloaded and saved, the bar says so and its ink button becomes the next step (Make the invoice, or
+          Back to the invoice); downloading again is a quiet link beside the note. */}
       <div className="action-bar fixed inset-x-0 bottom-[var(--tabbar-h)] z-20 px-4 md:left-[17.5rem] min-[1200px]:hidden">
-        <div className="mx-auto flex max-w-md gap-2">
-          <Button
-            type="button"
-            onClick={() => {
-              const next = !showPreview;
-              setShowPreview(next);
-              if (next) requestAnimationFrame(() => document.getElementById("contract-preview")?.scrollIntoView({ behavior: "smooth" }));
-            }}
-            className="flex-1"
-            aria-expanded={showPreview}
-            aria-controls="contract-preview"
-          >
-            {showPreview ? "Hide preview" : "Preview"}
-          </Button>
-          <Button variant="primary" onClick={download} disabled={busy} className="flex-[2]">
-            {busy ? "Making PDF…" : "Download PDF"}
-          </Button>
+        <div className="mx-auto grid max-w-md gap-1">
+          {saved && (
+            <p className="flex min-h-8 items-center justify-between gap-3">
+              <Status tone="ok" small>{invoiceId ? "Saved. Linked to its invoice." : "Downloaded and saved."}</Status>
+              {nextStep && (
+                <button type="button" onClick={download} disabled={busy} className="link tap-target inv-linkbtn text-sm">
+                  {busy ? "Making PDF…" : "Download again"}
+                </button>
+              )}
+            </p>
+          )}
+          {saved && nextStep ? (
+            <div className="flex gap-2">
+              <LinkButton variant="primary" href={nextStep.href} className="flex-[2]">{nextStep.label}</LinkButton>
+              {saved.kind === "monthly" && !invoiceId && <MonthlyInvoicesButton contractId={saved.id} size="md" className="flex-[2]" />}
+            </div>
+          ) : (
+            <div className="flex gap-2">
+              <Button
+                type="button"
+                onClick={() => {
+                  const next = !showPreview;
+                  setShowPreview(next);
+                  if (next) requestAnimationFrame(() => document.getElementById("contract-preview")?.scrollIntoView({ behavior: "smooth" }));
+                }}
+                className="flex-1"
+                aria-expanded={showPreview}
+                aria-controls="contract-preview"
+              >
+                {showPreview ? "Hide preview" : "Preview"}
+              </Button>
+              <Button variant="primary" onClick={download} disabled={busy} className="flex-[2]">
+                {busy ? "Making PDF…" : "Download PDF"}
+              </Button>
+            </div>
+          )}
         </div>
       </div>
-      {/* Room so the sticky bar never covers the last field or the preview. */}
-      <div aria-hidden className="h-16 min-[1200px]:hidden" />
+      {/* Room so the sticky bar never covers the last field or the preview (taller once it holds the note). */}
+      <div aria-hidden className={cx("min-[1200px]:hidden", saved ? "h-28" : "h-16")} />
     </div>
   );
 }
@@ -364,6 +429,13 @@ function PastContracts({ history, onStartFrom }: { history: PastContract[]; onSt
               <li key={c.id} className="flex flex-col gap-x-6 gap-y-2 py-3 sm:flex-row sm:items-center sm:justify-between">
                 <div className="min-w-0">
                   <p className="font-medium [overflow-wrap:anywhere]">{c.clientBusiness}</p>
+                  {/* Its invoices ("0000170 · Paid"), or the one-tap next step. */}
+                  {(c.invoices?.length || c.nextSteps?.length) ? (
+                    <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
+                      {c.invoices && c.invoices.length > 0 && <ContractInvoiceLinks invoices={c.invoices} />}
+                      {c.nextSteps && c.nextSteps.length > 0 && <NextSteps steps={c.nextSteps} />}
+                    </div>
+                  ) : null}
                   <p className="meta">
                     {[
                       c.kind === "monthly" ? "Monthly" : "Collab",

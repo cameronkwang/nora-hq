@@ -145,6 +145,83 @@ export function buildPaymentRequest(input: PaymentRequestInput): PaymentRequest 
 
 const join = (lines: Array<string | null>) => lines.filter((l): l is string => l !== null).join("\n");
 
+/* ───────────────────────── Invoices (Nora HQ's own, docs/invoicing.md) ───────────────────────── */
+
+export type InvoiceMessageInput = {
+  businessName: string;
+  contactName?: string | null;
+  /** "0000170" */
+  number: string;
+  totalCents: number;
+  /** What is still owed (the reminder asks for this). */
+  balanceCents: number;
+  /** "YYYY-MM-DD" */
+  issueDate: string;
+  dueDate: string;
+  /** "YYYY-MM-DD" (app timezone). */
+  today: string;
+  /** "Nora Chen" */
+  fromName: string;
+  /**
+   * The invoice's ways to pay, worded as its PDF prints them but without her bank account (invoices-types
+   * paymentMessageLines): "Bank transfer (ACH): the account details are on the PDF.", "Please send payment via Zelle
+   * to 5550100100.", "Put invoice 0000170 in the Zelle memo", "Checks Payable to …", "Pay online …: <link>".
+   */
+  payLines: string[];
+};
+
+/** "$625.10": invoices always show cents, like the PDF. */
+export function formatInvoiceAmount(cents: number): string {
+  return (cents / 100).toLocaleString("en-US", { style: "currency", currency: "USD", minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+/**
+ * The email that goes with an invoice's PDF and a friendly reminder, both with the invoice's ways to pay (the Zelle
+ * number and "Put invoice 0000170 in the Zelle memo" when Zelle is one of them). Fixed templates, no LLM; nothing is
+ * sent by Nora HQ: a person copies the text or opens it in their own mail app (mailtoHref).
+ */
+export function buildInvoiceMessages(input: InvoiceMessageInput): { email: PaymentText; reminder: PaymentText; missing: string[] } {
+  const business = oneLine(input.businessName) || "your business";
+  const from = oneLine(input.fromName) || "Nora";
+  const firstFrom = from.split(" ")[0] || from;
+  const hi = `Hi ${firstName(input.contactName)},`;
+  const number = oneLine(input.number);
+  const total = formatInvoiceAmount(input.totalCents);
+  const owed = formatInvoiceAmount(input.balanceCents);
+  const onReceipt = !input.dueDate || input.dueDate <= input.issueDate;
+  const overdue = !!input.dueDate && input.dueDate < input.today;
+  const pay = input.payLines.map(oneLine).filter(Boolean);
+  const missing: string[] = [];
+  if (!pay.length) missing.push("how you get paid");
+  const howToPay = pay.length ? ["", "How to pay:", ...pay] : ["", `How to pay: ${PAY_PLACEHOLDER}`];
+
+  const emailBody = [
+    hi,
+    "",
+    `Here is invoice ${number} for ${business}: ${total}, ${onReceipt ? "due on receipt" : `due ${longDate(input.dueDate)}`}. The PDF is attached.`,
+    ...howToPay,
+    "",
+    "Thank you so much!",
+    firstFrom,
+  ];
+  const when = overdue ? `, which was due ${longDate(input.dueDate)}` : onReceipt ? ", due on receipt" : `, due ${longDate(input.dueDate)}`;
+  const reminderBody = [
+    hi,
+    "",
+    `Hope you're doing well! Just a friendly reminder about invoice ${number} for ${business}: ${owed}${when}. I've attached it again in case it's handy.`,
+    ...howToPay,
+    "",
+    "Let me know if you need anything from me. Thank you!",
+    firstFrom,
+  ];
+  return {
+    email: { subject: `Invoice ${number} from ${from}`, body: join(emailBody) },
+    reminder: { subject: `Friendly reminder: invoice ${number} from ${from}`, body: join(reminderBody) },
+    missing,
+  };
+}
+
+
 /**
  * mailto: link that opens the person's own mail app with the text filled in (nothing is sent by Nora HQ).
  * `to` may be empty — the mail app then opens with a blank recipient.

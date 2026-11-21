@@ -6,6 +6,7 @@
     "dev": "next dev",
     "build": "tsx scripts/migrate.ts && next build",
     "start": "next start",
+    "start:test": "DATABASE_URL= MCP_TOKEN=test CRON_SECRET=test STRIPE_WEBHOOK_SECRET=whsec_test AUTH_SECRET=local-test-server-only-not-a-secret APP_USERS=Cameron:cameron@local,Nora:nora@local TOKEN_ENC_KEY=bm9yYS1ocS1kZXYtb25seW5vcmEtaHEtZGV2LW9ubHk= next start -H 127.0.0.1 -p 3200",
     "typecheck": "tsc --noEmit",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx scripts/migrate.ts",

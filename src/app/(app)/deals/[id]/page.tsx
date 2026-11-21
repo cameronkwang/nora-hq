@@ -9,6 +9,10 @@ import { getKitIdentity } from "@/lib/ops-kit";
 import { getPaymentLine } from "@/lib/ops-payment";
 import { scheduleItemForDeal } from "@/lib/ops-schedule";
 import { buildPaymentRequest } from "@/lib/payment-request";
+import { contractsForDeal, invoicesForDeal } from "@/lib/ops-invoices";
+import { contractRefLabel, isOpenStatus, shortDate } from "@/lib/invoices-types";
+import { InvoiceStatus, PdfLink, moneyShort } from "@/components/invoice-bits";
+import { ContractDownloadAgain } from "@/components/invoice-contract-bits";
 import { ActionForm, ConfirmButton, SubmitButton } from "@/components/client-form";
 import {
   COMP_LABEL, DEAL_STATUS_LABEL, DealStatusBadge, PaymentChip, centsToDollarsInput, compText, formatMoney, formatVisit,
@@ -34,13 +38,19 @@ export default async function DealPage({ params, searchParams }: { params: Promi
   const deal = await getDeal(id);
   if (!deal) notFound();
   const db = await getDb();
-  const [lead, client, paymentLine, identity, scheduleItem] = await Promise.all([
+  const [lead, client, paymentLine, identity, scheduleItem, invoices, contracts] = await Promise.all([
     deal.leadId ? db.select({ id: schema.leads.id, name: schema.leads.name }).from(schema.leads).where(eq(schema.leads.id, deal.leadId)).then((r) => r[0] ?? null) : null,
     deal.clientId ? db.select({ id: schema.clients.id, name: schema.clients.name }).from(schema.clients).where(eq(schema.clients.id, deal.clientId)).then((r) => r[0] ?? null) : null,
     getPaymentLine(),
     getKitIdentity(),
     scheduleItemForDeal(deal.id),
+    // Invoicing (docs/invoicing.md "Deals"): the deal's invoices and contracts. A failure there never hides the deal.
+    invoicesForDeal(deal.id).catch(() => []),
+    contractsForDeal(deal.id).catch(() => []),
   ]);
+  const openInvoice = invoices.find((i) => isOpenStatus(i.status)) ?? null;
+  const draftInvoice = invoices.find((i) => i.status === "draft") ?? null;
+  const tracked = invoices.some((i) => i.status !== "draft" && i.status !== "void");
   const t = today();
   const error = one(sp.error);
   const flash = one(sp.new)
@@ -257,6 +267,41 @@ export default async function DealPage({ params, searchParams }: { params: Promi
                     <span className={cx("text-sm", isOverdue(deal, t) ? "font-medium text-danger" : "text-muted")}>due {formatDate(deal.paymentDueDate)}</span>
                   )}
                 </p>
+                {/* Its invoices ("0000170 · Sent · due Dec 4") and contracts. With an invoice, the payment is tracked there. */}
+                {(invoices.length > 0 || contracts.length > 0) && (
+                  <ul className="list is-ruled mt-3">
+                    {invoices.map((i) => (
+                      <li key={i.id} className="flex items-center justify-between gap-2 py-2">
+                        <Link href={`/invoices/${encodeURIComponent(i.id)}`} className="min-w-0 hover:underline">
+                          <span className="num font-medium">{i.number ?? "Draft"}</span>{" "}
+                          <InvoiceStatus display={i.display} daysOverdue={i.daysOverdue} />
+                          <span className="meta">
+                            {" · "}
+                            {moneyShort(i.totalCents)}
+                            {i.dueDate && isOpenStatus(i.status) && i.display !== "overdue" ? ` · due ${shortDate(i.dueDate)}` : ""}
+                          </span>
+                        </Link>
+                        <PdfLink id={i.id} number={i.number} customer={deal.businessName} label="" />
+                      </li>
+                    ))}
+                    {contracts.map((c) => (
+                      <li key={c.id} className="flex flex-wrap items-center justify-between gap-2 py-2">
+                        <span><span className="font-medium">{contractRefLabel(c)}</span>{c.feeCents ? <span className="meta"> · {moneyShort(c.feeCents)}</span> : null}</span>
+                        <ContractDownloadAgain fields={c.fields} label="Download" />
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {openInvoice ? (
+                    <LinkButton href={`/invoices/${encodeURIComponent(openInvoice.id)}#record-payment`}>Record payment</LinkButton>
+                  ) : draftInvoice ? (
+                    <LinkButton href={`/invoices/new?draft=${encodeURIComponent(draftInvoice.id)}`}>Finish the invoice</LinkButton>
+                  ) : (
+                    deal.paymentStatus !== "paid" && <LinkButton href={`/invoices/new?deal=${encodeURIComponent(deal.id)}`}>Make invoice</LinkButton>
+                  )}
+                </div>
+                {!tracked && (
                 <form action={setPaymentAction} className="mt-3 grid gap-3">
                   <input type="hidden" name="id" value={deal.id} />
                   <input type="hidden" name="back" value={back} />
@@ -284,8 +329,9 @@ export default async function DealPage({ params, searchParams }: { params: Promi
                     )}
                   </div>
                 </form>
-                <p className="hint">Only you can change this. Claude never marks anything paid.</p>
-                {deal.paymentStatus !== "paid" && deal.status !== "cancelled" && (
+                )}
+                <p className="hint">{tracked ? "Paid when its invoice is. Only you can record a payment; Claude never marks anything paid." : "Only you can change this. Claude never marks anything paid."}</p>
+                {!tracked && deal.paymentStatus !== "paid" && deal.status !== "cancelled" && (
                   <PaymentRequest
                     invoice={request.invoice}
                     reminder={request.reminder}
