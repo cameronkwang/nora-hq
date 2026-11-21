@@ -1,0 +1,277 @@
+/* Invoicing (docs/invoicing.md "The team's pages"): the fast creator (/invoices/new) and its done state, the invoice
+   list with a one-tap PDF per row, the invoice drawn as its PDF, customers, reports, import, the Settings card, and
+   the invoice and contract lines on deals and contracts.
+   The same layer order as globals.css is stated first, so this sheet lands in "pages" (above the shared classes,
+   below Tailwind utilities) whichever stylesheet the browser reads first. Everything refines the shared Ink classes:
+   hairlines, not boxes; status = dot + words; one ink-filled focal button; 44px touch targets; 16px inputs on
+   phones; nothing under 12px; colours only through the tokens, so light and dark both follow. */
+@layer theme, base, components, pages, utilities;
+
+@layer pages {
+  /* ───────────────────────── The fast creator ───────────────────────── */
+  .inv-creator { max-width: 44rem; }
+  .inv-from-note { margin: -12px 0 20px; }
+
+  /* A field: its label in a narrow left column on wide screens, above it on phones and on a tablet standing up
+     (under 1024px the sidebar already took 280px, so the column is phone width again: an iPad Pro 11 leaves 490px). */
+  .inv-field { display: grid; grid-template-columns: 6.5rem minmax(0, 1fr); column-gap: 20px; align-items: start; padding: 14px 0; border-top: var(--rule); }
+  .inv-field:first-of-type, .inv-from-note + .inv-field { border-top: 0; padding-top: 0; }
+  .inv-label { padding-top: 8px; font-size: var(--text-sm); font-weight: 600; color: var(--muted); }
+  @media (max-width: 1023px) {
+    .inv-field { grid-template-columns: minmax(0, 1fr); row-gap: 6px; }
+    .inv-label { padding-top: 0; }
+  }
+
+  /* Bill to: a typeahead. The list floats under the box (the only floating thing on the screen). */
+  .inv-combo { position: relative; }
+  .inv-who { font-size: 1rem; font-weight: 500; }
+  .inv-who-static { padding-top: 7px; font-weight: 500; }
+  .inv-options { position: absolute; z-index: 30; left: 0; right: 0; top: calc(100% + 4px); max-height: 20rem; overflow-y: auto; padding: 4px 0; }
+  .inv-option { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; min-height: 2.5rem; padding: 9px 12px; cursor: pointer; }
+  .inv-option + .inv-option { border-top: var(--rule); }
+  .inv-option[aria-selected="true"] { background: var(--surface-2); }
+  .inv-option-name { min-width: 0; font-weight: 500; overflow-wrap: anywhere; }
+  .inv-option .meta { flex: none; }
+  .inv-option.is-new .inv-option-name { font-weight: 600; }
+  @media (max-width: 767px), (pointer: coarse) { .inv-option { min-height: 2.75rem; } }
+
+  .inv-addr { display: grid; justify-items: start; gap: 6px; margin-top: 8px; }
+  .inv-addr > textarea, .inv-addr > .hint { justify-self: stretch; }
+  .inv-addr textarea.input { min-height: 0; }
+  .inv-same { gap: 4px; text-decoration-style: solid; }
+  .inv-same[aria-busy="true"] { color: var(--muted); }   /* still loading: a tap is kept and applied when it arrives */
+  .inv-pair { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; justify-self: stretch; }
+  @media (max-width: 479px) { .inv-pair { grid-template-columns: minmax(0, 1fr); } }
+
+  /* A quiet, tappable piece of text: the address, each part of the defaults line. Ink with a dotted underline. */
+  .inv-quiet {
+    display: inline-flex; align-items: center; min-height: 2rem; padding: 0; background: none; border: 0; border-radius: var(--radius-xs);
+    font: inherit; color: var(--text); text-align: left; cursor: pointer;
+    text-decoration: underline dotted; text-decoration-color: var(--border-strong); text-underline-offset: 4px;
+  }
+  .inv-quiet:hover { text-decoration-style: solid; text-decoration-color: var(--text); }
+  .inv-quiet[aria-expanded="true"] { text-decoration-style: solid; text-decoration-color: var(--text); font-weight: 600; }
+  .inv-addr .inv-quiet { color: var(--muted); font-size: var(--text-sm); }
+  @media (max-width: 767px), (pointer: coarse) { .inv-quiet { min-height: 2.75rem; } }
+  .inv-linkbtn { padding: 0; background: none; border: 0; font: inherit; cursor: pointer; }
+
+  /* Saved lines as chips: "+ Standard Content Creation Package $550". */
+  .inv-chips { margin-bottom: 10px; }
+  .inv-chips .chip > span { white-space: normal; text-align: left; height: auto; min-height: 2rem; padding-top: 4px; padding-bottom: 4px; }
+  .inv-plus { font-weight: 500; color: var(--muted); margin-right: -2px; }
+  .chip:hover .inv-plus { color: inherit; }
+  @media (max-width: 767px), (pointer: coarse) { .inv-chips .chip > span { min-height: 2.125rem; } }
+
+  /* Lines: description | qty | $ amount | remove. Under 1024px (phones, a tablet standing up): the description on its
+     own line, so "Standard Content Creation Package" is never cut short. */
+  .inv-lines { display: grid; gap: 0; margin: 0 0 2px; }
+  .inv-line { display: grid; grid-template-columns: minmax(0, 1fr) 3.75rem 7.5rem 2.25rem; grid-template-areas: "desc qty amt x" ". . total ."; column-gap: 8px; align-items: center; padding: 5px 0; }
+  .inv-lines .inv-line + .inv-line { border-top: var(--rule); }
+  .inv-line.is-new { grid-template-columns: minmax(0, 1fr) 7.5rem 4.25rem; grid-template-areas: "desc amt add"; margin-top: 4px; padding-top: 9px; border-top: var(--rule); }
+  .inv-lines:empty + .inv-line.is-new { border-top: 0; margin-top: 0; }
+  .inv-l-desc { grid-area: desc; }
+  .inv-l-qty { grid-area: qty; text-align: right; }
+  .inv-l-amt { grid-area: amt; position: relative; display: block; }
+  .inv-l-amt .input { padding-left: 22px; text-align: right; }
+  .inv-dollar { position: absolute; left: 10px; top: 50%; transform: translateY(-50%); color: var(--muted); pointer-events: none; font-size: 0.875rem; }
+  .inv-l-x { grid-area: x; justify-self: end; color: var(--muted); }
+  .inv-l-x svg { width: 14px; height: 14px; }
+  .inv-l-add { grid-area: add; justify-self: end; }
+  .inv-l-total { grid-area: total; justify-self: end; padding-top: 2px; }
+  @media (max-width: 1023px) {
+    .inv-line { grid-template-columns: 3.5rem minmax(0, 1fr) 2.75rem; grid-template-areas: "desc desc desc" "qty amt x" ". total ."; row-gap: 6px; padding: 10px 0; }
+    .inv-line.is-new { grid-template-columns: minmax(0, 1fr) 4.5rem; grid-template-areas: "desc desc" "amt add"; row-gap: 6px; }
+  }
+  @media (max-width: 767px), (pointer: coarse) { .inv-dollar { font-size: 1rem; } }
+
+  .inv-sum { display: grid; justify-content: end; gap: 2px; margin-top: 12px; }
+  .inv-sum > div { display: grid; grid-template-columns: 7rem 8rem; column-gap: 12px; align-items: baseline; text-align: right; }
+  .inv-sum dt { font-size: var(--text-sm); color: var(--muted); }
+  .inv-sum .is-total dt { font-weight: 600; color: var(--text); font-size: var(--text-base); }
+  .inv-sum .is-total dd { font-family: var(--font-display); font-size: 1.75rem; line-height: 2.25rem; font-weight: 450; letter-spacing: -0.01em; font-variant-numeric: lining-nums tabular-nums; }
+  @media (max-width: 639px) { .inv-sum > div { grid-template-columns: auto 9rem; } }
+
+  /* The defaults, one quiet line: "Due on receipt · Zelle · #0000170". */
+  .inv-defaults { display: flex; flex-wrap: wrap; align-items: center; gap: 0 10px; padding: 10px 0 6px; border-top: var(--rule); color: var(--muted); }
+  .inv-defaults > span[aria-hidden] { color: var(--faint); }
+
+  /* What a part of the defaults line opens: inline, between hairlines (no box, no sheet). */
+  .inv-panel { margin: 4px 0 8px; padding: 6px 0 14px; border-top: var(--rule); border-bottom: var(--rule); }
+  .inv-panel-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 8px; }
+  .inv-ways { display: grid; gap: 2px; }
+  .inv-way { display: flex; align-items: baseline; gap: 10px; min-height: 2.25rem; padding: 6px 0; cursor: pointer; }
+  .inv-way .check { transform: translateY(3px); }
+  .inv-way.is-off { color: var(--muted); cursor: default; }
+  @media (max-width: 767px), (pointer: coarse) { .inv-way { min-height: 2.75rem; } }
+  .inv-inline { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+  .inv-inline > .input { width: auto; flex: 1 1 8rem; min-width: 0; }
+  .inv-inline > .input.num { flex: 0 1 9rem; }
+  .inv-disc { text-align: right; }
+
+  /* More: folded. No rule under it: the Make PDF strip (or the one-time ask) draws the next one. */
+  .inv-more { border-top: var(--rule); margin-top: 6px; }
+  .inv-more > summary { display: flex; align-items: baseline; gap: 12px; min-height: var(--row-h); padding: 11px 0; font-weight: 500; cursor: pointer; list-style: none; }
+  .inv-more > summary::-webkit-details-marker { display: none; }
+  .inv-more > summary::after { content: ""; width: 7px; height: 7px; margin-left: auto; align-self: center; border-right: 1.6px solid var(--faint); border-bottom: 1.6px solid var(--faint); transform: rotate(-45deg); transition: transform 0.15s; }
+  .inv-more[open] > summary::after { transform: rotate(45deg); }
+  .inv-more > summary:hover { text-decoration: underline; text-underline-offset: 4px; }
+  .inv-more-body { display: grid; gap: 16px; padding: 4px 0 20px; }
+  .inv-more-body textarea.input { min-height: 0; }
+
+  /* The one-time ask: a notice-like block on hairlines, above Make PDF. */
+  .inv-setup { display: grid; gap: 12px; margin: 20px 0 0; padding: 14px 0 0; border: 0; border-top: var(--rule-ink); }
+  .inv-setup-title { float: left; width: 100%; margin-bottom: 2px; padding: 0; font-family: var(--font-display); font-size: var(--text-title); line-height: 1.75rem; font-weight: 500; letter-spacing: -0.01em; }
+  .inv-setup-title + * { clear: both; }
+  .inv-setup textarea.input { min-height: 0; }
+
+  /* Make PDF: the one ink-filled button. A strip that stays in reach on phones (above the tab bar). */
+  .inv-go { margin-top: 20px; }
+  .inv-go-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+  .inv-make { min-width: 10rem; }
+  .inv-make .inv-kbd { margin-left: 8px; opacity: 0.8; }
+  .inv-go-total { margin-left: auto; font-weight: 600; }
+  .inv-err { margin-top: 6px; }
+  .inv-err.is-form { margin: 0 0 8px; }
+  @media (max-width: 767px), (pointer: coarse) {
+    .inv-kbd { display: none; }
+    .inv-make { flex: 1 1 auto; }
+  }
+  @media (max-width: 639px) { .inv-go-total { display: none; } }   /* the total is right above; the strip stays one row */
+
+  /* ───────────────────────── The done state ───────────────────────── */
+  .inv-done { max-width: 44rem; }
+  .inv-done-head { padding: 0 0 14px; }
+  .inv-done-title { font-family: var(--font-display); font-size: 1.75rem; line-height: 2.25rem; font-weight: 450; letter-spacing: -0.01em; font-variant-numeric: lining-nums tabular-nums; overflow-wrap: anywhere; }
+  .inv-done-meta { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 16px; margin-top: 4px; }
+  .inv-done-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+  @media (max-width: 767px), (pointer: coarse) {
+    .inv-done-actions > * { flex: 1 1 calc(50% - 4px); }
+    .inv-done-actions > .btn-primary { flex-basis: 100%; }
+  }
+  .inv-msg { margin-top: 20px; padding-top: 10px; border-top: var(--rule); }
+  .inv-msg-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px 12px; margin-bottom: 6px; }
+  .inv-msg-head .seg > button { font-size: var(--text-sm); }
+  .inv-msg-text { white-space: pre-line; color: var(--muted); overflow-wrap: anywhere; }
+  .inv-next { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 18px; margin-top: 18px; padding-top: 10px; border-top: var(--rule); }
+
+  /* ───────────────────────── Lists ───────────────────────── */
+  /* One row: number | customer | due | amount due | status | PDF. Under 1024px: two lines. */
+  .inv-rows { border-top: var(--rule); }
+  .inv-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; column-gap: 8px; }
+  .inv-row-main {
+    display: grid; grid-template-columns: 5.5rem minmax(0, 1fr) 11rem 7rem 8.5rem; column-gap: 16px; align-items: baseline;
+    min-height: var(--row-h); padding: 11px 0; color: inherit; text-decoration: none; border-radius: var(--radius-xs);
+  }
+  .inv-rows.is-one-customer .inv-row-main { grid-template-columns: 5.5rem minmax(0, 1fr) 7rem 8.5rem; }
+  .inv-row-main:hover .inv-c-who, .inv-row-main:hover .inv-c-num { text-decoration: underline; text-underline-offset: 3px; }
+  .inv-c-num { font-weight: 500; }
+  .inv-c-amt { text-align: right; font-weight: 500; white-space: nowrap; }
+  .inv-c-amt.is-void { color: var(--muted); text-decoration: line-through; font-weight: 400; }
+  .inv-c-due { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .inv-c-status { white-space: nowrap; }
+  .inv-pdf { gap: 4px; color: var(--text); }
+  .inv-pdf svg { width: 15px; height: 15px; }
+  /* Under 1024px: the customer and the amount, then one meta line "0000170 · Due Dec 4 · Sent". */
+  @media (max-width: 1023px) {
+    .inv-row-main, .inv-rows.is-one-customer .inv-row-main { display: flex; flex-wrap: wrap; align-items: baseline; column-gap: 0; row-gap: 2px; padding: 10px 0; }
+    .inv-c-who { order: 1; flex: 1 1 0; min-width: 0; margin-right: 12px; overflow-wrap: anywhere; }   /* basis 0: a long name wraps under itself, the amount stays on its line */
+    .inv-c-amt { order: 2; margin-left: auto; }
+    .inv-c-num { order: 3; flex-basis: auto; font-weight: 400; font-size: var(--text-sm); color: var(--muted); }
+    .inv-c-due { order: 4; }
+    .inv-c-status { order: 5; }
+    .inv-c-num:not(:empty)::after, .inv-c-due:not(:empty)::after { content: "·"; margin: 0 6px; color: var(--muted); }
+    .inv-row-main > .inv-c-num { margin-top: 2px; }
+    .inv-row-main::after { content: ""; order: 2; flex-basis: 100%; height: 0; }   /* line break after the amount */
+    .inv-rows.is-one-customer .inv-c-num { order: 1; flex: 1 1 auto; font-size: inherit; color: var(--text); font-weight: 500; margin-right: 12px; }
+    .inv-rows.is-one-customer .inv-c-num::after { content: none; }
+    .inv-rows.is-one-customer .inv-row-main::after { order: 2; }
+  }
+  /* A phone: "0000166 · Overdue 6 days" says when it was due; the date would push the status onto a third line. */
+  @media (max-width: 479px) { .inv-rows:not(.is-one-customer) .inv-c-due.is-late { display: none; } }
+
+  /* Filter chips with counts under the figures. */
+  .inv-filters { margin: 28px 0 14px; }
+  .inv-search { display: flex; gap: 8px; margin-bottom: 14px; max-width: 24rem; }
+
+  /* ───────────────────────── The invoice as its PDF ───────────────────────── */
+  .inv-paper { min-width: 0; border: var(--rule); border-radius: var(--radius-lg); padding: 32px 32px 36px; }
+  @media (max-width: 639px) { .inv-paper { padding: 22px 16px 26px; border-radius: var(--radius-sm); } }
+  .inv-paper-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; }
+  .inv-paper-title { display: grid; justify-items: end; gap: 6px; font-size: 1.75rem; line-height: 2rem; font-weight: 400; letter-spacing: 0.32em; color: var(--muted); margin-right: -0.32em; }
+  @media (max-width: 479px) { .inv-paper-title { font-size: 1.25rem; letter-spacing: 0.22em; margin-right: -0.22em; } }
+  .inv-stamp { letter-spacing: 0.05em; margin-right: 0.32em; }
+  .inv-paper-mid { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px 24px; margin-top: 28px; }
+  @media (max-width: 479px) { .inv-paper-mid { flex-direction: column; } }
+  .inv-facts { display: grid; gap: 2px; flex: none; }
+  .inv-facts > div { display: grid; grid-template-columns: auto 6.5rem; column-gap: 16px; text-align: right; }
+  .inv-facts dt { font-weight: 600; font-size: var(--text-sm); }
+  .inv-facts dd { font-size: var(--text-sm); }
+  .inv-table { width: 100%; margin-top: 24px; border-collapse: collapse; font-size: var(--text-sm); }
+  .inv-table th { padding: 7px 0; font-weight: 500; color: var(--muted); text-align: right; border-top: var(--rule); border-bottom: var(--rule); }
+  .inv-table td { padding: 8px 0; text-align: right; vertical-align: top; }
+  .inv-table :is(th, td):first-child { text-align: left; padding-right: 12px; }
+  .inv-table :is(th, td) + :is(th, td) { padding-left: 12px; white-space: nowrap; }
+  .inv-table tbody tr + tr td { border-top: var(--rule); }
+  @media (max-width: 479px) { .inv-table :is(th, td):nth-child(3) { display: none; } }   /* quantity: 1.00 nearly always */
+  .inv-paper-notes { margin-top: 16px; padding-top: 12px; border-top: var(--rule); font-size: var(--text-sm); }
+  .inv-paper-notes u { text-underline-offset: 2px; }
+  .inv-totals { display: grid; justify-content: end; gap: 2px; margin-top: 16px; padding-top: 12px; border-top: var(--rule); font-size: var(--text-sm); }
+  .inv-totals > div { display: grid; grid-template-columns: minmax(8rem, auto) 7rem; column-gap: 16px; text-align: right; }
+  .inv-totals > .is-strong { margin-top: 4px; padding-top: 6px; border-top: var(--rule); font-weight: 600; font-size: var(--text-base); }
+
+  /* ───────────────────────── The invoice page ───────────────────────── */
+  /* Two columns on a wide screen; on a phone the "send it" and payment column comes first. */
+  .inv-cols { display: grid; grid-template-columns: minmax(0, 1fr); gap: 40px; }
+  @media (min-width: 1200px) {
+    .inv-cols { grid-template-columns: minmax(0, 1fr) 20rem; column-gap: 56px; align-items: start; }
+    .inv-cols > .is-main { grid-column: 1; grid-row: 1; }
+    .inv-cols > .is-side { grid-column: 2; grid-row: 1; }
+  }
+  @media (max-width: 767px) { .inv-cols { gap: 32px; } }
+  .inv-cols > * > .sec:first-child { margin-top: 0; }
+  .inv-side-sec + .inv-side-sec { margin-top: 32px; }
+  .inv-steps { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; }
+  .inv-contract { display: grid; gap: 6px; }
+  .inv-steps > .btn-ghost:first-child { margin-left: -6px; }   /* a quiet first button lines up with the text above */
+  @media (max-width: 767px), (pointer: coarse) { .inv-steps > .btn-ghost:first-child { margin-left: -10px; } }
+  .inv-refs { display: inline-flex; flex-wrap: wrap; gap: 2px 12px; }
+  .inv-inline-ok { display: inline-flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; }
+  .inv-pay-form { display: grid; gap: 12px; }
+  .inv-pay-form .inv-pair { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .inv-text { white-space: pre-line; overflow-wrap: anywhere; font-size: var(--text-sm); color: var(--muted); padding: 8px 0; border-top: var(--rule); border-bottom: var(--rule); }
+  .inv-kv > div { display: grid; grid-template-columns: 7rem minmax(0, 1fr); column-gap: 12px; align-items: baseline; padding: 7px 0; }
+  .inv-kv > div + div { border-top: var(--rule); }
+  .inv-kv dt { font-size: var(--text-sm); color: var(--muted); }
+  .inv-kv dd { min-width: 0; overflow-wrap: anywhere; }
+
+  /* ───────────────────────── Reports ───────────────────────── */
+  .inv-bars { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 6px; align-items: end; height: 9rem; padding-top: 12px; }
+  .inv-bar { display: grid; grid-template-rows: 1fr auto; height: 100%; gap: 4px; text-align: center; }
+  .inv-bar > i { align-self: end; display: block; min-height: 1px; border-radius: 2px 2px 0 0; background: var(--text); }
+  .inv-bar > i.is-zero { background: var(--border); }
+  .inv-bar > span { font-size: var(--text-xs); color: var(--muted); }
+  .inv-table.is-report td:first-child { overflow-wrap: anywhere; }
+
+  /* ───────────────────────── Import ───────────────────────── */
+  .inv-paste { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.8125rem; min-height: 10rem; }
+  @media (max-width: 767px), (pointer: coarse) { .inv-paste { font-size: 1rem; } }
+  .inv-preview { overflow-x: auto; }
+  .inv-preview .inv-table { min-width: 36rem; }
+
+  /* ───────────────────────── Settings: saved lines ───────────────────────── */
+  .inv-saved { display: grid; gap: 0; }
+  .inv-saved-row { display: grid; grid-template-columns: minmax(0, 1fr) 7.5rem auto; gap: 8px; align-items: center; padding: 6px 0; }
+  .inv-saved-row + .inv-saved-row { border-top: var(--rule); }
+  .inv-saved-row .inv-l-amt { grid-area: auto; }
+  .inv-saved-row .inv-l-amt .input { padding-left: 22px; text-align: right; }
+  .inv-saved-moves { display: flex; gap: 0; }
+  @media (max-width: 639px) {
+    .inv-saved-row { grid-template-columns: minmax(0, 1fr) 7rem; }
+    .inv-saved-moves { grid-column: 1 / -1; justify-content: flex-end; }
+  }
+  .inv-fees { width: 100%; max-width: 28rem; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .inv-more > summary::after { transition: none; }
+}

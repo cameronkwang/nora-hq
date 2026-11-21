@@ -71,6 +71,22 @@ export function defaultFields(today: string): ContractFields {
   };
 }
 
+/**
+ * Any stored or posted value → complete ContractFields (every key a string, capped; kind collab unless "monthly").
+ * Pure: used by lib/ops-contracts (saving and listing) and lib/ops-invoices (the contract links), so a contract reads
+ * the same everywhere.
+ */
+export function readContractFields(raw: unknown): ContractFields {
+  const r = raw && typeof raw === "object" && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {};
+  const out = {} as Record<keyof ContractFields, string>;
+  for (const k of Object.keys(defaultFields("2000-01-01")) as (keyof ContractFields)[]) {
+    const v = r[k];
+    out[k] = typeof v === "string" ? v.slice(0, 5000) : "";
+  }
+  if (out.kind !== "monthly") out.kind = "collab";
+  return out as ContractFields;
+}
+
 export type ContractSection = { heading: string; paragraphs: string[] };
 export type ContractDoc = {
   title: string;

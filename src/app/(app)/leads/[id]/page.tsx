@@ -95,7 +95,10 @@ export default async function LeadPage({ params, searchParams }: { params: Promi
           ) : canConvert ? (
             <Card title="Start managing this business">
               <p className="meta mb-4">One screen, prefilled from this lead: sets up the plan and checklist, hands research to Claude, and marks the lead Won.</p>
-              <NewClientLink leadId={lead.id} size="md">Start managing {lead.name}</NewClientLink>
+              {/* A long business name is cut with an ellipsis inside the button; it used to run off a phone's right edge. */}
+              <NewClientLink leadId={lead.id} size="md" className="max-w-full">
+                <span className="min-w-0 truncate">Start managing {lead.name}</span>
+              </NewClientLink>
             </Card>
           ) : null}
 

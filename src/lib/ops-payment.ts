@@ -1,5 +1,5 @@
 import "server-only";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { z } from "zod";
 import { getDb, schema } from "./db";
 import { logActivity } from "./activity";
@@ -8,8 +8,9 @@ import { looksLikeSecret, secretRefusal } from "./credential-guard";
 
 /**
  * Nora's payment line: how she gets paid, as printed on payment requests ("Zelle: 804-555-0123").
- * One row in app_settings (schema.NORA_PAYMENT_KEY → { line }). Set once in Settings → Nora (or on a deal the
- * first time). People only; never a password — the credential guard refuses anything that looks like one.
+ * One row in app_settings (schema.NORA_PAYMENT_KEY → { line, …the invoice settings }). Set once in Settings → Nora (or
+ * on a deal the first time). Saving MERGES the line into the row, so the invoice settings beside it stay. People only;
+ * never a password — the credential guard refuses anything that looks like one.
  */
 
 const MACHINE = new Set(["claude", "public", "system"]);
@@ -36,9 +37,10 @@ export async function savePaymentLine(input: unknown, actor: string): Promise<st
   if (secrets.length) throw new OpsError(secretRefusal("the payment line", secrets));
   const db = await getDb();
   const now = new Date();
-  const value = { line };
+  const value = { line: line || null };
+  // MERGE into the row: the same row holds the invoice settings (lib/ops-invoices), which this must never wipe.
   await db.insert(schema.appSettings).values({ key: schema.NORA_PAYMENT_KEY, value, updatedBy: actor, updatedAt: now })
-    .onConflictDoUpdate({ target: schema.appSettings.key, set: { value, updatedBy: actor, updatedAt: now } });
+    .onConflictDoUpdate({ target: schema.appSettings.key, set: { value: sql`coalesce(${schema.appSettings.value}, '{}'::jsonb) || excluded.value`, updatedBy: actor, updatedAt: now } });
   // The line itself stays out of the activity log (it can hold a phone number or email).
   await logActivity({ actor, action: "payment_line.saved", entityType: "app_setting", entityId: schema.NORA_PAYMENT_KEY, summary: line ? "Updated how Nora gets paid (used on payment requests)" : "Cleared how Nora gets paid" });
   return line || null;
