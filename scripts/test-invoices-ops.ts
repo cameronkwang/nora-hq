@@ -84,6 +84,28 @@ async function main() {
   assert.equal(T.creatorDefaultsLine({ issueDate: today, dueDate: today, payWays: ctx0.prefill.payWays, nextNumber: ctx0.nextNumber }).text, "Due on receipt · Zelle, check · #0000170");
   ok("creator context: next 0000170, due on receipt, Zelle and check, the one-time ask, Bill to");
 
+  /* ── before setup is complete: a draft, and Settings saved early, still mean Zelle and a check by mail ── */
+  const earlyBird = await ops.createCustomer({ name: "SAMPLE Early Bird" }, NORA);
+  const reel = [{ description: "Instagram Reel", quantity: 1, unitCents: 45000 }];
+  const dEarly = await ops.createInvoiceDraft({ customerId: earlyBird.id, items: reel }, "claude");
+  assert.deepEqual(dEarly.payWays, ["zelle", "check"], "a draft Claude makes before anything is set up starts like the creator: Zelle and check");
+  // Settings saved with her name typed and the Zelle number not yet. The form sends no ticks unless she changed one
+  // (a way that isn't ready is a disabled box), so the built-in default stays the built-in default.
+  const early = await ops.saveInvoiceSettings({ fromName: "Nora Chen", fromAddress: "100 Sample St\nSampleton, VA 23000" }, NORA);
+  assert.deepEqual(early.payDefaults, [], "nothing was ticked or unticked: nothing is stored as her choice");
+  assert.deepEqual((await ops.getInvoiceCreatorContext({ today })).prefill.payWays, ["zelle", "check"], "the creator asks for the Zelle number and still starts with both");
+  assert.deepEqual((await ops.createInvoiceDraft({ customerId: earlyBird.id, items: reel }, "claude")).payWays, ["zelle", "check"], "and so does a draft, with the name saved and the Zelle number not yet");
+  await rejects(ops.saveInvoiceSettings({ payDefaults: ["zelle", "check"] }, NORA), /Zelle is ticked for new invoices but isn't ready/, "a tick that is sent must be ready");
+  const laterOn = await ops.saveInvoiceSettings({ zelle: "(555) 010-0100" }, NORA); // the number arrives later (the creator's ask, or Settings)
+  assert.deepEqual(T.defaultPayWays(laterOn, T.availablePayWays(laterOn, false)), ["zelle", "check"], "once the Zelle number is in, a new invoice offers Zelle and a check by mail");
+  assert.deepEqual((await ops.getInvoiceCreatorContext({ today })).prefill.payWays, ["zelle", "check"]);
+  // back to a fresh setup for the checks below
+  for (const d of await db.select({ id: schema.invoices.id }).from(schema.invoices).where(eq(schema.invoices.customerId, earlyBird.id))) await ops.deleteDraftInvoice(d.id, NORA);
+  await ops.deleteCustomer(earlyBird.id, NORA);
+  await ops.saveInvoiceSettings({ fromName: null, fromAddress: null, zelle: null }, NORA);
+  assert.deepEqual((await ops.getInvoiceCreatorContext({ today })).setupMissing, ["fromName", "fromAddress", "zelle"]);
+  ok("before setup is complete: drafts and an early Settings save keep Zelle and check");
+
   /* ── Make PDF: a new customer, the one-time ask, her two lines ── */
   const two = [
     { description: "Standard Content Creation Package", quantity: 1, unitCents: 55000 },
@@ -480,7 +502,7 @@ async function main() {
       let data: Buffer;
       try { data = zlib.inflateSync(buf.subarray(start, end)); } catch { data = buf.subarray(start, end); }
       for (const t of data.toString("latin1").matchAll(/<([0-9A-Fa-f]*)>\s*Tj|\(((?:\\.|[^\\)])*)\)\s*Tj/g)) out.push(t[1] != null ? Buffer.from(t[1], "hex").toString("latin1") : t[2].replace(/\\([()\\])/g, "$1"));
-      re.lastIndex = end;
+      re.lastIndex = end + "endstream".length; // past the word itself: it ends in "stream" too, and the next page's stream must be found
     }
     return out.join("\n");
   };
@@ -555,6 +577,22 @@ async function main() {
   await rejects(ops.createCustomer({ name: "SAMPLE Bank Person", notes: "account 000123456789" }, NORA), /card or bank/, "a customer's notes");
   await rejects(ops.createCustomer({ name: "SAMPLE Bank Person", billingAddress: "ROUTING:000000000" }, NORA), /card or bank/, "a customer's address");
   await rejects(ops.recordPayment(cd.id, { amountCents: 100, paidOn: today, method: "ach", reference: "acct 000123456789" }, NORA), /card or bank/, "a payment's reference");
+  // the deal payment line ("How Nora gets paid") sits in the same settings row, in plain text: her block is refused there too
+  await rejects(savePaymentLine("ACH to ACCT#:000123456789 ROUTING:000000000", NORA), /card or bank/, "the deal payment line");
+  await rejects(savePaymentLine("Zelle (555) 010-0100 or routing 000000000", CAM), /card or bank/, "the deal payment line, a routing number");
+  assert.equal(await getPaymentLine(), "Zelle: (555) 010-0100", "the line that was saved stays");
+  assert.doesNotMatch(JSON.stringify(await rawSettings()), /000123456789|000000000/, "and the settings row still holds no number in plain text");
+  await rejects(ops.createCustomer({ name: "SAMPLE acct 000123456789" }, NORA), /card or bank/, "a customer's name");
+  await rejects(ops.updateCustomer(bistro.id, { contactName: "ACH to ACCT#:000123456789" }, NORA), /card or bank/, "a customer's contact name");
+  await rejects(ops.createAndFinalizeInvoice({ billTo: { kind: "new", name: "SAMPLE Routing 000000000" }, items: two }, NORA, { today }), /card or bank/, "a new customer typed in Bill to");
+  await rejects(ops.createInvoiceDraft({ customerId: bistro.id, items: two, discountCents: 100, discountLabel: "acct 000123456789" }, NORA), /card or bank/, "a draft's discount label");
+  await rejects(ops.updateInvoice(cd.id, { discountCents: 100, discountLabel: "ROUTING:000000000" }, NORA), /card or bank/, "an edit's discount label");
+  await rejects(ops.createRetainer({ customerId: bistro.id, description: "Retainer, ACH to ACCT#:000123456789", amountCents: 1000, dayOfMonth: 1 }, NORA), /card or bank/, "a retainer's description (it becomes a line)");
+  await rejects(ops.voidInvoice(cd.id, NORA, { reason: "ACH to ACCT#:000123456789" }), /card or bank/, "a void reason");
+  assert.notEqual((await ops.getInvoice(cd.id, { today }))!.status, "void", "and the invoice is not void");
+  // ordinary wording is not a bank number: a month after the word "account" is how a social media line reads
+  const acctLine = await ops.createInvoiceDraft({ customerId: bistro.id, items: [{ description: "Account management 11-2026", quantity: 1, unitCents: 55000 }], notes: "Instagram account management 2026-12" }, NORA);
+  await ops.deleteDraftInvoice(acctLine.id, NORA);
   assert.ok((await ops.previewSkynovaImport("Invoice #\tCustomer\tTotal\n0000901\tSAMPLE Acct Person, acct 000123456789\t$10.00", "invoices")).invoices[0].issues.includes("card or bank number in the text"), "an import");
 
   // ticked for new invoices: the creator starts with them, in the pickers' order
@@ -589,6 +627,24 @@ async function main() {
   assert.doesNotMatch(drawn, /\[Zelle|Check payable to|••••/, "the old wording is gone and the PDF never prints a masked account");
   inOrder(await pdfDrawn(Buffer.from(inv3.pdfBase64!, "base64")), "the PDF that comes back with Make PDF");
   inOrder(await pdfDrawn((await ops.invoicePdf(inv3.id, { today, public: true }))!.bytes), "the customer's PDF");
+  // The PDF's layout around the check line (drawn straight from a document: fake values, no database). On one page
+  // the check line points at her address at the top; when the block lands on a later page there is no address above,
+  // so it is spelled out; and a long address line wraps instead of running under the INVOICE title.
+  const { renderInvoicePdf } = await import("../src/lib/invoice-pdf");
+  const paper = T.readInvoiceSettings({ fromName: "Nora Chen", fromAddress: "100 Sample St\nSampleton, VA 23000", zelle: "5550100100", zelleName: "Nora C" });
+  const docOf = (n: number, st = paper) => T.invoiceDocument(
+    { number: "0000170", status: "sent", issueDate: today, dueDate: today, termsDays: 0, items: Array.from({ length: n }, (_, i) => ({ description: `Instagram Reel ${i + 1}`, quantity: 1, unitCents: 10000 })), subtotalCents: n * 10000, discountCents: 0, discountLabel: null, totalCents: n * 10000, paidCents: 0, notes: null, payWays: ["zelle", "check"], payNote: null },
+    { name: "SAMPLE Bistro", billingAddress: null }, st, { stripeReady: false, payUrl: null, today, bank: null });
+  const onePage = await pdfDrawn(await renderInvoicePdf(docOf(2)));
+  assert.match(onePage, /PAYMENT INFORMATION:\nPlease send payment via Zelle to 5550100100\.\nPut invoice 0000170 in the Zelle memo\nChecks Payable to Nora Chen\nMail to the address above\n/, "the block a new invoice prints, her words exactly (the Zelle block is two lines even with a Zelle name set)");
+  assert.doesNotMatch(onePage, /Page 1 of|Zelle shows/);
+  const twoPages = await pdfDrawn(await renderInvoicePdf(docOf(24)));
+  assert.match(twoPages, /Page 1 of 2/); assert.match(twoPages, /Checks Payable to Nora Chen\nMail to 100 Sample St, Sampleton, VA 23000/, "on page 2 the address is spelled out");
+  assert.doesNotMatch(twoPages, /Mail to the address above/, "page 2 has no address above");
+  const longLine = "100 Sample St, Building B, Suite 2000, Attention Receiving Department, Rear Entrance By The Loading Dock";
+  const longFrom = (await pdfDrawn(await renderInvoicePdf(docOf(2, T.readInvoiceSettings({ fromName: "Nora Chen", fromAddress: `${longLine}\nSampleton, VA 23000`, zelle: "5550100100" }))))).split("\n");
+  assert.ok(!longFrom.includes(longLine) && longFrom.some((l) => l.startsWith("100 Sample St, Building B")) && longFrom.some((l) => l.endsWith("The Loading Dock")), "a long address line is wrapped, not drawn across the title");
+  assert.ok(longFrom.every((l) => l.length < 80), "no drawn row is long enough to reach the INVOICE title");
   // the message that goes with it names the ways, never the numbers
   assert.match(inv3.message, new RegExp(`Bank transfer \\(ACH\\): the account details are on the PDF\\.\\nZelle: \\(555\\) 010-0100, with ${n3} in the memo\\.\\nChecks payable to Nora Chen\\.`));
   noBank(JSON.stringify({ ...inv3, pdfBase64: null }), "the done state");

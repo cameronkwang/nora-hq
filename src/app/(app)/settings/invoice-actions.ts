@@ -52,8 +52,10 @@ export async function saveInvoiceSettingsAction(_prev: ActionFormState, fd: Form
         // Empty (or the boxes not shown): keep what is saved. Replacing means typing both again.
         ownBankAccount: str(fd.get("ownBankAccount")) || undefined,
         ownBankRouting: str(fd.get("ownBankRouting")) || undefined,
-        // Tick boxes: the form always renders them; a way that isn't ready is disabled and so not sent.
-        payDefaults: fd.getAll("payDefaults").filter((v): v is PayWay => isPayWay(v)),
+        // Tick boxes: sent only when she changed one on the page (the card then adds payDefaultsSet); otherwise the
+        // stored ticks stay. A way that isn't ready is a disabled box, which a form does not send: an untouched save
+        // made before her Zelle number is in must not store "check only" in place of the built-in Zelle and check.
+        payDefaults: fd.get("payDefaultsSet") ? fd.getAll("payDefaults").filter((v): v is PayWay => isPayWay(v)) : undefined,
         // Switches: an unticked box sends nothing, so read them by name (the form always renders both).
         achEnabled: fd.get("achEnabled") === "on",
         cardEnabled: fd.get("cardEnabled") === "on",

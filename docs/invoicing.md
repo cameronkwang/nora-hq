@@ -64,7 +64,7 @@ wording is built in, its numbers are typed once in Settings and never appear any
 | Number | The next in her sequence: 7 digits, zero padded, no prefix. The first Nora HQ invoice is `0000170` | "Next invoice number" (Settings, or tap the number in the creator) |
 | Invoice date | Today | Per invoice |
 | Due date | The same day: "Due on receipt" (`termsDays` 0) | Per invoice; a contract's payment days set it |
-| Ways to pay | Zelle, printed as "PAYMENT INFORMATION", "Please send payment via Zelle to ..." and "Put invoice 0000170 in the Zelle memo". Built in; the ways a new invoice starts with are ticked in Settings ("New invoices") | Settings for every new invoice; per invoice (people; Claude only when Nora or Cameron said so) |
+| Ways to pay | Zelle and a check by mail, printed under "PAYMENT INFORMATION": "Please send payment via Zelle to ..." and "Put invoice 0000170 in the Zelle memo", then "Checks Payable to ..." and "Mail to the address above". Built in; the ways a new invoice starts with are ticked in Settings ("New invoices"). A bank transfer (ACH) only when asked for | Settings for every new invoice; per invoice (people; Claude only when Nora or Cameron said so) |
 | Lines | One tap: "Standard Content Creation Package" $550.00; "Food Stipend" (amount typed each time). Quantity 1 | Saved lines in Settings; any line per invoice |
 | Notes | None (Settings' default note, if any) | Per invoice |
 | Language | The customer's (English unless set) for the message and the pay page. The PDF is English | Per invoice |
@@ -183,7 +183,7 @@ and holds the invoice settings (`InvoiceSettings` in `invoices-types`, defaults 
 | `checkPayee`, `checkAddress`, `venmo`, `paypal` | empty | A way is offered in the creator only when its details are set |
 | `ownBankLabel` | empty | Bank transfer (ACH): the free-text line above the numbers ("Sample Bank Checking") |
 | `ownBankEnc` | none | Her own account and routing numbers, **encrypted** (`lib/crypto`, `TOKEN_ENC_KEY`): `encryptJson({ a, r })`. Never in plain text, not even the last digits. See "Her own bank account" |
-| `payDefaults` | `[]` (= Zelle and check, `NEW_INVOICE_PAY_WAYS`) | The ways ticked for new invoices. Read through `defaultPayWays`: only the ticked ways (none ticked: Zelle and check) that are available, and Zelle when none is left |
+| `payDefaults` | `[]` (= Zelle and check, `NEW_INVOICE_PAY_WAYS`) | The ways ticked for new invoices. Read through `defaultPayWays`: only the ticked ways (none ticked: Zelle and check) that are available, and Zelle when none is left. Written only when a person changed a tick (see "The tick boxes in Settings" under "Ways to pay on each invoice") |
 | `achEnabled` | on | Bank transfer ONLINE through Stripe (needs `STRIPE_SECRET_KEY`). The name is older than the `ach` way and has nothing to do with it |
 | `cardEnabled` | **off** | Card online (needs `STRIPE_SECRET_KEY` and this on) |
 | `termsDays` | 0 | Due on receipt |
@@ -191,10 +191,12 @@ and holds the invoice settings (`InvoiceSettings` in `invoices-types`, defaults 
 | `savedItems` | the two defaults | `SavedItem[]` (`{ id, description, unitCents | null }`, at most 20); a missing key reads as the defaults, an edited list (even empty) is kept |
 
 `readInvoiceSettings(value)` reads any version of the row and never throws. Every writer MERGES (`value =
-coalesce(value, '{}') || $patch`, one statement); saved lines are replaced as one key. Today `savePaymentLine` in
-`lib/ops-payment.ts` replaces the whole value with `{ line }`: core must change it to merge, or saving the deal payment
-line would wipe the invoice settings. Every text setting refuses a password (`credential-guard`) and a card or bank
-account number (`looksLikeCardOrBankNumber`); her own account number has exactly one home, the two boxes under Bank
+coalesce(value, '{}') || $patch`, one statement); saved lines are replaced as one key. `savePaymentLine` in
+`lib/ops-payment.ts` (the deal payment line, "How Nora gets paid" in Settings) merges its `{ line }` the same way.
+Every text setting refuses a password (`credential-guard`) and a card or bank account number
+(`looksLikeCardOrBankNumber`), **the deal payment line included**: it is plain text in this same row, shown on
+Settings to both people, on a deal's payment request and in its "Email it" link, so `savePaymentLine` refuses her bank
+block with the same words as every other field. Her own account number has exactly one home, the two boxes under Bank
 transfer (ACH), which are checked and encrypted on their own path (next section). Stripe keys are never here: only the
 env vars `STRIPE_SECRET_KEY` and `STRIPE_WEBHOOK_SECRET`. The next invoice number is not here either: it is the
 SEQUENCE.
@@ -240,9 +242,17 @@ the app, and everything below exists to keep it in as few places as possible.
   server action's body, cleared when the save worked. After that the page's HTML holds the last digits only. They are
   never in a URL, `localStorage`, analytics or a client bundle.
 - **Still refused everywhere else.** `looksLikeCardOrBankNumber` keeps refusing a bank or card number (her own block
-  included, "ACH to ACCT#:..." pasted into a note) in notes, private notes, payment references, customers, invoice
-  lines, saved lines, imports, the custom pay line and every other setting. Card numbers are refused everywhere,
-  the account box included.
+  included, "ACH to ACCT#:..." pasted into a note) in an invoice's notes, private note, lines, discount label and
+  custom pay line; a payment's reference and note; a void reason; a customer's name, contact name, address and notes
+  (also a new customer typed in Bill to); a retainer's description; saved lines; imports; the deal payment line and
+  every other text setting. Card numbers are refused everywhere, the account box included. (A customer's phone and
+  email are not run through it: an international phone number is long enough to look like a card number.)
+- **What counts as a bank number in free text.** A card number is 13 to 19 digits that pass the card check. A bank
+  number is one written next to the word routing, account, acct or ABA, and long enough to be one: 8 or more digits
+  in a row ("ACH to ACCT#:000123456789", "ROUTING:000000000") or 9 or more written in groups ("account 0001 2345
+  6789"). A month or a date after the word "account" is ordinary wording on a social media invoice and passes:
+  "Account management 11-2026", "Instagram account management 2026-12". Not caught: her account number typed with
+  none of those words next to it (the op that checks free text does not know the number).
 
 ## Numbers
 
@@ -284,7 +294,7 @@ The main way to make an invoice. One screen, phone first, great on desktop. Serv
   [ Description          ] [ Amount ]
                                        Total  $625.10
 
-  Due on receipt · Zelle · #0000170        (each part tappable)
+  Due on receipt · Zelle, check · #0000170 (each part tappable)
   More: discount, notes, language, private note
 
   [ Make PDF ]        Save as draft
@@ -306,7 +316,11 @@ The main way to make an invoice. One screen, phone first, great on desktop. Serv
   button works the moment she picks one; for anyone else they are fetched on pick (`lastInvoiceForCustomer`), the
   button already there and focused: a tap or Enter while it loads is kept and applied when it arrives. It copies the
   lines (and ways to pay, notes); a saved line typed each time (Food Stipend) comes back with its amount empty and
-  focused (`sameAsLastTime`).
+  focused (`sameAsLastTime`). **Her bank account is never copied** (`sameAsLastWays`): a bank transfer (ACH) prints
+  her full account number, so it goes on an invoice only when asked for on THAT invoice (or ticked in Settings, in
+  which case the new invoice already has it and keeps it). When the last invoice offered it and this one doesn't, a
+  line under the defaults says so: "Their last invoice also offered a bank transfer (ACH). ... tap the ways to pay to
+  add it."
 - **Lines**: the saved lines are chips (`lineFromSavedItem`); a description + amount row adds a custom line; Enter
   moves to the next field (and from the amount adds the line); quantity is 1 unless changed; totals update live
   (`invoiceTotals`) from exactly the lines Make PDF will send, a custom line typed but not added yet included.
@@ -330,8 +344,12 @@ The main way to make an invoice. One screen, phone first, great on desktop. Serv
   invoice starts the same way: a way that only waits for the one-time ask (her name, her Zelle number) counts as there.
 - **More** (folded): discount (dollars or %), notes, language (English / 简体中文 / 繁體中文), private note.
 - **The one-time ask**: when `setupMissing` is not empty (no From name, address or Zelle number in Settings), a short
-  block above Make PDF asks for them once ("Your name", prefilled "Nora Chen"; "Your address"; "Zelle number") and
-  Make PDF saves them into Settings first (`QuickInvoiceInput.setup`). It never shows again once filled.
+  block above Make PDF asks for them once ("Your name", prefilled "Nora Chen"; "Your address"; "Zelle number", a phone
+  number or an email, so the box has the plain keyboard) and Make PDF saves them into Settings first
+  (`QuickInvoiceInput.setup`). It never shows again once filled. While it shows, a way that waits for it says so in
+  the chooser ("Add your Zelle number below.", "Add your name below."), not "in Settings". Make PDF asks for the
+  address when the invoice offers a check and there is nowhere to mail one (no address typed, none saved for checks):
+  "Add your address: it is where a check is mailed (or take Check off the ways to pay)."
 - **ONE focal button, "Make PDF"** (Cmd/Ctrl+Enter on desktop): `createAndFinalizeInvoice` saves and finalizes in one
   step (number, status sent, link) and the screen turns into the **done state**. **Save as draft** is secondary
   (`saveQuickDraft`). Errors show inline next to the field, the form keeps everything.
@@ -417,7 +435,7 @@ clients see a familiar document, in the clean Ink style:
   Put invoice 0000170 in the Zelle memo
 
   Checks Payable to Nora Chen
-  Mail to 100 Sample St, Sampleton, VA 23000
+  Mail to the address above
   ───────────────────────────────────────────────────────────────────────────
                                                       Subtotal        625.10
                                                       Total           625.10
@@ -430,7 +448,7 @@ clients see a familiar document, in the clean Ink style:
   letter so "Phở" prints "Pho", anything else is left out; line breaks in the notes are kept), checked against the
   real font for every character in `scripts/test-invoice-review.ts`.
 - Top left: From name and address lines (email / phone under them only if set). Top right: "INVOICE" large,
-  letter-spaced, grey.
+  letter-spaced, grey. A long name or address line wraps before the title instead of running under it.
 - Left: the customer's name and their address on one line (`oneLineAddress`). Right column: "Invoice #", "Invoice
   Date", "Due Date" (bold labels, right-aligned), dates as `11/20/2026` (`usDate`).
 - The table: Description | Unit Price | Quantity | Amount. Skynova's "Item: Service" column is dropped. **No blue
@@ -442,11 +460,15 @@ clients see a familiar document, in the clean Ink style:
   1. `<Bank label>` (only when a label is saved), `ACH to ACCT#:<account number>`, `ROUTING:<routing number>`. No
      space after the colons, as she writes them.
   2. `Please send payment via Zelle to <the Zelle value exactly as typed in Settings>.` and under it
-     `Put invoice 0000170 in the Zelle memo` (then `Zelle shows <name>` only when "Name Zelle shows" is set).
+     `Put invoice 0000170 in the Zelle memo`. Two lines, always. "Name Zelle shows", when set, is shown on the pay
+     page and in the email and the reminder (`Zelle shows <name>`), not on the PDF.
   3. `Checks Payable to <payee>` (the payee in Settings, else the name the invoice is from, `checkPayee`) and
-     `Mail to the address above`: her own address is printed at the top of the invoice. When a different address is
-     saved for checks, `Mail to <address on one line>` instead. The pay page and the messages always spell the address
-     out (they have no "above"). No address anywhere: no Mail to line.
+     `Mail to the address above` (`MAIL_TO_ADDRESS_ABOVE`): her own address is printed at the top of the invoice. When
+     a different address is saved for checks, `Mail to <address on one line>` instead (`mailToLine`). The pay page,
+     the email and the reminder always spell the address out (they have no "above"), and so does the PDF itself when
+     a long invoice pushes the block onto a later page, where no address is above it. The short text that goes with
+     the PDF (Copy message) names who the check is made out to and leaves the address to the PDF it travels with. No
+     address anywhere: no Mail to line.
   Then, each its own block: `@handle [Venmo]`; `… [PayPal]`; the custom line; `Pay online by bank transfer: <link>`
   (only with an online way and a link). The older "<number> [Zelle]" and "Check payable to …, mail to …" wording is
   gone everywhere. Only the chosen ways print, and a way whose details are missing prints nothing.
@@ -526,9 +548,20 @@ text, not a status.
 - **What a new invoice starts with** (`defaultPayWays`): the ways ticked under "New invoices" in Settings
   (`payDefaults`), and **Zelle and a check by mail when nothing is ticked** (`NEW_INVOICE_PAY_WAYS`). A bank transfer
   (ACH) is never a built-in default: it is added on the invoice whose customer asked for it. The same for a
-  retainer's monthly draft and for a draft Claude makes without `pay_ways`. A ticked way that has lost its details
-  (or an online way while Stripe is off) is skipped, and if none is left the invoice is Zelle. "Other" can't be a
-  default (its line is typed per invoice).
+  retainer's monthly draft and for a draft Claude makes without `pay_ways` (or one made from a deal): the creator,
+  the retainer run and `createInvoiceDraft` all start from `newInvoiceWays`, in which a way that only waits for the
+  one-time ask (her name, her Zelle number) counts as there, so a draft made before setup is complete is Zelle and
+  check too, never Zelle alone or check alone. A ticked way that has lost its details (or an online way while Stripe
+  is off) is skipped, and if none is left the invoice is Zelle. "Other" can't be a default (its line is typed per
+  invoice).
+- **The tick boxes in Settings.** A way that isn't ready is a disabled box, and a form does not send a disabled box.
+  So the form sends the ticks (`payDefaultsSet` + `payDefaults`) **only when a person ticked or unticked one on that
+  page**; otherwise `saveInvoiceSettingsAction` leaves `payDefaults` out and the stored ticks stay. Saving her name
+  before her Zelle number therefore keeps the built-in default (Zelle and check once the number is in), and a ticked
+  way that loses its details and gets them back is a default again. The boxes and the two Pay online switches always
+  show what was just saved: React resets a form after every server action, saved or refused, which would put a box
+  held in state back to how it was when the page opened (and the next Save would then store that); `Tick` in the
+  card keeps each box's reset value equal to its state.
 - **Available** (`availablePayWays(settings, stripeConfigured())`): Zelle, check, Venmo, PayPal need their details in
   Settings; **bank transfer (ACH)** needs her account and routing numbers saved; custom needs its line typed
   (`payNote`); **bank transfer online** needs `STRIPE_SECRET_KEY` and `achEnabled`; **card** needs `STRIPE_SECRET_KEY`
@@ -548,7 +581,7 @@ text, not a status.
   block until an account is saved again.
 - **Who sets them**: people, per invoice and (the defaults) in Settings. Claude only when Nora or Cameron said how
   that invoice should be paid (`create_draft_invoice`'s `pay_ways`); otherwise Claude's drafts take the ticked ways
-  (Zelle unless she ticked others). Claude names a way, never its details.
+  (Zelle and check unless she ticked others). Claude names a way, never its details.
 - If nothing prints (no Zelle number yet and no other way), the creator's one-time ask covers it; the invoice page
   warns before Make PDF: "Add how you get paid in Settings first." (a `.notice`).
 - No way ever adds a fee. The Stripe fee table in Settings is information for Nora, not a charge.
@@ -692,7 +725,8 @@ A retainer belongs to a customer (and maybe a contract): amount, description, da
 reminders cron (`runDailyReminders`, once a day after 8am New York) calls `runRetainers` first. For each retainer that
 is due (`retainerDue`: active, started, not made this month, today on or after its day; a missed day catches up), it
 claims the month with ONE conditional UPDATE on `lastRunMonth`, then inserts ONE draft (source `retainer`, one line
-"Social media services (November 2026)", `retainerMonth`, Zelle, the retainer's `contractId`; due on receipt, or in
+"Social media services (November 2026)", `retainerMonth`, the ways a new invoice starts with (Zelle and check unless
+others are ticked), the retainer's `contractId`; due on receipt, or in
 its contract's "pay within" days when it bills a contract), unique per retainer and month. A retainer with a
 contract first checks that no invoice of that contract already bills the month (a hand-made "Invoice this month"):
 if one does, the month is marked taken and no draft is made. A person presses Make PDF. A draft someone deleted is not made again that month. If
@@ -836,7 +870,7 @@ the smoke's `ROUTES` and `NORA_ROUTES`.
 | `/invoices/reports` | Paid by month, by method, by customer; Export payments (CSV) per year |
 | `/invoices/export` | `route.ts`: `paymentsCsv({ year })`, `text/csv`, attachment, `no-store`, signed-in |
 | `/invoices/import` | Paste box, kind (Customers / Invoices), Preview, then Save |
-| `/settings` | New "Invoices and payments" card (`#invoicing`), visible to both: From (name, address, optional email / phone), Zelle (number, optional name), **Bank transfer (ACH)** (bank label, account number, routing number; once saved the account shows as `••••6789` with Replace and Remove, and the page never holds the number), check, Venmo, PayPal, **Ways to pay on a new invoice** (tick boxes for Zelle, Bank transfer (ACH), Check, Venmo, PayPal, Bank transfer online, Card online; a box can be ticked once its details are filled in; nothing ticked means Zelle), **Saved lines** (add, edit, reorder, remove; amount optional = typed each time), **Next invoice number** (shows the next; setting it can't go back onto a used number), Pay online (status from `stripeConfigured()` / `stripeTestMode()`, bank transfer on/off, **card on/off, off by default**, the fee table, "No fee is ever added for the customer"), default due days (0 = due on receipt) and note. The existing payment line stays |
+| `/settings` | New "Invoices and payments" card (`#invoicing`), visible to both: From (name, address, optional email / phone), Zelle (number, optional name), **Bank transfer (ACH)** (bank label, account number, routing number; once saved the account shows as `••••6789` with Replace and Remove, and the page never holds the number), check, Venmo, PayPal, **Ways to pay on a new invoice** (tick boxes for Zelle, Bank transfer (ACH), Check, Venmo, PayPal, Bank transfer online, Card online; a box can be ticked once its details are filled in; nothing ticked means Zelle and check; after Save the boxes show what was saved, with no reload), **Saved lines** (add, edit, reorder, remove; amount optional = typed each time), **Next invoice number** (shows the next; setting it can't go back onto a used number), Pay online (status from `stripeConfigured()` / `stripeTestMode()`, bank transfer on/off, **card on/off, off by default**, the fee table, "No fee is ever added for the customer"), default due days (0 = due on receipt) and note. The existing payment line stays |
 | `/contracts` | The builder gains: after a download, **"Make the invoice"** (and "Set up monthly invoices" for a monthly contract with a fee); `?invoice=<id>` opens pre-filled from an invoice and the save links back; **Past contracts rows show their invoices** ("0000170 · Paid") or their next step |
 | `/deals/[id]` | Payment card: "Make invoice" (opens the creator), or the deal's invoice line(s) and contract(s) |
 
@@ -1129,7 +1163,11 @@ BASE_URL=http://localhost:3200 MCP_TOKEN=test CRON_SECRET=test NODE_PATH=$(npm r
   masking, and that the account number is in no table in plain text, no message, no activity row, no console line
   and no MCP answer (`scripts/test-invoices-types.ts`, `scripts/test-invoices-ops.ts`). The `invoicing` smoke
   section types the account in Settings, ticks the three ways, makes an invoice and reads the PDF, the pay page (en,
-  简体, 繁體) and the Settings HTML.
+  简体, 繁體) and the Settings HTML. It also saves Settings three times on one page without a reload (the ticks and the
+  Card online switch must show, and store, what was just saved), saves while the Zelle number is missing (Zelle must
+  be a default again once the number is back) and presses Same as last time for a customer whose last invoice offered
+  a bank transfer (it must not come back by itself). The ops test draws a two-page invoice (the check line spells the
+  address out on page 2) and one with a very long address line (it wraps before the title).
 - **Sections.** `node scripts/smoke.mjs list` prints them. One or more names run just those: `invoicing`, `v6`
   (deals), `v8` (navigation, schedule), `v10` (settings, payment text), or by feature: `deals`, `contracts`,
   `settings`, `navigation`, `schedule`. No name runs `all` (the crawl and every flow). `responsive` is the long page

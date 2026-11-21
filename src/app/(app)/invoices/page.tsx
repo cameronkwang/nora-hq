@@ -56,7 +56,7 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Pro
     <>
       <PageHeader
         title="Invoices"
-        subtitle="Make the PDF, send it from your phone, record the payment. Zelle unless you choose otherwise."
+        subtitle="Make the PDF, send it from your phone, record the payment. Zelle and check unless you choose otherwise."
         actions={
           <>
             <LinkButton href="/invoices/new" variant="primary" size="sm">New invoice</LinkButton>

@@ -24,6 +24,7 @@ import {
   pdfPrintsEmpty,
   pdfUnprintable,
   readyItems,
+  sameAsLastWays,
   sortPayWays,
   type BillToOption,
   type CreatorEdit,
@@ -167,6 +168,8 @@ export function InvoiceCreator({ ctx, edit, initialDone }: { ctx: InvoiceCreator
   /** Days until due picked with the Due chips while the dates still follow today (null: the prefill's). */
   const [terms, setTerms] = useState<number | null>(null);
   const [payWays, setPayWays] = useState<PayWay[]>(sortPayWays(p.payWays));
+  /** "Same as last time" left her bank account off (it is only added when asked for): said under the quiet line. */
+  const [achLeftOut, setAchLeftOut] = useState(false);
   const [payNote, setPayNote] = useState(p.payNote ?? "");
   const [panel, setPanel] = useState<Panel>(null);
   const [nextNumber, setNextNumber] = useState(ctx.nextNumber);
@@ -329,9 +332,16 @@ export function InvoiceCreator({ ctx, edit, initialDone }: { ctx: InvoiceCreator
   const zelleTyped = setupMissing.includes("zelle") && !!setup.zelle.trim();
   // A check is made out to her name: the first time, the name typed in the one-time ask is enough.
   const nameTyped = setupMissing.includes("fromName") && !!setup.fromName.trim();
+  // While the one-time ask is on this screen, a way that waits for it says so ("below"), not "in Settings".
+  const askZelle = setupMissing.includes("zelle");
+  const askName = setupMissing.includes("fromName") && !avail.check.ok;
   const availNow = useMemo(
-    () => ({ ...avail, ...(zelleTyped ? { zelle: { ok: true, why: null } } : {}), ...(nameTyped ? { check: { ok: true, why: null } } : {}) }),
-    [avail, zelleTyped, nameTyped],
+    () => ({
+      ...avail,
+      ...(askZelle ? { zelle: zelleTyped ? { ok: true, why: null } : { ok: false, why: "Add your Zelle number below." } } : {}),
+      ...(askName ? { check: nameTyped ? { ok: true, why: null } : { ok: false, why: "Add your name below." } } : {}),
+    }),
+    [avail, askZelle, askName, zelleTyped, nameTyped],
   );
   const defaults = creatorDefaultsLine({ issueDate, dueDate, payWays, nextNumber: edit ? edit.number : nextNumber });
 
@@ -344,6 +354,7 @@ export function InvoiceCreator({ ctx, edit, initialDone }: { ctx: InvoiceCreator
     setAddress(o.address ?? "");
     setAddressOpen(false);
     setListOpen(false);
+    setAchLeftOut(false);
     if (err?.field === "billTo") setErr(null);
     // Next: "Same as last time" if they have past invoices, else the first saved line.
     requestAnimationFrame(() => ((o.hasLast && o.customerId && o.last !== null ? sameRef.current : null) ?? firstChipRef.current)?.focus());
@@ -393,7 +404,10 @@ export function InvoiceCreator({ ctx, edit, initialDone }: { ctx: InvoiceCreator
     if (!from) return;
     const ls = from.lines.map(toLine);
     setLines(ls);
-    setPayWays(sortPayWays(from.payWays));
+    // The ways come back too, but never her bank account by itself: ACH only when asked for on THIS invoice.
+    const same = sameAsLastWays(from.payWays, payWays);
+    setPayWays(same.ways);
+    setAchLeftOut(same.achLeftOut);
     setPayNote(from.payNote ?? "");
     if (from.notes) setNotes(from.notes);
     if (from.discountCents > 0) {
@@ -551,6 +565,12 @@ export function InvoiceCreator({ ctx, edit, initialDone }: { ctx: InvoiceCreator
       setPanel("pay");
       return null;
     }
+    // A check by mail needs somewhere to mail it. The first time, her address is asked on this screen.
+    if (forPdf && setupMissing.includes("fromAddress") && payWays.includes("check") && !ctx.settings.checkAddress && !setup.fromAddress.trim()) {
+      setErr({ field: "setup", message: "Add your address: it is where a check is mailed (or take Check off the ways to pay)." });
+      document.getElementById(`${uid}-faddr`)?.focus();
+      return null;
+    }
     const setupIn = setupMissing.length
       ? {
           ...(setupMissing.includes("fromName") && setup.fromName.trim() ? { fromName: setup.fromName.trim() } : {}),
@@ -675,6 +695,7 @@ export function InvoiceCreator({ ctx, edit, initialDone }: { ctx: InvoiceCreator
     setIssueDate(blank.issueDate);
     setDueDate(blank.dueDate);
     setPayWays(sortPayWays(blank.payWays));
+    setAchLeftOut(false);
     setPayNote("");
     setPanel(null);
     setDiscount("");
@@ -1012,6 +1033,10 @@ export function InvoiceCreator({ ctx, edit, initialDone }: { ctx: InvoiceCreator
         )}
       </div>
 
+      {achLeftOut && !payWays.includes("ach") && (
+        <p className="meta" role="status">Their last invoice also offered a bank transfer (ACH). It prints your account number, so it is added only when they ask: tap the ways to pay to add it.</p>
+      )}
+
       {panel === "due" && (
         <Panel title="Dates" onClose={() => setPanel(null)} error={errFor("due")}>
           <div className="inv-pair">
@@ -1071,7 +1096,7 @@ export function InvoiceCreator({ ctx, edit, initialDone }: { ctx: InvoiceCreator
               );
             })}
           </ul>
-          <p className="hint">New invoices start with the ways ticked in Settings (Zelle unless you ticked others). No fee is ever added for any way to pay.</p>
+          <p className="hint">New invoices start with the ways ticked in Settings (Zelle and check unless you ticked others). No fee is ever added for any way to pay.</p>
         </Panel>
       )}
 
@@ -1142,19 +1167,20 @@ export function InvoiceCreator({ ctx, edit, initialDone }: { ctx: InvoiceCreator
           {setupMissing.includes("fromName") && (
             <div>
               <label htmlFor={`${uid}-fname`} className="label">Your name</label>
-              <input id={`${uid}-fname`} className="input" value={setup.fromName} onChange={(e) => setSetup((s) => ({ ...s, fromName: e.target.value }))} autoComplete="name" />
+              <input id={`${uid}-fname`} className="input" value={setup.fromName} onChange={(e) => { setSetup((s) => ({ ...s, fromName: e.target.value })); if (err?.field === "pay") setErr(null); }} autoComplete="name" />
             </div>
           )}
           {setupMissing.includes("fromAddress") && (
             <div>
               <label htmlFor={`${uid}-faddr`} className="label">Your address</label>
-              <textarea id={`${uid}-faddr`} className="input" rows={2} value={setup.fromAddress} onChange={(e) => setSetup((s) => ({ ...s, fromAddress: e.target.value }))} autoComplete="street-address" placeholder={"Street\nCity, state ZIP"} />
+              <textarea id={`${uid}-faddr`} className="input" rows={2} value={setup.fromAddress} aria-invalid={!!errFor("setup")} onChange={(e) => { setSetup((s) => ({ ...s, fromAddress: e.target.value })); if (err?.field === "setup") setErr(null); }} autoComplete="street-address" placeholder={"Street\nCity, state ZIP"} />
+              {errFor("setup") && <p role="alert" className="inv-err"><Status tone="danger" small className="is-wrap">{errFor("setup")}</Status></p>}
             </div>
           )}
           {setupMissing.includes("zelle") && (
             <div>
               <label htmlFor={`${uid}-zelle`} className="label">Zelle number</label>
-              <input id={`${uid}-zelle`} className="input" inputMode="tel" value={setup.zelle} aria-invalid={!!errFor("zelle")} onChange={(e) => { setSetup((s) => ({ ...s, zelle: e.target.value })); if (err?.field === "zelle") setErr(null); }} placeholder="Phone or email you use for Zelle" autoComplete="off" />
+              <input id={`${uid}-zelle`} className="input" value={setup.zelle} aria-invalid={!!errFor("zelle")} onChange={(e) => { setSetup((s) => ({ ...s, zelle: e.target.value })); if (err?.field === "zelle") setErr(null); }} placeholder="Phone or email you use for Zelle" autoComplete="off" />
               {errFor("zelle") && <p role="alert" className="inv-err"><Status tone="danger" small className="is-wrap">{errFor("zelle")}</Status></p>}
             </div>
           )}

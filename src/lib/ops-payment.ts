@@ -5,12 +5,16 @@ import { getDb, schema } from "./db";
 import { logActivity } from "./activity";
 import { OpsError } from "./ops";
 import { looksLikeSecret, secretRefusal } from "./credential-guard";
+import { CARD_REFUSAL, looksLikeCardOrBankNumber } from "./invoices-types";
 
 /**
  * Nora's payment line: how she gets paid, as printed on payment requests ("Zelle: 804-555-0123").
  * One row in app_settings (schema.NORA_PAYMENT_KEY → { line, …the invoice settings }). Set once in Settings → Nora (or
  * on a deal the first time). Saving MERGES the line into the row, so the invoice settings beside it stay. People only;
- * never a password — the credential guard refuses anything that looks like one.
+ * never a password — the credential guard refuses anything that looks like one — and never a card or bank account
+ * number: the line is plain text shown on Settings, on a deal's payment request and in its "Email it" link, so her
+ * account and routing numbers are refused here exactly as in every other text setting (their one home is the
+ * encrypted pair under Bank transfer (ACH), docs/invoicing.md "Her own bank account").
  */
 
 const MACHINE = new Set(["claude", "public", "system"]);
@@ -35,6 +39,7 @@ export async function savePaymentLine(input: unknown, actor: string): Promise<st
   const line = Line.parse(input);
   const secrets = looksLikeSecret(line);
   if (secrets.length) throw new OpsError(secretRefusal("the payment line", secrets));
+  if (looksLikeCardOrBankNumber(line)) throw new OpsError(CARD_REFUSAL);
   const db = await getDb();
   const now = new Date();
   const value = { line: line || null };

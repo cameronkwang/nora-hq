@@ -3845,7 +3845,7 @@ function pdfText(buf) {
       if (t[1] != null) out.push(Buffer.from(t[1], "hex").toString("latin1"));
       else out.push(t[2].replace(/\\([nrtbf()\\]|[0-7]{1,3})/g, (_, e) => ({ n: "\n", r: "\r", t: "\t", b: "\b", f: "\f", "(": "(", ")": ")", "\\": "\\" })[e] ?? String.fromCharCode(parseInt(e, 8))));
     }
-    re.lastIndex = end;
+    re.lastIndex = end + "endstream".length; // past the word itself (it ends in "stream"), so a second page's text is read too
   }
   return out.join("\n");
 }
@@ -3894,7 +3894,7 @@ async function invoicingEndToEnd(browser) {
     return t;
   };
   const doneId = () => new URL(page.url()).searchParams.get("done") ?? "";
-  /** The creator's quiet line ("Due on receipt · Zelle · #0000170"). */
+  /** The creator's quiet line ("Due on receipt · Zelle, check · #0000170"). */
   const defaultsLine = () => page.locator(".inv-defaults").innerText();
   const peekNumber = async () => (/#(\d{7,})/.exec(await defaultsLine()) ?? [])[1] ?? null;
   const pdfOf = async (id) => {
@@ -4185,6 +4185,19 @@ async function invoicingEndToEnd(browser) {
       await tick(["zelle", "ach", "check"]);
       const savedMsg = await saveSettings();
       must(/^Saved\./.test(savedMsg), `saving the bank details: ${savedMsg}`);
+      // Without a reload the boxes show what was just saved (the form is reset after every save: a box must not jump
+      // back to how it was when the page opened), so a second Save on the same page sends the same ticks again. The
+      // reload further down proves what that second Save stored. The same for the Pay online switches.
+      for (const w of ["zelle", "ach", "check"]) must(await card.locator(`input[name=payDefaults][value=${w}]`).isChecked(), `${w} shows unticked right after the save that ticked it`);
+      const cardSwitch = card.locator("input[name=cardEnabled]");
+      const cardWas = await cardSwitch.isChecked();
+      await cardSwitch.setChecked(!cardWas, { force: true });
+      must(/^Saved\./.test(await saveSettings()), "the second save on the same page failed");
+      must((await cardSwitch.isChecked()) === !cardWas, "the Card online switch jumped back after Save");
+      for (const w of ["zelle", "ach", "check"]) must(await card.locator(`input[name=payDefaults][value=${w}]`).isChecked(), `${w} shows unticked after the second save`);
+      await cardSwitch.setChecked(cardWas, { force: true });
+      must(/^Saved\./.test(await saveSettings()), "the third save on the same page failed");
+      must((await cardSwitch.isChecked()) === cardWas, "the Card online switch jumped back after the next Save");
       // Masked from now on: the last 4 digits and the routing number, no box holding the account.
       await bankBox.locator(".inv-bank-facts").waitFor();
       const facts = await bankBox.locator(".inv-bank-facts").innerText();
@@ -4205,6 +4218,7 @@ async function invoicingEndToEnd(browser) {
       await bankBox.getByRole("button", { name: "Keep these numbers" }).click();
       await page.reload({ waitUntil: "networkidle" });
       for (const w of ["zelle", "ach", "check"]) must(await card.locator(`input[name=payDefaults][value=${w}]`).isChecked(), `${w} is not ticked after a reload`);
+      must((await card.locator("input[name=cardEnabled]").isChecked()) === cardWas, "Card online is not as it was after three saves on one page");
 
       // The creator starts with the three ways and offers the new one in its chooser.
       await go(`/invoices/new?customer=${cus1}`);
@@ -4269,6 +4283,18 @@ async function invoicingEndToEnd(browser) {
           must(!/000123456789|000000000|••••|ACCT#|ROUTING:|Sample Bank/.test(out), "Claude's tools return her bank details");
       }
       must(!(await (await page.request.get(`${BASE}/invoices/export?year=${year}`)).text()).includes(ACCT), "the CSV export holds the account number");
+      // "Same as last time" never brings her bank account back by itself (ACH only when asked for on THAT invoice):
+      // with the way unticked in Settings, this customer's last invoice is the one that offered it, and the new
+      // invoice still starts with Zelle and check, and says the bank transfer was left out.
+      await go("/settings#invoicing");
+      await tick(["zelle", "check"]);
+      must(/^Saved\./.test(await saveSettings()), "unticking the bank transfer failed");
+      await go(`/invoices/new?customer=${cus1}`);
+      await page.getByRole("button", { name: /^Same as last time/ }).click();
+      const sameLine = await defaultsLine();
+      must(/Zelle, check/.test(sameLine) && !/ACH/.test(sameLine), `Same as last time brought the bank transfer back: ${sameLine}`);
+      must(await page.getByText(/last invoice also offered a bank transfer \(ACH\)/).count(), "Same as last time doesn't say it left the bank transfer out");
+      must(!(await page.content()).includes(ACCT), "the creator holds the account number");
       // A cancelled invoice's link, and a made-up one, still reveal nothing.
       await voidInvoice(made);
       const v = await publicText(link);
@@ -4293,6 +4319,47 @@ async function invoicingEndToEnd(browser) {
     must(/^Due on receipt\s*·\s*Zelle, check\s*·/.test(back), `after unticking the bank transfer, the defaults line is: ${back}`);
     // An invoice made while three ways were ticked keeps them (it is void now, but still says so).
     if (made && hasMcp) must((await tool("get_invoice", { id: made })).pay_ways === "Zelle, Bank transfer (ACH), Check", "the invoice lost the ways saved on it");
+  });
+
+  await st("Settings saved while the Zelle number is missing keeps Zelle for new invoices: it is a default again the moment the number is back", async () => {
+    // Nobody unticked Zelle. A way that isn't ready is a disabled box, and a form does not send those: the ticks are
+    // sent only when one was changed, so this save must not turn "Zelle and check" into "check only".
+    const card = page.locator("#invoicing");
+    const save = async () => {
+      await page.getByRole("button", { name: "Save invoice settings" }).click();
+      await page.waitForLoadState("networkidle");
+      await page.waitForTimeout(800);
+      return card.locator("form[aria-label='Invoice settings'] > p[role=status]").innerText();
+    };
+    await go("/settings#invoicing");
+    const zelle = await page.inputValue("#is-zelle");
+    must(zelle, "the sample Zelle number is missing");
+    let lineWithout = "";
+    let asks = 0;
+    let tickedAgain = false;
+    try {
+      await page.fill("#is-zelle", "");
+      must(await card.locator("input[name=payDefaults][value=zelle]").isDisabled(), "Zelle can be ticked without its number");
+      must(/^Saved\./.test(await save()), "saving without a Zelle number failed");
+      await go("/invoices/new");
+      lineWithout = await defaultsLine();
+      asks = await page.locator("fieldset.inv-setup").getByLabel("Zelle number").count();
+    } finally {
+      await go("/settings#invoicing").catch(() => {});
+      await page.fill("#is-zelle", zelle).catch(() => {});
+      tickedAgain = await card.locator("input[name=payDefaults][value=zelle]").isChecked().catch(() => false);
+      await save().catch(() => {});
+    }
+    must(/Zelle, check/.test(lineWithout), `with the Zelle number missing a new invoice starts with: ${lineWithout}`);
+    must(asks === 1, "the creator doesn't ask for the missing Zelle number");
+    must(tickedAgain, "Zelle is not ticked again once its number is typed");
+    await go("/settings#invoicing");
+    for (const w of ["zelle", "check"]) must(await card.locator(`input[name=payDefaults][value=${w}]`).isChecked(), `${w} is not ticked for new invoices after the number came back`);
+    must(!(await card.locator("input[name=payDefaults][value=ach]").isChecked()), "the bank transfer got ticked");
+    await go("/invoices/new");
+    const back = await defaultsLine();
+    must(/^Due on receipt\s*·\s*Zelle, check\s*·/.test(back), `after the number came back, the defaults line is: ${back}`);
+    must(!(await page.locator("fieldset.inv-setup").count()), "the one-time ask shows although everything is saved");
   });
 
   await st("a partial Zelle payment (Partly paid, $325.10 left on her page), then the rest (Paid)", async () => {

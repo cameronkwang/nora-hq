@@ -60,11 +60,15 @@ assert.equal(T.retainerItemDescription("Social media services", "2026-11"), "Soc
 
 /* card / bank guard, CSV */
 assert.equal(T.looksLikeCardOrBankNumber("4242 4242 4242 4242"), true); assert.equal(T.looksLikeCardOrBankNumber("Zelle: (555) 010-0100"), false);
-assert.equal(T.looksLikeCardOrBankNumber("routing 021000021 account 12345678"), true); assert.equal(T.looksLikeCardOrBankNumber("Check #1043 for $600"), false);
+assert.equal(T.looksLikeCardOrBankNumber("routing 000000000 account 00012345"), true); assert.equal(T.looksLikeCardOrBankNumber("Check #1043 for $600"), false);
 assert.equal(T.looksLikeCardOrBankNumber("Order 1234567890123"), false); // 13 digits failing Luhn
+// next to the word "account" a number must be long enough to be one: 8 digits in a row, or 9 written in groups
+for (const t of ["account 00012345", "Reel, acct 0001-2345-6", "account number 000 123 456", "acct 12, then account 000123456789"]) assert.equal(T.looksLikeCardOrBankNumber(t), true, `a number next to the word: ${t}`);
+// ordinary lines on a social media invoice: a month or a date after "account" is not a bank account number
+for (const t of ["Account management 11-2026", "Instagram account management 2026-12", "Social account takeover 2026 - 12 posts", "Account management (November 2026)", "TikTok account audit 12/2026", "Account management 2026-11-01", "Account management 11/01/2026 - 11/30/2026", "Account setup, 3 reels"]) assert.equal(T.looksLikeCardOrBankNumber(t), false, `an ordinary line is refused: ${t}`);
 assert.equal(T.toCsv([["Date", "Customer", "Amount"], ["2026-11-20", "=HYPERLINK(1)", -5], ["2026-11-21", 'Say "hi", ok', T.csvAmount(125050)]]), 'Date,Customer,Amount\r\n2026-11-20,\'=HYPERLINK(1),-5\r\n2026-11-21,"Say ""hi"", ok",1250.50\r\n');
 
-/* settings: defaults (card OFF, bank transfer on, due on receipt, the two saved lines, no bank account, Zelle for new invoices) */
+/* settings: defaults (card OFF, bank transfer on, due on receipt, the two saved lines, no bank account, Zelle and check for new invoices) */
 const d = T.readInvoiceSettings({});
 assert.equal(d.cardEnabled, false); assert.equal(d.achEnabled, true); assert.equal(d.termsDays, 0);
 assert.equal(d.ownBankLabel, null); assert.equal(d.ownBankLast4, null); assert.equal(d.ownBankRouting, null); assert.equal(d.ownBankUnreadable, false); assert.deepEqual(d.payDefaults, []);
@@ -76,7 +80,7 @@ assert.equal(s.zelle, "(555) 010-0100"); assert.equal(s.cardEnabled, true); asse
 assert.deepEqual(T.invoiceSetupMissing(d), ["fromName", "fromAddress", "zelle"]); assert.deepEqual(T.invoiceSetupMissing(s), []);
 assert.equal(T.SETUP_PREFILL.fromName, "Nora Chen");
 
-/* ways to pay: Zelle by default, Zelle first in the pickers, card only when turned on, online only with Stripe */
+/* ways to pay: Zelle and check by default, Zelle first in the pickers, card only when turned on, online only with Stripe */
 assert.deepEqual(T.sortPayWays(["card", "zelle", "zelle", "nope"]), ["zelle", "card"]); assert.deepEqual(T.sortPayWays([]), ["zelle"]); assert.deepEqual(T.sortPayWays(null), ["zelle"]);
 assert.deepEqual(T.sortPayWays(["check", "ach", "zelle"]), ["zelle", "ach", "check"], "the pickers list Zelle, bank transfer (ACH), check");
 assert.deepEqual(T.printPayWays(["check", "zelle", "ach", "bank"]), ["ach", "zelle", "check", "bank"], "printed as she writes them: bank account, Zelle, checks");
@@ -136,7 +140,10 @@ assert.equal(T.paymentInfoLines(all3, null).join("\n"), "Sample Bank Checking\nA
 // only the ways chosen: no bank block on a Zelle and check invoice, no blank line at either end
 assert.deepEqual(T.paymentInfoLines(T.payOptions(three, { number: "0000171", payWays: ["zelle", "check"], payNote: null }, false, BANK), null), ["Please send payment via Zelle to 5550100100.", "Put invoice 0000171 in the Zelle memo", "", "Checks Payable to Nora Chen", "Mail to 100 Sample St, Sampleton, VA 23000"]);
 assert.deepEqual(T.paymentInfoLines(T.payOptions({ ...three, ownBankLabel: null }, { number: "0000171", payWays: ["ach"], payNote: null }, false, BANK), null), ["ACH to ACCT#:000123456789", "ROUTING:000000000"], "no label saved: the two numbers only");
-assert.deepEqual(T.paymentInfoLines([{ way: "zelle", to: "5550100100", name: "Nora C", memo: T.zelleMemo("0000170") }], null), ["Please send payment via Zelle to 5550100100.", "Put invoice 0000170 in the Zelle memo", "Zelle shows Nora C"]);
+// "Name Zelle shows" is set: the PDF's Zelle block is still her two lines; a message (and the pay page) adds the name
+assert.deepEqual(T.paymentInfoLines([{ way: "zelle", to: "5550100100", name: "Nora C", memo: T.zelleMemo("0000170") }], null), ["Please send payment via Zelle to 5550100100.", "Put invoice 0000170 in the Zelle memo"]);
+assert.deepEqual(T.paymentMessageLines([{ way: "zelle", to: "5550100100", name: "Nora C", memo: T.zelleMemo("0000170") }], null), ["Please send payment via Zelle to 5550100100.", "Put invoice 0000170 in the Zelle memo", "Zelle shows Nora C"]);
+assert.equal(T.MAIL_TO_ADDRESS_ABOVE, "Mail to the address above"); assert.equal(T.mailToLine("100 Sample St\nSampleton, VA 23000"), "Mail to 100 Sample St, Sampleton, VA 23000");
 assert.deepEqual(T.payOptions(three, { number: "0000170", payWays: ["ach", "zelle"], payNote: null }, false, null).map((o) => o.way), ["zelle"], "no bank details given: the way is left out, never printed empty");
 for (const l of T.paymentInfoLines(all3, null)) assert.doesNotMatch(l, /\[Zelle|Check payable to|, mail to/, "the old wording is gone");
 // a team page and a message: the account masked, or not there at all
@@ -153,7 +160,7 @@ assert.equal(av3.ach.ok, true); assert.equal(T.availablePayWays(d, true).ach.ok,
 const unreadable = T.readInvoiceSettings({ ownBankEnc: "v1.x.y.z" });
 assert.equal(unreadable.ownBankUnreadable, true); assert.equal(unreadable.ownBankLast4, null); assert.match(T.availablePayWays(unreadable, false).ach.why ?? "", /again/);
 assert.equal(T.checkPayWays(["zelle", "ach"], null, T.availablePayWays(s, false)), "Add your bank account and routing numbers in Settings.", "ACH can't be chosen without its details");
-assert.deepEqual(T.defaultPayWays(d, T.availablePayWays(d, false)), ["zelle"], "nothing ticked and nothing set up yet: Zelle");
+assert.deepEqual(T.defaultPayWays(d, T.availablePayWays(d, false)), ["zelle"], "nothing ticked and nothing available: the fallback is Zelle (the creator and drafts count a way that only waits for the one-time ask: ops newInvoiceWays)");
 assert.deepEqual(T.defaultPayWays(s, T.availablePayWays(s, false)), ["zelle", "check"], "nothing ticked: Zelle and check, never a bank transfer");
 assert.deepEqual(T.defaultPayWays(three, av3), ["zelle", "check"], "bank details saved but not ticked: still Zelle and check only");
 assert.deepEqual(T.defaultPayWays({ payDefaults: ["zelle"] }, T.availablePayWays(s, false)), ["zelle"], "Zelle alone ticked: Zelle alone");
@@ -195,6 +202,12 @@ assert.deepEqual(last, [
   { description: "Extra reel", quantity: 2, unitCents: 10000, savedItemId: null },
 ]);
 assert.deepEqual(T.readyItems(last), { items: null, error: "Type the amount for food stipend." });
+// "Same as last time" and the ways to pay: her bank account is never copied (ACH only when asked for on THIS invoice)
+assert.deepEqual(T.sameAsLastWays(["zelle", "ach", "check"], ["zelle", "check"]), { ways: ["zelle", "check"], achLeftOut: true }, "the last invoice offered ACH: not copied");
+assert.deepEqual(T.sameAsLastWays(["check", "ach", "zelle"], ["zelle", "ach", "check"]), { ways: ["zelle", "ach", "check"], achLeftOut: false }, "ACH ticked in Settings (already on this invoice): it stays");
+assert.deepEqual(T.sameAsLastWays(["ach"], ["zelle", "check"]), { ways: ["zelle", "check"], achLeftOut: true }, "ACH was the only way last time: this invoice keeps its own");
+assert.deepEqual(T.sameAsLastWays(["zelle", "venmo"], ["zelle", "check"]), { ways: ["zelle", "venmo"], achLeftOut: false }, "every other way comes back as before");
+assert.deepEqual(T.sameAsLastWays(["zelle"], ["zelle", "ach", "check"]), { ways: ["zelle"], achLeftOut: false });
 assert.deepEqual(T.readyItems([{ ...last[0] }, { description: " ", quantity: 1, unitCents: null, savedItemId: null }]), { items: [{ description: "Standard Content Creation Package", quantity: 1, unitCents: 55000 }], error: null });
 assert.equal(T.readyItems([]).error, "Add at least one line."); assert.equal(T.readyItems([{ description: "Free", quantity: 1, unitCents: 0, savedItemId: null }]).error, "The total is $0.");
 

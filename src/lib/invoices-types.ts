@@ -356,9 +356,9 @@ export function retainerItemDescription(description: string, month: string): str
 
 /**
  * How one invoice asks to be paid (invoices.payWays), in the order the pickers list them (the creator's chooser, the
- * tick boxes in Settings): Zelle first, then the other free ways, then the online ones (Stripe Checkout). Zelle unless
- * a person chose otherwise ("Claude may set them on a draft only when Nora or Cameron said so"). "custom" prints the
- * invoice's payNote as its own line.
+ * tick boxes in Settings): Zelle first, then the other free ways, then the online ones (Stripe Checkout). Zelle and a
+ * check by mail unless a person chose otherwise ("Claude may set them on a draft only when Nora or Cameron said so").
+ * "custom" prints the invoice's payNote as its own line.
  *
  * Two bank transfers, never to be mixed up:
  * - "ach"  = "Bank transfer (ACH)": the customer sends it from their own bank straight to NORA'S OWN account, using
@@ -541,6 +541,11 @@ export function noPayOptions(o: readonly PayOption[]): boolean {
   return o.length === 0;
 }
 
+/** The check line that points at her own address, printed at the top of the invoice's first page. */
+export const MAIL_TO_ADDRESS_ABOVE = "Mail to the address above";
+/** The check line with the address spelled out on one line: "Mail to 100 Sample St, Sampleton, VA 23000". */
+export const mailToLine = (address: string): string => `Mail to ${oneLineAddress(address)}`;
+
 /**
  * Each chosen way as its own block of lines, worded the way Nora writes her invoices (fake values here):
  *
@@ -549,7 +554,7 @@ export function noPayOptions(o: readonly PayOption[]): boolean {
  *   ROUTING:000000000
  *
  *   Please send payment via Zelle to 5550100100.     (the Zelle value exactly as typed in Settings)
- *   Put invoice 0000170 in the Zelle memo            ("Zelle shows <name>" under it only when that name is set)
+ *   Put invoice 0000170 in the Zelle memo            (two lines on the PDF, always; see below for "Zelle shows")
  *
  *   Checks Payable to Nora Chen                      (the payee in Settings, else the name the invoice is from)
  *   Mail to the address above                        (her address at the top of the invoice; when a different
@@ -558,8 +563,9 @@ export function noPayOptions(o: readonly PayOption[]): boolean {
  * then "@nora [Venmo]", "paypal.me/nora [PayPal]", the custom line and "Pay online by bank transfer: <link>", each
  * its own block. The online line needs the customer link (payUrl); without one it is left out.
  * `to: "message"` is for a message a person sends WITH the PDF: the bank transfer is named but the account and routing
- * numbers are not repeated (the PDF carries them), and a check's mailing address is spelled out (a message has no
- * "address above").
+ * numbers are not repeated (the PDF carries them), a check's mailing address is spelled out (a message has no
+ * "address above"), and "Zelle shows <name>" follows the Zelle lines when that name is set in Settings (the pay page
+ * says the same; the PDF's Zelle block is her two lines and nothing else).
  */
 function paymentBlocks(options: readonly PayOption[], payUrl: string | null, to: "pdf" | "message"): string[][] {
   const out: string[][] = [];
@@ -567,8 +573,8 @@ function paymentBlocks(options: readonly PayOption[], payUrl: string | null, to:
   const card = options.some((o) => o.way === "card");
   for (const o of options) {
     if (o.way === "ach") out.push(to === "message" ? ["Bank transfer (ACH): the account details are on the PDF."] : [...(o.label ? [o.label] : []), `ACH to ACCT#:${o.account}`, `ROUTING:${o.routing}`]);
-    else if (o.way === "zelle") out.push([`Please send payment via Zelle to ${o.to}.`, o.memo, ...(o.name ? [`Zelle shows ${o.name}`] : [])]);
-    else if (o.way === "check") out.push([`Checks Payable to ${o.payee}`, ...(o.address ? [o.addressAbove && to === "pdf" ? "Mail to the address above" : `Mail to ${oneLineAddress(o.address)}`] : [])]);
+    else if (o.way === "zelle") out.push([`Please send payment via Zelle to ${o.to}.`, o.memo, ...(o.name && to === "message" ? [`Zelle shows ${o.name}`] : [])]);
+    else if (o.way === "check") out.push([`Checks Payable to ${o.payee}`, ...(o.address ? [o.addressAbove && to === "pdf" ? MAIL_TO_ADDRESS_ABOVE : mailToLine(o.address)] : [])]);
     else if (o.way === "venmo") out.push([`${o.handle} [Venmo]`]);
     else if (o.way === "paypal") out.push([`${o.handle} [PayPal]`]);
     else if (o.way === "custom") out.push([o.text]);
@@ -628,6 +634,18 @@ export function sameAsLastTime(items: readonly InvoiceItem[], saved: readonly Sa
     const match = saved.find((s) => sameText(s.description, i.description));
     return { description: i.description, quantity: i.quantity, unitCents: match && match.unitCents == null ? null : i.unitCents, savedItemId: match?.id ?? null };
   });
+}
+
+/**
+ * "Same as last time" and the ways to pay: the last invoice's ways come back, except her bank account. A bank transfer
+ * (ACH) prints her full account number, so it goes on an invoice only when asked for: ticked in Settings or picked on
+ * THIS invoice, which is when `current` already has it. `achLeftOut` says the last invoice offered it and this one
+ * does not, so the creator can say so next to the ways to pay.
+ */
+export function sameAsLastWays(last: readonly PayWay[], current: readonly PayWay[]): { ways: PayWay[]; achLeftOut: boolean } {
+  const keepAch = current.includes("ach");
+  const kept = last.filter((w) => w !== "ach" || keepAch);
+  return { ways: sortPayWays(kept.length ? kept : current), achLeftOut: last.includes("ach") && !keepAch };
 }
 
 /** The creator's lines → invoice items, or the message for the first line that isn't ready. Empty lines are skipped. */
@@ -863,6 +881,11 @@ export function bankLabelHoldsNumber(label: string | null | undefined): boolean 
  * lines, imports, the custom pay line and the other settings): Nora HQ never stores a customer's card or bank
  * details, and Nora's own account number goes in ONE place only, its own boxes in Settings (bankDetailsProblem),
  * never in free text. A phone number, a check number or an amount does not match.
+ *
+ * Next to one of those words the number has to be long enough to be one: 8 or more digits in a row ("ACH to
+ * ACCT#:000123456789", "ROUTING:000000000"), or 9 or more written in groups ("account 0001 2345 6789"). A month or a
+ * date after the word "account" is ordinary wording for a social media invoice and passes: "Account management
+ * 11-2026", "Instagram account management 2026-12".
  */
 export function looksLikeCardOrBankNumber(text: string | null | undefined): boolean {
   const s = text ?? "";
@@ -870,8 +893,14 @@ export function looksLikeCardOrBankNumber(text: string | null | undefined): bool
     const digits = m[0].replace(/\D/g, "");
     if (digits.length >= 13 && digits.length <= 19 && luhn(digits)) return true;
   }
-  return /\b(routing|account|acct|aba)\b[^\d\n]{0,20}\d[\d -]{5,}/i.test(s);
+  for (const m of s.matchAll(/\b(?:routing|account|acct|aba)\b[^\d\n]{0,20}(\d(?:[ -]?\d)*)/gi)) {
+    if (/\d{8}/.test(m[1]) || m[1].replace(/\D/g, "").length >= 9) return true;
+  }
+  return false;
 }
+
+/** What every op answers when free text holds one (ops-invoices guardText, ops-payment savePaymentLine). Fixed words: never what was typed. */
+export const CARD_REFUSAL = "Not saved: that looks like a card or bank account number. Nora HQ never stores a customer's card or bank details (Stripe's own page takes them), and your own account number goes only in Settings, under Bank transfer (ACH).";
 
 function luhn(digits: string): boolean {
   let sum = 0;
@@ -1102,7 +1131,7 @@ export function filterBillTo(options: readonly BillToOption[], q: string, limit 
   return scored.sort((a, b) => a.score - b.score || a.o.name.localeCompare(b.o.name)).slice(0, limit).map((s) => s.o);
 }
 
-/** The creator's quiet defaults line: "Due on receipt · Zelle · #0000170", each part tappable. */
+/** The creator's quiet defaults line: "Due on receipt · Zelle, check · #0000170", each part tappable. */
 export function creatorDefaultsLine(a: { issueDate: string; dueDate: string; payWays: readonly PayWay[]; nextNumber: string | null }): { due: string; pay: string; number: string | null; text: string } {
   const due = dueLabel(a.issueDate, a.dueDate);
   const pay = payWaysLabel(a.payWays);
@@ -1160,7 +1189,7 @@ export type InvoiceCreatorContext = {
   today: string;
   /** What "Make PDF" will most likely take ("0000170"); the real number is taken atomically on Make PDF. */
   nextNumber: string;
-  settings: Pick<InvoiceSettings, "fromName" | "fromAddress" | "zelle" | "zelleName" | "termsDays" | "footer" | "achEnabled" | "cardEnabled">;
+  settings: Pick<InvoiceSettings, "fromName" | "fromAddress" | "zelle" | "zelleName" | "checkAddress" | "termsDays" | "footer" | "achEnabled" | "cardEnabled">;
   /** Ask these once, inline, before the first PDF (prefill SETUP_PREFILL). */
   setupMissing: InvoiceSetupField[];
   savedItems: SavedItem[];

@@ -20,6 +20,11 @@ export type StripeStatus = { configured: boolean; testMode: boolean; webhook: bo
  * ever RECEIVES it: `settings` carries the last digits (shown as ••••6789) and the routing number, never the account
  * number, so it is not in this page's HTML. Replacing it means typing both numbers again. What she types lives in
  * this component's state until Save, is sent once to the server action, and is cleared when the save worked.
+ *
+ * The tick boxes and the two switches live in state (a way's box turns on the moment its details are typed), inside a
+ * form with a server action. React resets such a form every time the action answers, saved or refused, and a reset
+ * puts a tick box back to how it was when the page opened. `Tick` below keeps every box's reset value equal to its
+ * state, so the page always shows what was just saved and the next Save sends the same ticks again.
  */
 export function InvoiceSettingsCard({ settings, nextNumber, stripe }: { settings: InvoiceSettings; nextNumber: string | null; stripe: StripeStatus }) {
   const s = settings;
@@ -39,6 +44,8 @@ export function InvoiceSettingsCard({ settings, nextNumber, stripe }: { settings
   const [bankMsg, setBankMsg] = useState<{ ok: boolean; text: string } | null>(null);
   // Nothing ticked yet is the built-in default: Zelle and check (a bank transfer only when a customer asks for it).
   const [ticked, setTicked] = useState<PayWay[]>(s.payDefaults.length ? s.payDefaults : [...NEW_INVOICE_PAY_WAYS]);
+  // True once she ticked or unticked a way on this page: only then does Save send the ticks (see the boxes below).
+  const [ticksChanged, setTicksChanged] = useState(false);
 
   const bankSaved = !!s.ownBankLast4;
   const typingBank = !bankSaved || replacing;
@@ -196,12 +203,12 @@ export function InvoiceSettingsCard({ settings, nextNumber, stripe }: { settings
             </div>
           )}
           <label className="switch">
-            <input type="checkbox" name="achEnabled" checked={bankOnline} onChange={(e) => setBankOnline(e.target.checked)} />
+            <Tick name="achEnabled" checked={bankOnline} onChange={(e) => setBankOnline(e.target.checked)} />
             <span className="switch-track" aria-hidden />
             Bank transfer online
           </label>
           <label className="switch">
-            <input type="checkbox" name="cardEnabled" checked={cardOnline} onChange={(e) => setCardOnline(e.target.checked)} />
+            <Tick name="cardEnabled" checked={cardOnline} onChange={(e) => setCardOnline(e.target.checked)} />
             <span className="switch-track" aria-hidden />
             Card online <span className="font-normal text-muted">(off unless you turn it on)</span>
           </label>
@@ -222,6 +229,10 @@ export function InvoiceSettingsCard({ settings, nextNumber, stripe }: { settings
           <legend className="eyebrow mb-2">New invoices</legend>
           <div role="group" aria-labelledby="is-defaults-title">
             <p id="is-defaults-title" className="label">Ways to pay on a new invoice</p>
+            {/* The ticks are sent only once she changed one here. A way that isn't ready is a disabled box, and a form
+                does not send those: saving her name before her Zelle number would otherwise store "check only" in
+                place of the built-in "Zelle and check", and Zelle would stay off after the number arrives. */}
+            {ticksChanged && <input type="hidden" name="payDefaultsSet" value="1" />}
             <ul className="inv-ways">
               {DEFAULTABLE_PAY_WAYS.map((w) => {
                 const why = ready[w];
@@ -229,14 +240,16 @@ export function InvoiceSettingsCard({ settings, nextNumber, stripe }: { settings
                 return (
                   <li key={w}>
                     <label className={cx("inv-way", why && "is-off")}>
-                      <input
-                        type="checkbox"
+                      <Tick
                         className="check"
                         name="payDefaults"
                         value={w}
                         checked={on}
                         disabled={!!why}
-                        onChange={(e) => setTicked((t) => (e.target.checked ? [...t.filter((x) => x !== w), w] : t.filter((x) => x !== w)))}
+                        onChange={(e) => {
+                          setTicksChanged(true);
+                          setTicked((t) => (e.target.checked ? [...t.filter((x) => x !== w), w] : t.filter((x) => x !== w)));
+                        }}
                       />
                       <span>
                         {PAY_WAY_LABEL[w]}
@@ -267,6 +280,24 @@ export function InvoiceSettingsCard({ settings, nextNumber, stripe }: { settings
       <SavedLines initial={s.savedItems} />
       <NextNumber initial={nextNumber} />
     </div>
+  );
+}
+
+/**
+ * A tick box held in state, safe inside a form with a server action: its reset value (`defaultChecked`, which React
+ * sets once for a box held in state) follows the state on every render, so the form reset React runs after each save
+ * leaves it showing what state says, never what the page opened with.
+ */
+function Tick({ checked, ...rest }: Omit<React.ComponentProps<"input">, "type" | "checked" | "ref"> & { checked: boolean }) {
+  return (
+    <input
+      type="checkbox"
+      checked={checked}
+      ref={(el) => {
+        if (el) el.defaultChecked = checked;
+      }}
+      {...rest}
+    />
   );
 }
 

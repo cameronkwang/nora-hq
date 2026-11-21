@@ -30,12 +30,13 @@ import "server-only";
  *                                                        Amount Paid         0.00
  *                                                        Balance Due      $550.00
  *
- * Long tables flow onto more pages with the column header repeated; "Page 1 of 2" only when there is more than one.
+ * Long tables flow onto more pages with the column header repeated; "Page 1 of 2" only when there is more than one
+ * (and a check's "Mail to the address above" spells the address out when the block lands on a later page).
  * Helvetica draws WinAnsi only: curly quotes and dashes are mapped, an accent it lacks is dropped from its letter, and
  * anything else (CJK, emoji) is left out. Make PDF is refused before that could leave a name or a line empty (ops).
  */
 import { PDFDocument, StandardFonts, degrees, rgb, type PDFFont, type PDFPage } from "pdf-lib";
-import { pdfText, type InvoiceDocument } from "./invoices-types";
+import { MAIL_TO_ADDRESS_ABOVE, mailToLine, pdfText, type InvoiceDocument } from "./invoices-types";
 
 const PAGE_W = 612; // 8.5in
 const PAGE_H = 792; // 11in
@@ -156,6 +157,7 @@ export async function renderInvoicePdf(doc: InvoiceDocument, meta: { title?: str
       page.drawText(ch, { x, y: yy, size, font: bold, color: TITLE });
       x += bold.widthOfTextAtSize(ch, size) + spacing;
     }
+    return total;
   };
 
   newPage();
@@ -164,16 +166,16 @@ export async function renderInvoicePdf(doc: InvoiceDocument, meta: { title?: str
   const lead = BODY * 1.32; // table and notes
   const tight = BODY * 1.2; // the address blocks, set close like hers
   let fy = y - BODY;
-  if (doc.from.name) {
-    text(doc.from.name, M, fy);
-    fy -= tight;
-  }
-  for (const l of [...doc.from.addressLines, doc.from.email, doc.from.phone].filter((v): v is string => !!v)) {
-    text(l, M, fy);
-    fy -= tight;
-  }
-  spaced(doc.title, RIGHT, y - 24, 25, 5.2);
+  const titleW = spaced(doc.title, RIGHT, y - 24, 25, 5.2);
   if (doc.stamp) spaced(doc.stamp, RIGHT, y - 44, 11, 2.6);
+  // The From lines stop short of the title: a long name or address line wraps instead of running under "INVOICE".
+  const fromW = WIDTH - titleW - 16;
+  for (const l of [doc.from.name, ...doc.from.addressLines, doc.from.email, doc.from.phone].filter((v): v is string => !!v)) {
+    for (const row of wrap(regular, BODY, printable(regular, l), fromW)) {
+      text(row, M, fy);
+      fy -= tight;
+    }
+  }
 
   /* ── Bill to (left) and the facts (right) ── */
   y = Math.min(fy, y - 60) - 66;
@@ -273,7 +275,11 @@ export async function renderInvoicePdf(doc: InvoiceDocument, meta: { title?: str
         y -= lead;
         continue;
       }
-      for (const l of wrap(regular, BODY, printable(regular, p), notesW)) {
+      // "Mail to the address above" points at the From address at the top of page 1. On a later page there is no
+      // address above, so the same address is spelled out, as the pay page and the messages do.
+      const later = pages.length > 1 || y - lead < BOTTOM;
+      const line = p === MAIL_TO_ADDRESS_ABOVE && later && doc.from.addressLines.length ? mailToLine(doc.from.addressLines.join("\n")) : p;
+      for (const l of wrap(regular, BODY, printable(regular, line), notesW)) {
         ensure(lead, false);
         text(l, M + 4, y);
         y -= lead;

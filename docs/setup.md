@@ -180,7 +180,7 @@ Notes:
 
 ## Stripe (Pay online)
 
-Optional. Invoices are paid by Zelle unless an invoice also offers paying online. Nora HQ makes its own invoices (no
+Optional. Invoices are paid by Zelle or a check by mail unless an invoice also offers paying online. Nora HQ makes its own invoices (no
 monthly fee) and uses Stripe only to take a payment online through Stripe's hosted Checkout page. The whole setup
 (a free account, the payout bank, ACH Direct Debit, the two keys, the webhook URL and its events, test mode first, and
 the fees) is in [`docs/stripe-setup.md`](stripe-setup.md). In short:

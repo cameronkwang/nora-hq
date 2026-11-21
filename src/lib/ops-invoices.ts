@@ -21,6 +21,7 @@ import {
   DEFAULTABLE_PAY_WAYS,
   DEFAULT_PAY_WAYS,
   FIRST_INVOICE_NUMBER,
+  CARD_REFUSAL,
   INVOICE_NUMBER_DIGITS,
   INVOICE_NUMBER_SEQUENCE,
   MANUAL_PAYMENT_METHODS,
@@ -354,7 +355,6 @@ function rowsOf<T>(r: unknown): T[] {
   return ((r as { rows?: T[] }).rows ?? (r as T[])) ?? [];
 }
 
-const CARD_REFUSAL = "Not saved: that looks like a card or bank account number. Nora HQ never stores a customer's card or bank details (Stripe's own page takes them), and your own account number goes only in Settings, under Bank transfer (ACH).";
 /**
  * Refuses card or bank numbers (and passwords, where `secrets`) in free text a person typed: notes, references,
  * customers, lines, the custom pay line and every text setting. The one place a bank account number is allowed is
@@ -613,7 +613,13 @@ export async function saveInvoiceSettings(input: InvoiceSettingsInputT, actor: s
     after = null;
   }
 
-  /* The ways ticked for new invoices: each needs its details filled in, as they will be once this save lands. */
+  /*
+   * The ways ticked for new invoices: each needs its details filled in, as they will be once this save lands. Left
+   * out (undefined) = keep what is stored: the Settings form sends the ticks only when a person changed one, so a
+   * save made while a way still waits for its details (her name typed, the Zelle number not yet) never turns the
+   * built-in "Zelle and check" into "check only". A stored tick whose details are missing is skipped when an invoice
+   * is made (defaultPayWays) and counts again once they are there.
+   */
   if (v.payDefaults !== undefined) {
     const ways = DEFAULTABLE_PAY_WAYS.filter((w) => v.payDefaults!.includes(w));
     const next = readInvoiceSettings({ ...(current ?? {}), ...patch }, after);
@@ -684,7 +690,7 @@ async function checkClientForCustomer(clientId: string, exceptCustomerId?: strin
 export async function createCustomer(input: CustomerInputT, actor: string): Promise<schema.Customer> {
   people(actor, "add a customer");
   const v = CustomerInput.parse(input);
-  guardText([["the notes", v.notes], ["the address", v.billingAddress]]);
+  guardText([["the name", v.name], ["the contact name", v.contactName], ["the notes", v.notes], ["the address", v.billingAddress]]);
   if (v.clientId) await checkClientForCustomer(v.clientId);
   const db = await getDb();
   const [row] = await db.insert(schema.customers).values({
@@ -708,7 +714,7 @@ export async function createCustomer(input: CustomerInputT, actor: string): Prom
 export async function updateCustomer(id: string, patch: z.input<typeof CustomerPatch>, actor: string): Promise<schema.Customer> {
   people(actor, "edit a customer");
   const v = CustomerPatch.parse(patch);
-  guardText([["the notes", v.notes], ["the address", v.billingAddress]]);
+  guardText([["the name", v.name], ["the contact name", v.contactName], ["the notes", v.notes], ["the address", v.billingAddress]]);
   if (v.clientId) await checkClientForCustomer(v.clientId, id);
   const set: Partial<typeof schema.customers.$inferInsert> = { updatedAt: new Date() };
   if (v.name !== undefined) {
@@ -1261,6 +1267,7 @@ export async function getInvoiceCreatorContext(opts: {
       fromAddress: settings.fromAddress,
       zelle: settings.zelle,
       zelleName: settings.zelleName,
+      checkAddress: settings.checkAddress,
       termsDays: settings.termsDays,
       footer: settings.footer,
       achEnabled: settings.achEnabled,
@@ -1349,7 +1356,7 @@ async function resolveBillTo(b: z.output<typeof BillToInput>, actor: string): Pr
     customer = await customerForDeal(b.id, actor);
     dealId = b.id;
   } else {
-    guardText([["the address", b.address]]);
+    guardText([["the name", b.name], ["the contact name", b.contactName], ["the address", b.address]]);
     const key = customerNameKey(b.name);
     const same = await db.select().from(schema.customers).where(and(eq(schema.customers.nameKey, key), eq(schema.customers.archived, false))).orderBy(asc(schema.customers.createdAt)).limit(2);
     if (same.length === 1) {
@@ -1703,7 +1710,7 @@ export async function createInvoiceDraft(
   const claude = isClaude(actor);
   const v = InvoiceDraftInput.parse(input);
   if (claude && v.contractId) throw new OpsError("Contracts are people only: leave contract_id out.");
-  guardText([["the notes", v.notes], ["the private note", v.privateNotes], ["the other way to pay", v.payNote], ...lineTexts(v.items)]);
+  guardText([["the notes", v.notes], ["the private note", v.privateNotes], ["the other way to pay", v.payNote], ["the discount", v.discountLabel], ...lineTexts(v.items)]);
   const db = await getDb();
   const [customer, settings, dealOk, contractOk] = await Promise.all([
     customerRow(v.customerId),
@@ -1715,9 +1722,10 @@ export async function createInvoiceDraft(
   if (customer.archived) throw new OpsError(`${customer.name} is archived.`);
   if (!dealOk) throw new OpsError(`No deal with id "${v.dealId}".`);
   if (!contractOk) throw new OpsError("That contract is gone.");
-  // No ways given (Claude gives them only when a person said how): the ways Nora ticked in Settings, else Zelle.
+  // No ways given (Claude gives them only when a person said how): what every new invoice starts with, the same as
+  // the creator and the retainer run (newInvoiceWays): the ways ticked in Settings, else Zelle and check.
   const avail = availablePayWays(settings, stripeConfigured());
-  const ways = sortPayWays(v.payWays ?? defaultPayWays(settings, avail));
+  const ways = sortPayWays(v.payWays ?? newInvoiceWays(settings));
   const wayError = checkPayWays(ways, v.payNote, draftAvailability(avail));
   if (wayError) throw new OpsError(wayError);
   const totals = invoiceTotals(v.items, v.discountCents ?? 0);
@@ -1780,7 +1788,7 @@ export async function createInvoiceFromDeal(dealId: string, actor: string, opts:
 export async function updateInvoice(id: string, patch: InvoicePatchT, actor: string): Promise<schema.Invoice> {
   people(actor, "edit an invoice");
   const v = InvoicePatch.parse(patch);
-  guardText([["the notes", v.notes], ["the private note", v.privateNotes], ["the other way to pay", v.payNote], ...lineTexts(v.items)]);
+  guardText([["the notes", v.notes], ["the private note", v.privateNotes], ["the other way to pay", v.payNote], ["the discount", v.discountLabel], ...lineTexts(v.items)]);
   const [cur, settings] = await Promise.all([invoiceRow(id), getInvoiceSettings()]);
   if (!cur) throw new OpsError("That invoice is gone.");
   if (cur.status === "paid") throw new OpsError("This invoice is paid. Delete a payment first to change it.");
@@ -1951,6 +1959,7 @@ export async function closeOpenCheckouts(invoiceId: string, opts: { exceptSessio
 export async function voidInvoice(id: string, actor: string, opts: { reason?: string | null } = {}): Promise<schema.Invoice> {
   people(actor, "void an invoice");
   const reason = cleanLine(opts.reason ?? "").slice(0, 300) || null;
+  guardText([["the reason", reason]]);
   const db = await getDb();
   // ONE statement: only a finalized invoice with no payments (delete them first) and no bank transfer on its way
   // (the money would land on a void invoice about 4 business days later).
@@ -2515,6 +2524,7 @@ export async function syncDealFromInvoices(dealId: string, actor: string): Promi
 export async function createRetainer(input: RetainerInputT, actor: string): Promise<schema.Retainer> {
   people(actor, "add a retainer");
   const v = RetainerInput.parse(input);
+  guardText([["the description", v.description]]); // it becomes a line on every monthly draft
   const db = await getDb();
   const c = await customerRow(v.customerId);
   if (!c) throw new OpsError("That customer is gone.");
@@ -2544,6 +2554,7 @@ export async function createRetainer(input: RetainerInputT, actor: string): Prom
 export async function updateRetainer(id: string, patch: z.input<typeof RetainerPatch>, actor: string): Promise<schema.Retainer> {
   people(actor, "change a retainer");
   const v = RetainerPatch.parse(patch);
+  guardText([["the description", v.description]]);
   const set: Partial<typeof schema.retainers.$inferInsert> = { updatedAt: new Date() };
   for (const k of ["description", "amountCents", "dayOfMonth", "startMonth", "active", "contractId"] as const) {
     if (v[k] !== undefined) (set as Record<string, unknown>)[k] = v[k] ?? null;
@@ -2627,7 +2638,7 @@ export async function runRetainers(now = new Date(), opts: { dryRun?: boolean } 
         items,
         ...totals,
         notes: settings.footer,
-        payWays: newInvoiceWays(settings), // the ways ticked in Settings for new invoices, else Zelle
+        payWays: newInvoiceWays(settings), // the ways ticked in Settings for new invoices, else Zelle and check
         retainerId: r.id,
         retainerMonth: month,
         contractId: r.contractId,

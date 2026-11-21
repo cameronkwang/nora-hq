@@ -970,8 +970,8 @@ export const retainers = pgTable(
  * One invoice. status: draft · sent · partially_paid · paid · void ("overdue" is derived from dueDate, never stored).
  * number is null until finalized ("Make PDF": invoiceNumberSeq, "0000170"); an imported Skynova invoice keeps its own.
  * Dates default to today and due the same day ("Due on receipt", termsDays 0). payWays = how this invoice asks to be
- * paid, in any order (the pickers list Zelle first, the PDF prints her bank account first): Zelle unless a person chose
- * otherwise, on the invoice or as a default in Settings; payNote = the "custom" way's line.
+ * paid, in any order (the pickers list Zelle first, the PDF prints her bank account first): Zelle and a check by mail
+ * unless a person chose otherwise, on the invoice or as a default in Settings; payNote = the "custom" way's line.
  * contractId = the contract it bills (lib/contract), many invoices per contract.
  * items = the lines in order (InvoiceItem: description, quantity, unitCents); subtotal / discount / total are written
  * with them in the same UPDATE. paidCents = sum of invoice_payments, recomputed from them in ONE UPDATE after every
