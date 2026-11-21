@@ -16,17 +16,23 @@ export function ActionForm({
   className,
   resetOnSuccess = false,
   ariaLabel,
+  onSaved,
 }: {
   action: (state: ActionFormState, fd: FormData) => Promise<ActionFormState>;
   children: ReactNode;
   className?: string;
   resetOnSuccess?: boolean;
   ariaLabel?: string;
+  /** Called once after each save that worked (for a form that keeps some of its fields in state). */
+  onSaved?: () => void;
 }) {
   const [state, formAction] = useActionState(action, {} as ActionFormState);
   const ref = useRef<HTMLFormElement>(null);
+  const saved = useRef(onSaved);
+  saved.current = onSaved;
   useEffect(() => {
     if (state.ok && resetOnSuccess) ref.current?.reset();
+    if (state.ok) saved.current?.();
   }, [state.at, state.ok, resetOnSuccess]);
   return (
     <form ref={ref} action={formAction} className={className} aria-label={ariaLabel}>

@@ -88,10 +88,10 @@ const LANG_OPTIONS: Array<{ value: "" | IntakeLang; label: string }> = [
   { value: "zh-Hant", label: "繁體中文" },
 ];
 
-/** A blank creator (after "New invoice" in the done state): today, due on receipt, Zelle, no lines. */
-export function blankPrefill(ctx: Pick<InvoiceCreatorContext, "today" | "settings">): InvoicePrefill {
+/** A blank creator (after "New invoice" in the done state): today, due on receipt, the ways ticked in Settings (Zelle unless she chose others), no lines. */
+export function blankPrefill(ctx: Pick<InvoiceCreatorContext, "today" | "settings" | "defaultPayWays">): InvoicePrefill {
   return {
-    billTo: null, newCustomer: null, lines: [], issueDate: ctx.today, dueDate: addDaysYmd(ctx.today, ctx.settings.termsDays), payWays: ["zelle"],
+    billTo: null, newCustomer: null, lines: [], issueDate: ctx.today, dueDate: addDaysYmd(ctx.today, ctx.settings.termsDays), payWays: [...ctx.defaultPayWays],
     payNote: null, notes: ctx.settings.footer, lang: null, dealId: null, contractId: null, contractPart: null, draftId: null, source: "blank", note: null,
   };
 }
@@ -669,7 +669,7 @@ export function InvoiceCreator({ ctx, edit, initialDone }: { ctx: InvoiceCreator
     setNewAmount("");
     setIssueDate(blank.issueDate);
     setDueDate(blank.dueDate);
-    setPayWays(["zelle"]);
+    setPayWays(sortPayWays(blank.payWays));
     setPayNote("");
     setPanel(null);
     setDiscount("");
@@ -1066,7 +1066,7 @@ export function InvoiceCreator({ ctx, edit, initialDone }: { ctx: InvoiceCreator
               );
             })}
           </ul>
-          <p className="hint">Zelle unless you choose otherwise. No fee is ever added for any way to pay.</p>
+          <p className="hint">New invoices start with the ways ticked in Settings (Zelle unless you ticked others). No fee is ever added for any way to pay.</p>
         </Panel>
       )}
 
