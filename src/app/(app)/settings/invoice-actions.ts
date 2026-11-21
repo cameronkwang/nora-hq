@@ -4,14 +4,19 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { requireUser } from "@/lib/auth";
 import { OpsError } from "@/lib/ops";
-import { MoneyInputError, type SavedItem } from "@/lib/invoices-types";
+import { MoneyInputError, isPayWay, type PayWay, type SavedItem } from "@/lib/invoices-types";
 import { saveInvoiceSettings, saveSavedItems, type SavedItemInputT } from "@/lib/ops-invoices";
 import type { ActionFormState } from "@/components/client-form";
 
 /**
  * Settings → Invoices and payments (people only; Claude never reads or changes these). The op merges what it is
- * given into the stored row, refuses passwords and card or bank numbers, and logs that the settings changed, never
- * their values. Stripe keys are never here: only STRIPE_SECRET_KEY / STRIPE_WEBHOOK_SECRET in the environment.
+ * given into the stored row, refuses passwords and card or bank numbers in every text field, and logs that the
+ * settings changed, never their values. Stripe keys are never here: only STRIPE_SECRET_KEY / STRIPE_WEBHOOK_SECRET in
+ * the environment.
+ *
+ * Her own bank account (ownBankAccount / ownBankRouting) is the one account number the app keeps: the op checks it,
+ * stores it encrypted and answers with fixed words. Nothing here logs, echoes or returns what was typed: an error is
+ * the op's own message or a generic one, never the cause.
  */
 
 const str = (v: FormDataEntryValue | null) => (typeof v === "string" ? v.trim() : "");
@@ -43,6 +48,12 @@ export async function saveInvoiceSettingsAction(_prev: ActionFormState, fd: Form
         checkAddress: str(fd.get("checkAddress")),
         venmo: str(fd.get("venmo")),
         paypal: str(fd.get("paypal")),
+        ownBankLabel: str(fd.get("ownBankLabel")),
+        // Empty (or the boxes not shown): keep what is saved. Replacing means typing both again.
+        ownBankAccount: str(fd.get("ownBankAccount")) || undefined,
+        ownBankRouting: str(fd.get("ownBankRouting")) || undefined,
+        // Tick boxes: the form always renders them; a way that isn't ready is disabled and so not sent.
+        payDefaults: fd.getAll("payDefaults").filter((v): v is PayWay => isPayWay(v)),
         // Switches: an unticked box sends nothing, so read them by name (the form always renders both).
         achEnabled: fd.get("achEnabled") === "on",
         cardEnabled: fd.get("cardEnabled") === "on",
@@ -58,6 +69,21 @@ export async function saveInvoiceSettingsAction(_prev: ActionFormState, fd: Form
   }
   refresh();
   return { ok: true, message: "Saved. New invoices use this.", at: Date.now() };
+}
+
+/** "Remove" under Bank transfer (ACH): the saved account is deleted and the way is unticked for new invoices. */
+export async function removeBankDetailsAction(): Promise<{ ok: true } | { ok: false; error: string }> {
+  const user = await requireUser();
+  try {
+    await saveInvoiceSettings({ ownBankRemove: true }, user.email);
+    refresh();
+    return { ok: true };
+  } catch (e) {
+    const m = message(e);
+    if (m) return { ok: false, error: m };
+    console.error("[settings] removing the bank details failed");
+    return { ok: false, error: "Couldn't remove it. Try again." };
+  }
 }
 
 /** The creator's one-tap lines, replaced as one list (order kept). */
