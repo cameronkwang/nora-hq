@@ -3624,7 +3624,8 @@ const DEV_BLIP = /ERR_CONNECTION_REFUSED|ERR_CONNECTION_RESET|ERR_INCOMPLETE_CHU
  * Invoicing, signed in as Nora (her money; Cameron sees the same pages): the fast creator's Make PDF with the two saved
  * lines and a new customer, the done state, the PDF, the list's one-tap PDF per row, record and delete a payment,
  * Void with its confirmation, the customer page, Make contract from the invoice (/contracts?invoice=), a contract's
- * "Make invoice" prefill, the Settings card (card off unless turned on), and the creator at 390 with touch.
+ * "Make invoice" prefill, the Settings card (card off unless turned on, her bank account, the ways for new invoices), and
+ * the creator at 390 with touch.
  * Leaves one void invoice and one archived customer named "Smoke Invoice …".
  */
 async function invoicingFlows(browser) {
@@ -3720,9 +3721,11 @@ async function invoicingFlows(browser) {
     if (!(await page.getByRole("combobox", { name: "Bill to" }).inputValue())) throw new Error("Bill to is empty");
   });
 
-  await step("settings: Invoices and payments card (Zelle, saved lines, next number, card switch)", async () => {
+  await step("settings: Invoices and payments card (Zelle, bank transfer (ACH), the ways for new invoices, saved lines, next number, card switch)", async () => {
     await page.goto(`${BASE}/settings#invoicing`, { waitUntil: "networkidle" });
-    for (const t of ["Zelle number", "Saved lines", "Next invoice number", "Card online"]) if (!(await page.locator("#invoicing").getByText(t).first().count())) throw new Error(`missing ${t}`);
+    for (const t of ["Zelle number", "Bank transfer (ACH)", "Bank label", "Ways to pay on a new invoice", "Saved lines", "Next invoice number", "Card online"]) if (!(await page.locator("#invoicing").getByText(t).first().count())) throw new Error(`missing ${t}`);
+    for (const w of ["zelle", "ach", "check", "venmo", "paypal", "bank", "card"]) if (!(await page.locator(`#invoicing input[name=payDefaults][value=${w}]`).count())) throw new Error(`no tick box for ${w}`);
+    if (await page.locator("#invoicing input[name=payDefaults][value=custom]").count()) throw new Error("the custom line can't be a default way");
   });
 
   await step("tidy: archive the smoke customer", async () => {
@@ -3853,7 +3856,9 @@ const shortNyDate = (ymd) => new Date(`${ymd}T12:00:00Z`).toLocaleDateString("en
 /**
  * Invoicing end to end (docs/invoicing.md), signed in as Nora: the first run's one-time From / Zelle ask, Make PDF for a
  * sample business with both saved-line chips (the next number in her Skynova sequence, 0000170 on fresh sample data, due
- * on receipt, Zelle; the PDF's own text), the second invoice takes the next number, Same as last time, bank transfer
+ * on receipt, Zelle; the PDF's own text), the second invoice takes the next number, Same as last time, her own bank
+ * account for a transfer (typed in Settings, masked after, the three ways ticked for new invoices, the PDF's three blocks
+ * in her order, the pay page with its copy buttons, never the account number in Settings or a team page), bank transfer
  * offered only with Stripe set up, the customer's page in English and 简体 (the right amount, only the chosen ways, no
  * other customer), an unknown link and a voided invoice, a partial Zelle payment then the rest, a deal's invoice marking
  * the deal paid, contract → invoice (deposit, the rest due in the payment days, linked both ways) and invoice → contract,
@@ -3967,6 +3972,8 @@ async function invoicingEndToEnd(browser) {
     await go("/settings#invoicing");
     saved = { from: await page.inputValue("#is-from"), addr: await page.inputValue("#is-addr"), zelle: await page.inputValue("#is-zelle") };
     for (const sel of ["#is-from", "#is-addr", "#is-zelle"]) await page.fill(sel, "");
+    // Nothing ticked for new invoices = the built-in default, Zelle only (whatever an earlier run left ticked).
+    for (const box of await page.locator("#invoicing input[name=payDefaults]:checked").all()) await box.uncheck();
     await page.getByRole("button", { name: "Save invoice settings" }).click();
     await page.waitForLoadState("networkidle");
     await page.waitForTimeout(800);
@@ -4056,9 +4063,10 @@ async function invoicingEndToEnd(browser) {
     // The creator's ways to pay: bank transfer is a choice only with Stripe.
     await go(`/invoices/new?customer=${cus1}`);
     await page.locator(".inv-defaults").getByRole("button", { name: /Zelle/ }).click();
-    const bank = page.locator(".inv-way", { hasText: "Bank transfer" }).locator("input[type=checkbox]");
+    // "Bank transfer online" is the Stripe way; "Bank transfer (ACH)" (her own account) has its own step below.
+    const bank = page.locator(".inv-way", { hasText: "Bank transfer online" }).locator("input[type=checkbox]");
     must((await bank.isDisabled()) === !stripeOn, `bank transfer checkbox ${stripeOn ? "disabled with Stripe on" : "enabled without Stripe"}`);
-    if (!stripeOn) must(/Stripe/i.test(await page.locator(".inv-way", { hasText: "Bank transfer" }).innerText()), "the off bank way doesn't say it needs Stripe");
+    if (!stripeOn) must(/Stripe/i.test(await page.locator(".inv-way", { hasText: "Bank transfer online" }).innerText()), "the off bank way doesn't say it needs Stripe");
     if (hasMcp) {
       const r = await toolRaw("create_draft_invoice", { customer_id: cus1, lines: [{ description: "Smoke bank draft", unit_cents: 10000 }], pay_ways: ["zelle", "bank"] });
       if (!stripeOn) must(r.isError && /Stripe/i.test(r.text), `a bank draft without Stripe: ${r.text.slice(0, 160)}`);
@@ -4117,6 +4125,170 @@ async function invoicingEndToEnd(browser) {
     must(zh.text.includes("这张账单已取消"), "简体 cancelled page");
     const pdf = await pp.request.get(`${BASE}${link2}/pdf`);
     must(pdf.status() === 404, `void PDF HTTP ${pdf.status()}`);
+  });
+
+  await st("bank transfer (ACH): her account typed in Settings (refused when the routing number is wrong, masked once saved, never in the page), the three ways ticked for new invoices, an invoice whose PDF and pay page carry the three blocks in her order", async () => {
+    // Fake values only (docs/invoicing.md "Safety checklist").
+    const ACCT = "000123456789", ROUT = "000000000", LABEL = "Sample Bank Checking";
+    const card = page.locator("#invoicing");
+    const bankBox = card.locator(".inv-bank");
+    const saveSettings = async () => {
+      await page.getByRole("button", { name: "Save invoice settings" }).click();
+      await page.waitForLoadState("networkidle");
+      await page.waitForTimeout(800);
+      return card.locator("form[aria-label='Invoice settings'] > p[role=status]").innerText();
+    };
+    /** Each of these, in this order, somewhere in the text. */
+    const inOrder = (text, wants, what) => {
+      let at = -1;
+      for (const w of wants) {
+        const i = text.indexOf(w, at + 1);
+        must(i > at, `${what}: ${JSON.stringify(w)} is missing or out of order`);
+        at = i;
+      }
+    };
+    const tick = async (ways) => {
+      for (const box of await card.locator("input[name=payDefaults]").all()) {
+        const want = ways.includes(await box.getAttribute("value"));
+        if ((await box.isChecked()) !== want && !(await box.isDisabled())) await box.setChecked(want);
+      }
+    };
+    let made = "";
+    try {
+      await go("/settings#invoicing");
+      const zelle = await page.inputValue("#is-zelle");
+      must(zelle && (await page.inputValue("#is-check")) === "Nora Chen", "the sample Zelle number or check payee is missing");
+      // Start as she does: no account saved (the sample data has one).
+      if (await bankBox.getByRole("button", { name: "Remove the bank account" }).count()) {
+        await bankBox.getByRole("button", { name: "Remove the bank account" }).click();
+        await bankBox.getByText("Removed. No bank account is saved.").waitFor();
+      }
+      await page.locator("#is-bank-account").waitFor();
+      must(await card.locator("input[name=payDefaults][value=ach]").isDisabled(), "bank transfer (ACH) can be ticked before its details are filled in");
+      must(/Add your account and routing numbers/.test(await card.locator(".inv-way", { hasText: "Bank transfer (ACH)" }).innerText()), "the unticked way doesn't say what it needs");
+      // A routing number that fails the bank's check digit: refused in plain words, nothing echoed, nothing saved.
+      await page.fill("#is-bank-label", LABEL);
+      await page.fill("#is-bank-account", ACCT);
+      await page.fill("#is-bank-routing", "000000001");
+      const refused = await saveSettings();
+      must(/routing number doesn't pass the bank check/.test(refused) && !/\d{4,}/.test(refused), `a wrong routing number: ${refused}`);
+      must(!(await bankBox.locator(".inv-bank-facts").count()), "a refused account shows as saved");
+      // The right one, and the three ways ticked for new invoices in the same save.
+      await page.fill("#is-bank-label", LABEL);
+      await page.fill("#is-bank-account", ACCT);
+      await page.fill("#is-bank-routing", ROUT);
+      must(!(await card.locator("input[name=payDefaults][value=ach]").isDisabled()), "bank transfer (ACH) can't be ticked once both numbers are typed");
+      await tick(["zelle", "ach", "check"]);
+      const savedMsg = await saveSettings();
+      must(/^Saved\./.test(savedMsg), `saving the bank details: ${savedMsg}`);
+      // Masked from now on: the last 4 digits and the routing number, no box holding the account.
+      await bankBox.locator(".inv-bank-facts").waitFor();
+      const facts = await bankBox.locator(".inv-bank-facts").innerText();
+      must(facts.includes("••••6789") && facts.includes(ROUT), `the saved account shows as: ${facts}`);
+      must(!(await page.locator("#is-bank-account").count()), "the account box is still there after saving");
+      // The Settings page never holds the full account number: not in the server's HTML, not in the live page, not
+      // in any field, and (it is data, not code) in none of the page's scripts.
+      const html = await (await page.request.get(`${BASE}/settings`)).text();
+      must(html.includes("6789") && html.includes(LABEL), "the Settings HTML lacks the masked account or the label");
+      must(!html.includes(ACCT), "the Settings HTML holds the full account number");
+      must(!(await page.content()).includes(ACCT), "the live Settings page holds the full account number");
+      must(!(await page.evaluate(() => [...document.querySelectorAll("input, textarea")].map((e) => e.value).join("\n"))).includes(ACCT), "a Settings field holds the full account number");
+      const scripts = await page.evaluate(() => [...document.querySelectorAll("script[src]")].map((e) => e.src));
+      for (const src of scripts) must(!(await (await page.request.get(src)).text()).includes(ACCT), `a script holds the account number: ${src}`);
+      // Replace opens two empty boxes (replacing means typing both again); Keep these closes them.
+      await bankBox.getByRole("button", { name: "Replace the bank account" }).click();
+      must((await page.inputValue("#is-bank-account")) === "" && (await page.inputValue("#is-bank-routing")) === "", "Replace prefilled a number");
+      await bankBox.getByRole("button", { name: "Keep these numbers" }).click();
+      await page.reload({ waitUntil: "networkidle" });
+      for (const w of ["zelle", "ach", "check"]) must(await card.locator(`input[name=payDefaults][value=${w}]`).isChecked(), `${w} is not ticked after a reload`);
+
+      // The creator starts with the three ways and offers the new one in its chooser.
+      await go(`/invoices/new?customer=${cus1}`);
+      const line = await defaultsLine();
+      must(/Zelle, bank transfer \(ACH\), check/.test(line), `defaults line: ${line}`);
+      await page.locator(".inv-defaults").getByRole("button", { name: /Zelle/ }).click();
+      const ach = page.locator(".inv-way", { hasText: "Bank transfer (ACH)" }).locator("input[type=checkbox]");
+      must((await ach.isChecked()) && !(await ach.isDisabled()), "the chooser doesn't offer bank transfer (ACH), ticked");
+      must(!(await page.content()).includes(ACCT), "the creator holds the account number");
+      await page.getByRole("button", { name: /Standard Content Creation Package/ }).click();
+      await page.getByRole("button", { name: /^Make PDF/ }).click();
+      const num = (/(\d{7,})/.exec(await doneTitle()) ?? [])[1] ?? "";
+      made = doneId();
+      must(num && made, "no invoice made with the three ways");
+      // The message that goes with the PDF names the ways and never repeats the account or routing number.
+      const msg = await page.locator(".inv-msg-text").innerText();
+      inOrder(msg, ["Bank transfer (ACH): the account details are on the PDF.", `Zelle: ${zelle}, with ${num} in the memo.`, "Checks payable to Nora Chen."], "the message");
+      must(!msg.includes(ACCT) && !msg.includes(ROUT), "the message repeats a bank number");
+      must(!(await page.content()).includes(ACCT), "the done state holds the account number");
+
+      // The PDF: PAYMENT INFORMATION, then her three blocks in her order, in her words.
+      const blocks = [LABEL, `ACH to ACCT#:${ACCT}`, `ROUTING:${ROUT}`, `Please send payment via Zelle to ${zelle}.`, `Put invoice ${num} in the Zelle memo`, "Checks Payable to Nora Chen", "Mail to 100 Sample St, Sampleton, VA 23000"];
+      const t = await pdfOf(made);
+      inOrder(t, ["PAYMENT INFORMATION:", ...blocks], "the PDF");
+      must(!/\[Zelle|Check payable to|, mail to|••••/.test(t), "the PDF still has the old wording, or a masked account");
+
+      // The team's invoice page shows the same block with the account masked, and says so.
+      await go(`/invoices/${made}`);
+      const paper = await page.locator(".inv-paper").innerText();
+      inOrder(paper, [LABEL, "ACH to ACCT#:••••6789", `ROUTING:${ROUT}`, `Please send payment via Zelle to ${zelle}.`, "Checks Payable to Nora Chen"], "the invoice page");
+      must(/The PDF and the customer's page print the full account number/.test(paper), "the invoice page doesn't say the account is masked");
+      must(!(await page.content()).includes(ACCT), "the team's invoice page holds the full account number");
+
+      // The customer's page: the same facts, Copy buttons for the account number, the routing number and the Zelle
+      // value, in that order, in English, 简体 and 繁體.
+      const link = await customerLink(made);
+      const en = await publicText(link);
+      must(en.status === 200, `pay page HTTP ${en.status}`);
+      inOrder(en.text, ["How to pay", "Bank transfer (ACH)", LABEL, "Account number", ACCT, "Routing number", ROUT, "Zelle", zelle, `Put invoice ${num} in the Zelle memo`, "Checks Payable to Nora Chen", "Mail to", "100 Sample St"], "the pay page");
+      const copies = await pp.locator(".ip-copyrow button").evaluateAll((bs) => bs.map((b) => b.getAttribute("aria-label")));
+      must(copies[0] === `Copy ${ACCT}` && copies[1] === `Copy ${ROUT}` && copies[2] === `Copy ${zelle}`, `Copy buttons: ${copies.join(" | ")}`);
+      for (const never of ["Venmo", "PayPal", "Pay online"]) must(!en.text.includes(never), `the pay page shows a way that wasn't chosen: ${never}`);
+      const hans = await publicText(`${link}?lang=zh-Hans`);
+      inOrder(hans.text, ["付款方式", "银行转账（ACH）", LABEL, ACCT, ROUT, "Zelle", zelle, "支票", "Nora Chen"], "the 简体 pay page");
+      const hant = await publicText(`${link}?lang=zh-Hant`);
+      inOrder(hant.text, ["付款方式", "銀行轉帳（ACH）", LABEL, ACCT, ROUT, "Zelle", zelle, "支票", "Nora Chen"], "the 繁體 pay page");
+      const pubPdf = await pp.request.get(`${BASE}${link}/pdf`);
+      must(pubPdf.status() === 200, `public PDF ${pubPdf.status()}`);
+      inOrder(pdfText(Buffer.from(await pubPdf.body())), blocks, "the customer's PDF");
+      // Only the ways chosen for THAT invoice: the first invoice (Zelle only) shows no bank account anywhere.
+      if (link1) {
+        const z = await publicText(link1);
+        must(!z.text.includes(ACCT) && !z.text.includes(ROUT) && !/Bank transfer|Account number|Routing/.test(z.text), "a Zelle-only invoice's page shows the bank account");
+        must(!(await (await pp.request.get(`${BASE}${link1}`)).text()).includes(ACCT), "a Zelle-only invoice's HTML holds the account number");
+        must(!/ACH|ROUTING/.test(await pdfOf(inv1)), "a Zelle-only invoice's PDF prints the bank account");
+      }
+      // Claude: the way by name, never a number (not even masked). The tax CSV neither.
+      if (hasMcp) {
+        const g = await toolRaw("get_invoice", { id: made });
+        must(!g.isError && /Bank transfer \(ACH\)/.test(g.text), `get_invoice: ${g.text.slice(0, 160)}`);
+        for (const out of [g.text, (await toolRaw("list_invoices", { status: "all", limit: 200 })).text, (await toolRaw("list_customers", {})).text])
+          must(!/000123456789|000000000|••••|ACCT#|ROUTING:|Sample Bank/.test(out), "Claude's tools return her bank details");
+      }
+      must(!(await (await page.request.get(`${BASE}/invoices/export?year=${year}`)).text()).includes(ACCT), "the CSV export holds the account number");
+      // A cancelled invoice's link, and a made-up one, still reveal nothing.
+      await voidInvoice(made);
+      const v = await publicText(link);
+      must(v.status === 200 && v.text.includes("This invoice was cancelled"), `void link: ${v.status}`);
+      const vHtml = await (await pp.request.get(`${BASE}${link}`)).text();
+      for (const never of [ACCT, ROUT, LABEL, zelle, "ACH", "Checks Payable"]) must(!v.text.includes(never) && !vHtml.includes(never), `the cancelled page shows ${JSON.stringify(never)}`);
+      must((await pp.request.get(`${BASE}${link}/pdf`)).status() === 404, "a cancelled invoice still has a public PDF");
+      const fake = await pp.request.get(`${BASE}/i/${`smoke-not-a-real-invoice-${stamp}-`.padEnd(43, "y")}`);
+      must(fake.status() === 404 && !(await fake.text()).includes(ACCT), "a made-up link shows something");
+      // The sample invoice that offers all three ways (fresh sample data): the same blocks on its page.
+      const sample = await publicText(SAMPLE_INVOICE_LINK("contract"));
+      if (sample.status === 200) inOrder(sample.text, ["Bank transfer (ACH)", ACCT, ROUT, "Zelle", "Checks Payable to Nora Chen"], "the sample invoice with all three ways");
+      else console.log("  (no sample data: the sample three-way invoice was not checked)");
+    } finally {
+      // Back to the built-in default (Zelle only) for the steps after this one and for the next run. The account stays.
+      await go("/settings#invoicing").catch(() => {});
+      await tick(["zelle"]).catch(() => {});
+      await saveSettings().catch(() => {});
+    }
+    await go("/invoices/new");
+    const back = await defaultsLine();
+    must(/^Due on receipt\s*·\s*Zelle\s*·/.test(back), `after unticking, the defaults line is: ${back}`);
+    // An invoice made while three ways were ticked keeps them (it is void now, but still says so).
+    if (made && hasMcp) must((await tool("get_invoice", { id: made })).pay_ways === "Zelle, Bank transfer (ACH), Check", "the invoice lost the ways saved on it");
   });
 
   await st("a partial Zelle payment (Partly paid, $325.10 left on her page), then the rest (Paid)", async () => {
@@ -4336,7 +4508,7 @@ async function invoicingEndToEnd(browser) {
     const tools = (await mcp("tools/list", {})).body?.result?.tools ?? [];
     const names = tools.map((t) => t.name);
     for (const n of ["list_invoices", "get_invoice", "list_customers", "create_draft_invoice"]) must(names.includes(n), `no ${n} tool`);
-    const bad = names.filter((n) => /contract|finali[sz]e|send_invoice|record_payment|mark_paid|void|delete_invoice|invoice_link|payment_settings|invoice_settings|saved_lines|next_number|import_invoices/.test(n));
+    const bad = names.filter((n) => /contract|finali[sz]e|send_invoice|record_payment|mark_paid|void|delete_invoice|invoice_link|payment_settings|invoice_settings|bank_(details|account)|saved_lines|next_number|import_invoices/.test(n));
     must(!bad.length, `tools that must not exist: ${bad.join(", ")}`);
     // Contracts never: no key about one, no contract id, no "made from a contract" source.
     const keys = (v, out = []) => { if (v && typeof v === "object") for (const [k, x] of Object.entries(v)) { out.push(k); keys(x, out); } return out; };
@@ -4344,7 +4516,7 @@ async function invoicingEndToEnd(browser) {
       let json = null; try { json = JSON.parse(text); } catch {}
       must(json, `${label}: not JSON (${text.slice(0, 80)})`);
       must(!keys(json).some((k) => /contract|stripe|token|link|url|fee/i.test(k)), `${label} returns a contract, Stripe, link or fee field`);
-      for (const [what, re] of [["a contract id", /"(ctr_[^"]*|sample-ctr-[^"]*)"/], ["a contract source", /"source":"contract"/], ["a link or token", /\/i\/|token/i], ["a Stripe id", /cs_(test|live)_|"pi_[A-Za-z0-9]|"evt_/], ["the Zelle number", /\(555\) 010-0100|555.?010.?0100/], ["the From address", /100 Sample St/]])
+      for (const [what, re] of [["a contract id", /"(ctr_[^"]*|sample-ctr-[^"]*)"/], ["a contract source", /"source":"contract"/], ["a link or token", /\/i\/|token/i], ["a Stripe id", /cs_(test|live)_|"pi_[A-Za-z0-9]|"evt_/], ["the Zelle number", /\(555\) 010-0100|555.?010.?0100/], ["the From address", /100 Sample St/], ["her bank details", /000123456789|000000000|ACCT#|ROUTING:|••••|Sample Bank/]])
         must(!re.test(text), `${label} returns ${what}`);
     };
     const list = await toolRaw("list_invoices", { status: "all", limit: 200 });

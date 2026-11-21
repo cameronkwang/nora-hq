@@ -30,6 +30,7 @@ export function InvoiceSettingsCard({ settings, nextNumber, stripe }: { settings
   const [paypal, setPaypal] = useState(s.paypal ?? "");
   const [bankOnline, setBankOnline] = useState(s.achEnabled);
   const [cardOnline, setCardOnline] = useState(s.cardEnabled);
+  const [bankLabel, setBankLabel] = useState(s.ownBankLabel ?? "");
   const [account, setAccount] = useState("");
   const [routing, setRouting] = useState("");
   const [replacing, setReplacing] = useState(false);
@@ -117,7 +118,7 @@ export function InvoiceSettingsCard({ settings, nextNumber, stripe }: { settings
               <p className="hint mt-0!">A customer sends it from their bank straight to your account. Nothing to pay, nothing connected. The invoice prints the label, “ACH to ACCT#:” and “ROUTING:”.</p>
             </div>
             <Field id="is-bank-label" label="Bank label" hint="The line above the numbers, like “Sample Bank Checking”.">
-              <input id="is-bank-label" name="ownBankLabel" className="input" defaultValue={s.ownBankLabel ?? ""} maxLength={80} autoComplete="off" />
+              <input id="is-bank-label" name="ownBankLabel" className="input" value={bankLabel} onChange={(e) => setBankLabel(e.target.value)} maxLength={80} autoComplete="off" />
             </Field>
             {bankSaved && (
               <div className="inv-bank-saved">
@@ -132,10 +133,10 @@ export function InvoiceSettingsCard({ settings, nextNumber, stripe }: { settings
                   </div>
                 </dl>
                 <div className="flex flex-wrap items-center gap-2">
-                  <button type="button" className={buttonClass("ghost", "sm")} aria-expanded={replacing} onClick={() => { setReplacing((r) => !r); setAccount(""); setRouting(""); setBankMsg(null); }}>
+                  <button type="button" className={buttonClass("ghost", "sm")} aria-expanded={replacing} aria-label={replacing ? "Keep these numbers" : "Replace the bank account"} onClick={() => { setReplacing((r) => !r); setAccount(""); setRouting(""); setBankMsg(null); }}>
                     {replacing ? "Keep these" : "Replace"}
                   </button>
-                  <button type="button" className={buttonClass("ghost", "sm")} disabled={removing} onClick={removeBank}>{removing ? "Removing…" : "Remove"}</button>
+                  <button type="button" className={buttonClass("ghost", "sm")} aria-label="Remove the bank account" disabled={removing} onClick={removeBank}>{removing ? "Removing…" : "Remove"}</button>
                 </div>
               </div>
             )}

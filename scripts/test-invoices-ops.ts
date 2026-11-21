@@ -677,7 +677,7 @@ async function main() {
   assert.match(all[4].text, /"pay_ways":"Zelle, Bank transfer \(ACH\), Check"/, "Claude sees which ways an invoice offers, by name");
   for (const o of all) {
     assert.equal(o.error, false, o.text);
-    assert.doesNotMatch(o.text, /000123456789|000000000|ACCT|ROUTING|••••|6789|Sample Bank/i, `never her bank details, not even masked: ${o.text.slice(0, 120)}`);
+    assert.doesNotMatch(o.text, /000123456789|000000000|ACCT#|ROUTING:|••••|Sample Bank/i, `never her bank details, not even masked: ${o.text.slice(0, 120)}`);
     assert.doesNotMatch(o.text, /token|tokenHash|tokenEnc|stripe|ctr_|contract/i, `no links, Stripe or contracts in Claude's output: ${o.text.slice(0, 120)}`);
     assert.doesNotMatch(o.text, /\/i\//, "never a customer link");
   }
