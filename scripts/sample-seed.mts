@@ -125,5 +125,17 @@ await db.insert(schema.asks).values([
 ]).onConflictDoNothing();
 await db.insert(schema.askMessages).values({ id: "sample-askmsg-1", askId: "sample-ask-1", author: "claude", body: "Which pie should the caption lead with? (fake)" }).onConflictDoNothing();
 
+// Nora's reminders (tasks on her own list), one private note, so her Home has something on it.
+{
+  const d = (n: number) => { const x = new Date(); x.setDate(x.getDate() + n); return x.toISOString().slice(0, 10); };
+  const month = d(0).slice(0, 7);
+  await db.insert(schema.tasks).values([
+    { id: "sample-rem-1", title: "Post the Fake Burger Bar reel (fake)", assignee: "nora", dueDate: d(0), month, createdBy: "nora@local" },
+    { id: "sample-rem-2", title: "Send Cameron the five pizza picks (fake)", assignee: "nora", dueDate: d(2), month: d(2).slice(0, 7), createdBy: "cameron@local" },
+    { id: "sample-rem-3", title: "Buy a spare phone battery (fake)", assignee: "nora", month, createdBy: "nora@local" },
+  ]).onConflictDoNothing();
+  await db.insert(schema.notes).values({ id: "sample-note-1", owner: "nora@local", body: "Reel ideas (fake)\nTop 5 ramen, date night under $40, best happy hours" }).onConflictDoNothing();
+}
+
 await client.close();
 console.log("sample data ready");

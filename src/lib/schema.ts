@@ -875,3 +875,46 @@ export const contracts = pgTable(
   (t) => [index("contracts_created_idx").on(t.createdAt)],
 );
 export type ContractRow = typeof contracts.$inferSelect;
+
+/**
+ * Nora's own notes ("Just me"). Private to the person who wrote them: no Claude (MCP) tool reads these and they are
+ * never in the activity log. A note she sends to Cameron stops being a note and becomes an ask.
+ */
+export const notes = pgTable(
+  "notes",
+  {
+    id: text("id").primaryKey(),
+    owner: text("owner").notNull(), // user email
+    body: text("body").notNull(),
+    attachments: jsonb("attachments").$type<Attachment[]>().notNull().default([]),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("notes_owner_idx").on(t.owner, t.updatedAt)],
+);
+export type Note = typeof notes.$inferSelect;
+
+/**
+ * Files Cameron sends to Nora (contracts, invoices, anything else): her Files tab. `openedAt` is the first time she
+ * opened it, so both of them can see what is still new. People only: there is no Claude (MCP) tool for these.
+ */
+export const SHARED_FILE_KINDS = ["contract", "invoice", "other"] as const;
+export type SharedFileKind = (typeof SHARED_FILE_KINDS)[number];
+export const sharedFiles = pgTable(
+  "shared_files",
+  {
+    id: text("id").primaryKey(),
+    title: text("title").notNull(),
+    kind: text("kind").$type<SharedFileKind>().notNull().default("other"),
+    note: text("note"),
+    url: text("url").notNull(),
+    fileName: text("file_name").notNull(),
+    contentType: text("content_type"),
+    sizeBytes: integer("size_bytes"),
+    sentBy: text("sent_by").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    openedAt: timestamp("opened_at", { withTimezone: true }),
+  },
+  (t) => [index("shared_files_created_idx").on(t.createdAt)],
+);
+export type SharedFile = typeof sharedFiles.$inferSelect;

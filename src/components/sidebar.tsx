@@ -10,7 +10,7 @@ import { sectionOf, type SectionKey } from "./section-tabs";
 
 type NavClient = { id: string; name: string; location: string | null; kind?: string | null };
 type User = { name: string; email: string };
-type Counts = { newAsks: number; needsReview: number; tasksDue: number; reelsOwed: number };
+type Counts = { newAsks: number; needsReview: number; tasksDue: number; reelsOwed: number; newFiles: number };
 /** Nora tracks her schedule, so her phone tab is Calendar; Cameron works the checklists, so his is Tasks. */
 type PhoneTab = "calendar" | "tasks";
 type NavProps = { user: User; creator: NavClient | null; businesses: NavClient[]; inactiveCount: number; counts: Counts; phoneTab: PhoneTab };
@@ -31,12 +31,20 @@ const CONTRACTS: Item = { href: "/contracts", label: "Contracts" };
 const SETTINGS: Item = { href: "/settings", label: "Settings" };
 const ACTIVITY: Item = { href: "/activity", label: "Activity" };
 
+/** Nora's folder of files from Cameron (badge: ones she hasn't opened). For Cameron the same page is where he sends them. */
+const FILES: Item = { href: "/files", label: "Files", icon: "folder", badge: (c) => c.newFiles, badgeWord: "new" };
+const FILES_FOR_NORA: Item = { href: "/files", label: "Files for Nora" };
+const NOTES: Item = { href: "/notes", label: "Notes" };
+
 const MAIN = [HOME, INBOX, TASKS, CALENDAR];
-const GROW = [OUTREACH, INSIGHTS, CONTRACTS];
+const GROW = [OUTREACH, INSIGHTS, CONTRACTS, FILES_FOR_NORA];
+/** Nora's HQ is a notes-and-reminders app: Home (reminders, what's coming up, notes), her calendar and her files. */
+const NORA_MAIN = [HOME, CALENDAR, FILES];
+/** What the "+" (and the sidebar button, and the N key) opens: a new ask for Cameron, a new note for Nora. */
+const NEW_ASK = { href: "/asks/new", label: "New ask" };
+const NEW_NOTE = { href: "/notes/new", label: "New note" };
 /** Nora's own pages (her HQ): no back-end tools, no list of businesses. */
-const MY_STATS: Item = { href: "/stats", label: "My stats" };
-const COLLABS: Item = { href: "/collabs", label: "Collab requests" };
-const NORA_MORE = [CONTRACTS, COLLABS, MY_STATS];
+const NORA_MORE = [NOTES, CONTRACTS];
 const INACTIVE_HREF = "/clients?inactive=1";
 
 function useIsActive() {
@@ -50,7 +58,7 @@ function useIsActive() {
 }
 
 export function Sidebar(props: NavProps) {
-  useNewAskShortcut();
+  useNewShortcut(props.phoneTab === "calendar" ? NEW_NOTE.href : NEW_ASK.href);
   return (
     <>
       <DesktopSidebar {...props} />
@@ -64,6 +72,7 @@ export function Sidebar(props: NavProps) {
 /** A table of contents: text only. The one block of colour is "New ask"; counts are plain cinnabar numerals. */
 function DesktopSidebar({ user, creator, businesses, inactiveCount, counts, phoneTab }: NavProps) {
   const nora = phoneTab === "calendar"; // Nora's HQ: only her things
+  const create = nora ? NEW_NOTE : NEW_ASK;
   const active = useIsActive();
   const path = usePathname() ?? "/";
 
@@ -72,14 +81,14 @@ function DesktopSidebar({ user, creator, businesses, inactiveCount, counts, phon
       <Link href="/" className="wordmark">
         Nora HQ
       </Link>
-      <Link href="/asks/new" title="New ask (press N)" className={cx(buttonClass("primary"), "side-new")}>
+      <Link href={create.href} title={`${create.label} (press N)`} className={cx(buttonClass("primary"), "side-new")}>
         <Icon name="plus" />
-        New ask <kbd>N</kbd>
+        {create.label} <kbd>N</kbd>
       </Link>
 
       <nav aria-label="Main" className="side-nav">
         <div className="side-group">
-          {MAIN.map((item) => (
+          {(nora ? NORA_MAIN : MAIN).map((item) => (
             <SideLink key={item.href} item={item} active={active(item) && path !== "/asks/new"} count={item.badge?.(counts) ?? 0} />
           ))}
         </div>
@@ -87,7 +96,7 @@ function DesktopSidebar({ user, creator, businesses, inactiveCount, counts, phon
         <div className="side-group">
           <p className="eyebrow side-heading">{nora ? "Mine" : "Grow"}</p>
           {(nora ? NORA_MORE : GROW).map((item) => (
-            <SideLink key={item.href} item={item} active={active(item)} />
+            <SideLink key={item.href} item={item} active={active(item) && path !== NEW_NOTE.href} />
           ))}
         </div>
 
@@ -115,7 +124,7 @@ function DesktopSidebar({ user, creator, businesses, inactiveCount, counts, phon
           </div>
         )}
 
-        {creator && (
+        {creator && !nora && (
           <div className="side-group side-rule">
             <Link href={`/clients/${creator.id}`} aria-current={active(`/clients/${creator.id}`) ? "page" : undefined} className="side-link">
               <span className="t">{creator.name}</span>
@@ -186,10 +195,13 @@ function SideLink({ item, active, count = 0 }: { item: Item; active: boolean; co
 /* ------------------------------------------------------------------- phones */
 
 function MobileNav({ user, creator, businesses, inactiveCount, counts, phoneTab }: NavProps) {
-  const tabItem = phoneTab === "tasks" ? TASKS : CALENDAR;
-  // Nora: her own pages only (Tasks, Contracts, Collab requests, My stats). Cameron: the back-end tools.
-  const sheetItems = phoneTab === "tasks" ? [CALENDAR, ...GROW] : [TASKS, ...NORA_MORE];
   const nora = phoneTab === "calendar";
+  // The two tabs left of the "+" and the one right of it. Nora: Home, Calendar, Files. Cameron: Home, Inbox, Tasks.
+  const leftTabs = nora ? [HOME, CALENDAR] : [HOME, INBOX];
+  const tabItem = nora ? FILES : TASKS;
+  const create = nora ? NEW_NOTE : NEW_ASK;
+  // Nora: her notes and contracts. Cameron: the back-end tools.
+  const sheetItems = nora ? NORA_MORE : [CALENDAR, ...GROW];
   const active = useIsActive();
   const path = usePathname() ?? "/";
   const sheet = useRef<HTMLDialogElement>(null);
@@ -217,7 +229,7 @@ function MobileNav({ user, creator, businesses, inactiveCount, counts, phoneTab 
     };
   }, [open]);
 
-  const onTab = [HOME, INBOX, tabItem].some((i) => active(i)) || path === "/asks/new";
+  const onTab = [...leftTabs, tabItem].some((i) => active(i)) || path === create.href;
   const sheetActive = open || !onTab;
 
   return (
@@ -233,9 +245,10 @@ function MobileNav({ user, creator, businesses, inactiveCount, counts, phoneTab 
           still owes); for Cameron it's Tasks (badge: due). The other goes in More. Solid paper, a hairline on top. */}
       <nav aria-label="Main" className="tabbar">
         <div className="tabbar-in">
-          <Tab item={HOME} active={active(HOME)} count={0} />
-          <Tab item={INBOX} active={active(INBOX) && path !== "/asks/new"} count={INBOX.badge!(counts)} />
-          <Link href="/asks/new" aria-label="New ask" aria-current={path === "/asks/new" ? "page" : undefined} className="tab tab-new">
+          {leftTabs.map((item) => (
+            <Tab key={item.href} item={item} active={active(item) && path !== "/asks/new"} count={item.badge?.(counts) ?? 0} />
+          ))}
+          <Link href={create.href} aria-label={create.label} aria-current={path === create.href ? "page" : undefined} className="tab tab-new">
             <span>
               <Icon name="plus" />
             </span>
@@ -274,7 +287,7 @@ function MobileNav({ user, creator, businesses, inactiveCount, counts, phoneTab 
               {sheetItems.map((item) => {
                 const n = item.badge?.(counts) ?? 0;
                 return (
-                  <SheetLink key={item.href} href={item.href} active={active(item)} onClick={close}>
+                  <SheetLink key={item.href} href={item.href} active={active(item) && path !== NEW_NOTE.href} onClick={close}>
                     <span className="t">{item.label}</span>
                     {n > 0 && <Count n={n} label={`${n} ${item.badgeWord ?? ""}`.trim()} />}
                   </SheetLink>
@@ -303,7 +316,7 @@ function MobileNav({ user, creator, businesses, inactiveCount, counts, phoneTab 
             </div>
           )}
 
-          {creator && (
+          {creator && !nora && (
             <div className="more-group">
               <div className="more-list">
                 <SheetLink href={`/clients/${creator.id}`} active={active(`/clients/${creator.id}`)} onClick={close}>
@@ -366,8 +379,8 @@ function SheetLink({ href, active, onClick, quiet, children }: { href: string; a
 
 /* --------------------------------------------------------------- shortcuts */
 
-/** Press N anywhere (outside a text field) to start a new ask. */
-function useNewAskShortcut() {
+/** Press N anywhere (outside a text field) to start a new ask (Cameron) or a new note (Nora). */
+function useNewShortcut(href: string) {
   const router = useRouter();
   const path = usePathname();
   useEffect(() => {
@@ -377,19 +390,19 @@ function useNewAskShortcut() {
       const t = e.target as HTMLElement | null;
       if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return;
       if (document.querySelector("dialog[open]")) return;
-      if (path === "/asks/new") return;
+      if (path === href) return;
       e.preventDefault();
-      router.push("/asks/new");
+      router.push(href);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [router, path]);
+  }, [router, path, href]);
 }
 
 /* ------------------------------------------------------------------- icons */
 
 /** Line icons for the phone tab bar (the desktop sidebar has none), plus the two small glyphs the lists use. */
-type IconName = "home" | "inbox" | "list" | "calendar" | "plus" | "menu" | "right";
+type IconName = "home" | "inbox" | "list" | "calendar" | "folder" | "plus" | "menu" | "right";
 
 const PATHS: Record<IconName, ReactNode> = {
   home: <path d="M3 10.5 12 3l9 7.5M5 9v11h5v-6h4v6h5V9" />,
@@ -401,6 +414,7 @@ const PATHS: Record<IconName, ReactNode> = {
       <path d="M3.5 10h17M8 3v4M16 3v4" />
     </>
   ),
+  folder: <path d="M3 7v11a1.5 1.5 0 0 0 1.5 1.5h15A1.5 1.5 0 0 0 21 18V9.5A1.5 1.5 0 0 0 19.5 8H12l-2-2.5H4.5A1.5 1.5 0 0 0 3 7z" />,
   plus: <path d="M12 5v14M5 12h14" />,
   menu: <path d="M4 7h16M4 12h16M4 17h16" />,
   right: <path d="m9 6 6 6-6 6" />,

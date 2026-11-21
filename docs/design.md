@@ -226,19 +226,22 @@ Email to Myah the Beauty   S&F Massage…   5h ago  ›
   padding, 6px radius. Current page: `--surface-2` fill and 600 weight, ink text (not accent).
 - Counts (Inbox, Tasks, Calendar's reels to post) are right-aligned cinnabar numerals.
 - Group headings (Grow, or Mine for Nora; My businesses, which Nora does not see) are `.eyebrow`;
-  groups are 22px apart. Nora's HQ shows only her things: Home, Inbox, Tasks, Calendar, then Mine
-  (Contracts, Collab requests, My stats).
+  groups are 22px apart. Nora's HQ is a notes-and-reminders app: Home, Calendar, Files, then Mine
+  (Notes, Contracts). Her primary button is "+ New note". Cameron's Grow group ends with "Files for
+  Nora", where he sends her files.
 - A business is one line: name left, city right in 12px muted. The city gives way first when space
   is short.
-- Nora's row sits under a hairline, same row style (name left, @handle right).
+- Nora's workspace row sits under a hairline, same row style (name left, @handle right). Cameron
+  only: Nora's own nav does not list it.
 - Foot: "Settings · Activity" as 13px muted text links (Nora: Settings), the Appearance choice
   (Auto / Light / Dark, `.seg`), then a hairline, name left, "Sign out" right.
 
 ### Phone
 
 - Top: a 48px row with the serif wordmark. No border, no blur, not sticky.
-- Tab bar: Home · Inbox · + · Tasks · More for Cameron, Home · Inbox · + · Calendar · More for Nora
-  (the other one is in More). 64px plus the bottom safe area, solid page colour,
+- Tab bar: Home · Inbox · + · Tasks · More for Cameron (Calendar is in More), Home · Calendar · + ·
+  Files · More for Nora (Notes and Contracts are in More; her "+" opens a new note or reminder, and
+  the Files badge counts files she has not opened). 64px plus the bottom safe area, solid page colour,
   hairline on top. No blur, no translucency. 24px line icons (stroke 1.6, 2 when current), 12px
   labels. Current tab is ink and 600 (not accent). Badges: 18px cinnabar pill with a 2px
   page-colour ring.

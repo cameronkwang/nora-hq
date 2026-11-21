@@ -110,3 +110,52 @@ export function attachmentsFromJson(raw: FormDataEntryValue | null): Attachment[
   }
   return out.slice(0, 20);
 }
+
+/* ───────────── Files Cameron sends to Nora (lib/ops-files): documents as well as pictures ───────────── */
+
+/** Blob folder (and local file prefix) for files sent to Nora. */
+export const SHARED_FILE_FOLDER = "files/";
+export const SHARED_FILE_TYPES = [
+  "application/pdf",
+  "image/*",
+  "text/plain",
+  "text/csv",
+  "application/msword",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "application/vnd.ms-excel",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  "application/vnd.ms-powerpoint",
+  "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+];
+
+export function isSharedFileType(contentType: string | null | undefined): boolean {
+  if (!contentType) return false;
+  return SHARED_FILE_TYPES.some((t) => (t.endsWith("/*") ? contentType.startsWith(t.slice(0, -1)) : contentType === t));
+}
+
+/** True for a file this app stored for the Files tab: our Blob store under files/, or a local dev upload. */
+export function isSharedFileUrl(url: unknown): url is string {
+  if (typeof url !== "string") return false;
+  if (!blobEnabled()) return /^\/uploads\/files-[a-f0-9]{12}-[\w.\-]+$/.test(url);
+  return isOwnBlobUrl(url, SHARED_FILE_FOLDER);
+}
+
+/** Server-side save for the Files tab (local dev, or a small file in production). */
+export async function saveSharedFile(file: File): Promise<{ url: string; name: string; contentType: string; size: number }> {
+  if (!file.size) throw new UploadError(`${file.name || "File"} is empty.`);
+  if (file.size > MAX_UPLOAD_BYTES) throw new UploadError(`${file.name} is over 25MB.`);
+  if (!isSharedFileType(file.type)) throw new UploadError(`${file.name} isn't a PDF, picture or document.`);
+  const name = safeName(file.name);
+  if (blobEnabled()) {
+    const { put } = await import("@vercel/blob");
+    const res = await put(`${SHARED_FILE_FOLDER}${name}`, file, { access: "public", addRandomSuffix: true, contentType: file.type });
+    return { url: res.url, name: file.name || name, contentType: file.type, size: file.size };
+  }
+  const { mkdir, writeFile } = await import("node:fs/promises");
+  const path = await import("node:path");
+  const dir = path.join(process.cwd(), "public", "uploads");
+  await mkdir(dir, { recursive: true });
+  const fileName = `files-${randomBytes(6).toString("hex")}-${name}`;
+  await writeFile(path.join(dir, fileName), Buffer.from(await file.arrayBuffer()));
+  return { url: `/uploads/${fileName}`, name: file.name || name, contentType: file.type, size: file.size };
+}

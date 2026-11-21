@@ -1,19 +1,25 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
-import { and, desc, eq, ne, or } from "drizzle-orm";
+import { and, asc, eq, ne, sql } from "drizzle-orm";
 import { getDb, schema } from "@/lib/db";
-import { relativeTime } from "@/lib/dates";
-import { askThreadState, listAskMessagesFor } from "@/lib/ops";
-import { reelsToPost, scheduleOn } from "@/lib/ops-schedule";
-import { dealsOwed } from "@/lib/ops-deals";
+import { monthOfDate } from "@/lib/dates";
+import { listSchedule, reelsToPost } from "@/lib/ops-schedule";
 import { CHECKLIST_TOTAL, checklistDone } from "@/lib/shoot-checklist";
-import { Card, Count, EmptyState, Status, Tag } from "./ui";
+import { NoteRows, loadNoteRows } from "./note-rows";
+import { TaskList, TaskRow } from "./task-row";
+import { Card, Count, EmptyState, Tag } from "./ui";
 
 /**
- * Nora's Home: her day, not the agency view. What she's shooting today and tomorrow (each job opens its
- * shoot checklist), the reels she still owes, whether collabs are paid (never amounts here), and the asks
- * she sent with whether Cameron or Claude answered. Cameron's Home is unchanged.
+ * Nora's Home is a notes-and-reminders page, not the agency view: her reminders (tick them off), what is coming up
+ * on her calendar this week (each shoot opens its checklist), the reels she still owes, and her notes: the private
+ * ones and the ones she sent to Cameron, with whether he has answered. No money, no drafts, no business tools.
+ * Cameron's Home is unchanged.
  */
+
+/** How far ahead "Coming up" looks, and how many reminders and notes Home lists before "All". */
+const COMING_UP_DAYS = 7;
+const REMINDERS_MAX = 30;
+const NOTES_MAX = 6;
 
 function addDays(date: string, n: number): string {
   const d = new Date(`${date}T12:00:00Z`);
@@ -21,12 +27,6 @@ function addDays(date: string, n: number): string {
   return d.toISOString().slice(0, 10);
 }
 const dayName = (d: string) => new Date(`${d}T12:00:00Z`).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", timeZone: "UTC" });
-
-const ASK_STATUS: Record<string, { label: string; tone: "neutral" | "info" | "ok" | "warn" }> = {
-  new: { label: "Sent", tone: "neutral" },
-  in_progress: { label: "In progress", tone: "info" },
-  done: { label: "Done", tone: "ok" },
-};
 
 export function Chevron({ className = "chev" }: { className?: string }) {
   return (
@@ -60,36 +60,54 @@ export function HomeRow({ href, title, note, where, when, clamp }: { href: strin
   );
 }
 
-export async function NoraHome({ email, name, now, skipAskIds = [] }: { email: string; name: string; now: string; skipAskIds?: string[] }) {
+export async function NoraHome({ email, name, now, names, skipAskIds = [] }: { email: string; name: string; now: string; names: Map<string, string>; skipAskIds?: string[] }) {
   const db = await getDb();
-  const tomorrow = addDays(now, 1);
-  const [todayJobs, tomorrowJobs, owedReels, owed, myAsks] = await Promise.all([
-    scheduleOn(now),
-    scheduleOn(tomorrow),
-    reelsToPost(now),
-    dealsOwed(now),
+  const until = addDays(now, COMING_UP_DAYS);
+  const months = [...new Set([monthOfDate(now), monthOfDate(until)])];
+  const [reminders, schedule, owedReels, notes] = await Promise.all([
     db
       .select()
-      .from(schema.asks)
-      .where(and(or(eq(schema.asks.createdBy, email), eq(schema.asks.createdBy, name)), ne(schema.asks.status, "archived"), ne(schema.asks.kind, "idea")))
-      .orderBy(desc(schema.asks.updatedAt))
-      .limit(6),
+      .from(schema.tasks)
+      .where(and(eq(schema.tasks.assignee, "nora"), ne(schema.tasks.status, "done")))
+      // Dated ones first, soonest (or most overdue) at the top; undated ones after, oldest first.
+      .orderBy(sql`${schema.tasks.dueDate} asc nulls last`, asc(schema.tasks.createdAt))
+      .limit(REMINDERS_MAX),
+    Promise.all(months.map((m) => listSchedule(m))),
+    reelsToPost(now),
+    loadNoteRows(email, name, NOTES_MAX, skipAskIds),
   ]);
-  // Asks already under "For you" (Claude asked her something) aren't listed twice.
-  const skip = new Set(skipAskIds);
-  const mine = myAsks.filter((a) => !skip.has(a.id));
-  const threads = await listAskMessagesFor(mine.map((a) => a.id));
+  const comingUp = schedule
+    .flat()
+    .filter((j) => j.date && j.date >= now && j.date <= until)
+    .sort((a, b) => a.date!.localeCompare(b.date!));
+  const when = (d: string) => (d === now ? <span className="font-medium text-text">Today</span> : d === addDays(now, 1) ? "Tomorrow" : dayName(d));
 
   return (
     <>
-      <Card title="Shoots" actions={<Link href="/calendar" className="link-quiet">Schedule →</Link>} padded={false}>
-        {todayJobs.length + tomorrowJobs.length === 0 ? (
-          <EmptyState title="Nothing booked today or tomorrow.">
-            <Link href="/calendar" className="link">See the whole schedule</Link>
+      <Card
+        title={<>Reminders{reminders.length > 0 && <Count n={reminders.length} />}</>}
+        actions={<Link href="/notes/new?kind=reminder" className="link-quiet">New reminder →</Link>}
+        padded={false}
+      >
+        {reminders.length === 0 ? (
+          <p className="sec-note">Nothing to remember right now. Tap + to add a reminder.</p>
+        ) : (
+          <TaskList>
+            {reminders.map((t) => (
+              <TaskRow key={t.id} task={t} clientName={t.clientId ? names.get(t.clientId) : null} showWho={false} />
+            ))}
+          </TaskList>
+        )}
+      </Card>
+
+      <Card title="Coming up" actions={<Link href="/calendar" className="link-quiet">Calendar →</Link>} padded={false}>
+        {comingUp.length === 0 ? (
+          <EmptyState title="Nothing booked this week.">
+            <Link href="/calendar" className="link">See the whole calendar</Link>
           </EmptyState>
         ) : (
           <ul className="list">
-            {[...todayJobs.map((j) => ({ j, when: "Today" })), ...tomorrowJobs.map((j) => ({ j, when: "Tomorrow" }))].map(({ j, when }) => (
+            {comingUp.map((j) => (
               <HomeRow
                 key={j.id}
                 href={`/calendar/jobs/${j.id}`}
@@ -100,21 +118,15 @@ export async function NoraHome({ email, name, now, skipAskIds = [] }: { email: s
                   </>
                 }
                 where={<span className="num">Shoot list {checklistDone(j.checklist)}/{CHECKLIST_TOTAL}</span>}
-                when={when === "Today" ? <span className="font-medium text-text">Today</span> : when}
+                when={when(j.date!)}
               />
             ))}
           </ul>
         )}
       </Card>
 
-      <Card
-        title={<>Reels to post{owedReels.length > 0 && <Count n={owedReels.length} />}</>}
-        actions={owedReels.length > 0 ? <Link href="/calendar?show=reels" className="link-quiet">All →</Link> : undefined}
-        padded={false}
-      >
-        {owedReels.length === 0 ? (
-          <p className="sec-note">All caught up. No reels owed.</p>
-        ) : (
+      {owedReels.length > 0 && (
+        <Card title={<>Reels to post<Count n={owedReels.length} /></>} actions={<Link href="/calendar?show=reels" className="link-quiet">All →</Link>} padded={false}>
           <ul className="list">
             {owedReels.slice(0, 5).map((r) => (
               <HomeRow
@@ -129,43 +141,14 @@ export async function NoraHome({ email, name, now, skipAskIds = [] }: { email: s
               />
             ))}
           </ul>
-        )}
-      </Card>
-
-      {/* Paid or not, never an amount: one row between hairlines that opens the deals. */}
-      {owed.count > 0 && (
-        <Link href="/deals" className="notice mt-10 items-center hover:underline max-md:mt-8">
-          <Status tone={owed.overdueCount > 0 ? "danger" : "warn"} className="font-medium">
-            <span>
-              {owed.count} collab{owed.count === 1 ? "" : "s"} not paid yet
-              {owed.overdueCount > 0 && <span className="font-normal text-muted"> · {owed.overdueCount} overdue</span>}
-            </span>
-          </Status>
-          <Chevron />
-        </Link>
+        </Card>
       )}
 
-      <Card title="Your asks" actions={<Link href="/asks/new" className="link-quiet">New ask →</Link>} padded={false}>
-        {mine.length === 0 ? (
-          <p className="sec-note">Anything you send with the + button shows up here, with whether Cameron or Claude has answered.</p>
+      <Card title="Notes" actions={<Link href="/notes" className="link-quiet">All →</Link>} padded={false}>
+        {notes.length === 0 ? (
+          <p className="sec-note">Tap + to write a note. Keep it for yourself or send it to Cameron.</p>
         ) : (
-          <ul className="list">
-            {mine.map((a) => {
-              const thread = threads.get(a.id) ?? [];
-              const state = askThreadState(a, thread.at(-1));
-              const s = ASK_STATUS[a.status] ?? ASK_STATUS.new;
-              return (
-                <HomeRow
-                  key={a.id}
-                  href={`/asks/${a.id}`}
-                  title={a.body.split("\n")[0]}
-                  clamp
-                  note={state === "claude_asked" ? <Status tone="warn" small>Claude asked you something</Status> : <Status tone={s.tone} small>{s.label}</Status>}
-                  when={relativeTime(a.updatedAt)}
-                />
-              );
-            })}
-          </ul>
+          <NoteRows rows={notes} />
         )}
       </Card>
     </>
