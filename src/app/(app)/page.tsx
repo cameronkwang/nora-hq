@@ -14,7 +14,8 @@ import { NotifyHomeCard } from "@/components/notify-home-card";
 import { NEW_CLIENT_HREF } from "@/components/onboard-link";
 import { HealthLine, loadClientHealth } from "@/components/client-health-strip";
 import type { ClientHealthRow } from "@/lib/data";
-import { HomeRow, NoraHome } from "@/components/nora-home";
+import { Chevron, HomeRow, NoraHome } from "@/components/nora-home";
+import { newFileCount } from "@/lib/ops-files";
 import { KIND_LABELS } from "@/components/draft-checks";
 import { Card, Count, EmptyState, PageHeader, ProgressBar, Status, Tag, clientLabel, formatNumber, humanize } from "@/components/ui";
 
@@ -90,56 +91,54 @@ export default async function Home({ searchParams }: { searchParams: Promise<Rec
   const now = today();
   const me = personKey(assigneeFor(user));
 
-  // After "New ask" → Send: one line between hairlines, and the way to add another.
-  const sentNote = sent && (
+  // After "+" → Send or Save: one line between hairlines, and the way to add another.
+  const noraSent = me === "nora" && (sp.sent === "note" || sp.sent === "reminder" || sent) ? (sp.sent === "note" ? "Saved to your notes." : sp.sent === "reminder" ? "Reminder added." : "Sent to Cameron.") : null;
+  const sentNote = (noraSent || sent) && (
     <p role="status" className="notice">
-      <Status tone="ok" className="whitespace-normal">{SENT[sent]}</Status>
-      <Link href="/asks/new" className="link inline-flex min-h-11 items-center md:pointer-fine:min-h-0">
+      <Status tone="ok" className="whitespace-normal">{noraSent ?? SENT[sent!]}</Status>
+      <Link href={me === "nora" ? (sp.sent === "reminder" ? "/notes/new?kind=reminder" : "/notes/new") : "/asks/new"} className="link inline-flex min-h-11 items-center md:pointer-fine:min-h-0">
         Add another
       </Link>
     </p>
   );
 
-  // Nora's Home is her day (shoots, reels, payments, her asks), not the agency dashboard.
+  // Nora's Home is a notes-and-reminders page (reminders, the week ahead, her notes), not the agency dashboard.
   if (me === "nora") {
-    const [forYou, clients] = await Promise.all([getForYou(user.email, me, now), listClients()]);
+    const [forYou, clients, newFiles] = await Promise.all([getForYou(user.email, me, now), listClients(), newFileCount()]);
     const names = new Map(clients.map((c) => [c.id, clientLabel(c)]));
     return (
       <div>
         <PageHeader title={`${greeting()}, ${user.name.split(" ")[0]}`} subtitle={todayLabel()} />
-        <QuickAsk me={me} directUpload={blobEnabled()} />
         <div className="home-notes">
           <NotifyHomeCard />
           {sentNote}
+          {newFiles > 0 && (
+            <Link href="/files" className="notice items-center hover:underline">
+              <Status tone="info" className="font-medium">
+                {newFiles} new file{newFiles === 1 ? "" : "s"} from Cameron
+              </Status>
+              <Chevron />
+            </Link>
+          )}
         </div>
-        {(forYou.asks.length > 0 || forYou.tasks.length > 0) && (
+        {/* Something waiting on her answer (Claude asked, or Cameron sent her an ask): rare, so it only shows then. */}
+        {forYou.asks.length > 0 && (
           <Card title="For you" padded={false}>
-            <div className="approve-stack">
-              {forYou.asks.length > 0 && (
-                <ul className="list">
-                  {forYou.asks.map((a) => (
-                    <HomeRow
-                      key={a.id}
-                      href={`/asks/${a.id}`}
-                      title={a.title}
-                      clamp
-                      note={a.claudeAsked ? <Status tone="warn" small>Claude asked a question</Status> : <Status tone="info" small>Ask for you</Status>}
-                      when={relativeTime(a.at)}
-                    />
-                  ))}
-                </ul>
-              )}
-              {forYou.tasks.length > 0 && (
-                <TaskList>
-                  {forYou.tasks.map((t) => (
-                    <TaskRow key={t.id} task={t} clientName={t.clientId ? names.get(t.clientId) : null} />
-                  ))}
-                </TaskList>
-              )}
-            </div>
+            <ul className="list">
+              {forYou.asks.map((a) => (
+                <HomeRow
+                  key={a.id}
+                  href={`/asks/${a.id}`}
+                  title={a.title}
+                  clamp
+                  note={a.claudeAsked ? <Status tone="warn" small>A question for you</Status> : <Status tone="info" small>From Cameron</Status>}
+                  when={relativeTime(a.at)}
+                />
+              ))}
+            </ul>
           </Card>
         )}
-        <NoraHome email={user.email} name={user.name} now={now} skipAskIds={forYou.asks.map((a) => a.id)} />
+        <NoraHome email={user.email} name={user.name} now={now} names={names} skipAskIds={forYou.asks.map((a) => a.id)} />
       </div>
     );
   }

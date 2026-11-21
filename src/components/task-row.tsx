@@ -19,11 +19,12 @@ export function isOverdue(task: Pick<Task, "dueDate" | "status">, now = today())
  * `selectable`: shows a bulk-select checkbox when the row sits inside a <TaskSelection> that is selecting.
  * Put it in a `ul.list > li` (or <TaskList>, which does that).
  */
-export function TaskRow({ task, clientName, showClient = true, selectable = false }: { task: Task; clientName?: string | null; showClient?: boolean; selectable?: boolean }) {
+export function TaskRow({ task, clientName, showClient = true, selectable = false, showWho = true }: { task: Task; clientName?: string | null; showClient?: boolean; selectable?: boolean; /** false on a list that is all one person's (Nora's reminders): the name would repeat on every row. */ showWho?: boolean }) {
   const done = task.status === "done";
   const overdue = isOverdue(task);
   const dueToday = !!task.dueDate && task.dueDate === today() && !done;
-  const hasNotes = !!task.platform || task.assignee !== "unassigned" || (task.status !== "todo" && !done);
+  const who = showWho && task.assignee !== "unassigned";
+  const hasNotes = !!task.platform || who || (task.status !== "todo" && !done);
 
   return (
     <div className={cx("row task-row", done && "is-done")}>
@@ -46,7 +47,7 @@ export function TaskRow({ task, clientName, showClient = true, selectable = fals
                   <PlatformTag platform={task.platform} inherit />
                 </span>
               )}{" "}
-              {task.assignee !== "unassigned" && <span>{humanize(task.assignee)}</span>}{" "}
+              {who && <span>{humanize(task.assignee)}</span>}{" "}
               {task.status !== "todo" && !done && (
                 <span>
                   <StatusBadge status={task.status} />

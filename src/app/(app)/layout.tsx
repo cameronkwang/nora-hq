@@ -4,19 +4,21 @@ import { Sidebar } from "@/components/sidebar";
 import { SectionTabs } from "@/components/section-tabs";
 import { LiveRefresh } from "@/components/live-refresh";
 import { reelsToPostCount } from "@/lib/ops-schedule";
+import { newFileCount } from "@/lib/ops-files";
 
 export const dynamic = "force-dynamic";
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const user = await requireUser();
-  const [everyone, baseCounts, reelsOwed] = await Promise.all([
+  const [everyone, baseCounts, reelsOwed, newFiles] = await Promise.all([
     listClients({ includeArchived: true }),
     navCounts({ assignee: assigneeFor(user) }),
     reelsToPostCount(),
+    newFileCount(),
   ]);
   const drafts = seesDrafts(user);
   // Nora never sees the review queue, so her Inbox badge counts asks only.
-  const counts = { ...baseCounts, needsReview: drafts ? baseCounts.needsReview : 0, reelsOwed };
+  const counts = { ...baseCounts, needsReview: drafts ? baseCounts.needsReview : 0, reelsOwed, newFiles };
   // Nora's workspace is always pinned (even if it was archived); the business list shows active businesses only.
   const creator = everyone.find(isCreatorClient) ?? null;
   const businesses = everyone.filter((c) => !isCreatorClient(c));
