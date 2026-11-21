@@ -1,10 +1,10 @@
 /**
- * Parses Nora's schedule as she keeps it in her notes app, e.g.
+ * Parses Nora's schedule as she keeps it in her notes app, e.g. (invented names and amounts)
  *
  *   November
- *   9. 11/04 | Antonelli’s - FREE 📸
- *   11. 11/11 | TLJ (DC) - $600.00 () 📸 🚩
- *   20. 11/XX | Charles Chocolates - $250.00 () 📸
+ *   9. 11/04 | Marcello’s - FREE 📸
+ *   11. 11/11 | Pan Pan (DC) - $525.00 () 📸 🚩
+ *   20. 11/XX | Cocoa House - $200.00 () 📸
  *
  * Keeps only what the app tracks: the date (or "no set day"), the business, FREE and 📸 (a reel to post).
  * Money is never kept: amounts, (Check)/(Zelle), 🚩 and anything after it are dropped — and no output
@@ -86,7 +86,7 @@ function monthHeader(line: string): { month: number; year: number | null } | nul
   return { month: idx + 1, year: m[2] ? Number(m[2]) : null };
 }
 
-/** "Antonelli’s - FREE 📸" → { name: "Antonelli’s", isFree: true }. */
+/** "Marcello’s - FREE 📸" → { name: "Marcello’s", isFree: true }. */
 function splitBusiness(rest: string): { name: string; isFree: boolean } {
   let s = rest;
   const flag = s.search(FLAG);
