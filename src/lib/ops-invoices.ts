@@ -1381,7 +1381,7 @@ async function resolveBillTo(b: z.output<typeof BillToInput>, actor: string): Pr
 /** Ways a draft may hold: everything but the details (a Zelle number, …), which are checked when it is finalized. */
 function draftAvailability(avail: PayWayAvailability): PayWayAvailability {
   const ok = { ok: true, why: null };
-  return { ...avail, zelle: ok, check: ok, venmo: ok, paypal: ok };
+  return { ...avail, zelle: ok, ach: ok, check: ok, venmo: ok, paypal: ok };
 }
 
 /** Make PDF is refused when the customer's name or a line would print empty on the PDF (Chinese only): never "Customer" or a blank row. */
@@ -1397,13 +1397,16 @@ function checkDates(issueDate: string, dueDate: string) {
   if (daysBetween(issueDate, dueDate) > MAX_TERMS_DAYS) throw new OpsError(`Keep the due date within ${MAX_TERMS_DAYS} days of the invoice date.`);
 }
 
-/** The done state ("Make PDF" landed): Share PDF, Download, Copy message, Copy pay link (only with an online way). */
+/**
+ * The done state ("Make PDF" landed): Share PDF, Download, Copy message, Copy pay link (only with an online way).
+ * Built for a team page: the message names a bank transfer but never carries the account or routing number.
+ */
 function buildDone(inv: schema.Invoice, customer: schema.Customer, settings: InvoiceSettings, o: { origin?: string | null; stripeReady: boolean; token?: LinkToken | null }): InvoiceDone {
   const number = inv.number ?? "DRAFT";
   const issueDate = inv.issueDate ?? todayNY();
   const dueDate = inv.dueDate ?? issueDate;
   const ways = sortPayWays(inv.payWays);
-  const options = payOptions(settings, { number: inv.number, payWays: ways, payNote: inv.payNote }, o.stripeReady);
+  const options = payOptions(settings, { number: inv.number, payWays: ways, payNote: inv.payNote }, o.stripeReady, maskedBankDetails(settings));
   const online = options.some((x) => x.way === "bank" || x.way === "card");
   const payUrl = online
     ? o.token && inv.tokenHash === o.token.hash
@@ -1411,6 +1414,7 @@ function buildDone(inv: schema.Invoice, customer: schema.Customer, settings: Inv
       : urlFromEnc(inv.tokenEnc, o.origin)
     : null;
   const zelle = options.find((x) => x.way === "zelle");
+  const check = options.find((x) => x.way === "check");
   const balance = balanceCents(inv);
   const amount = formatCents(inv.paidCents > 0 && balance > 0 ? balance : inv.totalCents, { decimals: "always" });
   const args = {
@@ -1420,7 +1424,9 @@ function buildDone(inv: schema.Invoice, customer: schema.Customer, settings: Inv
     amount,
     dueDate,
     dueOnReceipt: dueDate <= issueDate,
+    ach: options.some((x) => x.way === "ach"),
     zelle: zelle && zelle.way === "zelle" ? zelle.to : null,
+    checkPayee: check && check.way === "check" ? check.payee : null,
     url: payUrl,
   };
   const messages = {
@@ -1473,6 +1479,8 @@ async function afterFinalize(inv: schema.Invoice, customer: schema.Customer, act
 type QuickPlan = {
   customer: schema.Customer;
   settings: InvoiceSettings;
+  /** Her own bank details, decrypted: only for the PDF that comes back with Make PDF (donePdf). */
+  bank: BankDetails | null;
   draft: schema.Invoice | null;
   requestId: string | null;
   values: {
@@ -1503,8 +1511,8 @@ async function planQuick(input: QuickInvoiceInputT, actor: string, today: string
   if (mode === "finalize") checkPrintable({ newName: v.billTo.kind === "new" ? v.billTo.name : null, items: v.items });
   const setup = setupPatch(v.setup);
   const db = await getDb();
-  const [settings, bill, draft, dealOk, contractOk] = await Promise.all([
-    setup ? mergeSettings(setup, actor) : getInvoiceSettings(),
+  const [{ settings, bank }, bill, draft, dealOk, contractOk] = await Promise.all([
+    setup ? mergeSettings(setup, actor) : paySetup(),
     resolveBillTo(v.billTo, actor),
     v.draftId ? invoiceRow(v.draftId) : Promise.resolve(null),
     v.dealId ? db.select({ id: schema.deals.id }).from(schema.deals).where(eq(schema.deals.id, v.dealId)).then((r) => r.length > 0) : Promise.resolve(true),
@@ -1515,9 +1523,10 @@ async function planQuick(input: QuickInvoiceInputT, actor: string, today: string
   if (!contractOk) throw new OpsError("That contract is gone.");
   if (mode === "finalize") checkPrintable({ customerName: bill.customer.name });
   const keep = <T>(given: T | undefined, fromDraft: T, fallback: T): T => (given !== undefined ? given : draft ? fromDraft : fallback);
-  const ways = sortPayWays(keep(v.payWays, draft?.payWays ?? [...DEFAULT_PAY_WAYS], [...DEFAULT_PAY_WAYS]));
-  const payNote = keep(v.payNote, draft?.payNote ?? null, null) ?? null;
   const avail = availablePayWays(settings, stripeConfigured());
+  // No ways sent (the creator always sends them): a draft keeps its own, a new invoice takes the ones ticked in Settings.
+  const ways = sortPayWays(keep(v.payWays, draft?.payWays ?? [...DEFAULT_PAY_WAYS], defaultPayWays(settings, avail)));
+  const payNote = keep(v.payNote, draft?.payNote ?? null, null) ?? null;
   const wayError = checkPayWays(ways, payNote, mode === "finalize" ? avail : draftAvailability(avail));
   if (wayError) throw new OpsError(wayError);
   // The form is the truth for the money: no discount sent = none (the creator sends undefined when it is cleared).
@@ -1532,6 +1541,7 @@ async function planQuick(input: QuickInvoiceInputT, actor: string, today: string
   return {
     customer: bill.customer,
     settings,
+    bank,
     draft,
     requestId: v.draftId ? null : v.requestId ?? null,
     values: {
@@ -1555,10 +1565,13 @@ async function planQuick(input: QuickInvoiceInputT, actor: string, today: string
   };
 }
 
-/** The finished PDF as base64, for the answer to Make PDF from a phone (Share PDF is ready with no second round trip). */
-async function donePdf(inv: schema.Invoice, customer: schema.Customer, settings: InvoiceSettings, done: InvoiceDone, today: string): Promise<string | null> {
+/**
+ * The finished PDF as base64, for the answer to Make PDF from a phone (Share PDF is ready with no second round trip).
+ * The PDF itself, so it carries her real bank details like every PDF (invoicePdf).
+ */
+async function donePdf(inv: schema.Invoice, customer: schema.Customer, pay: PaySetup, done: InvoiceDone, today: string): Promise<string | null> {
   try {
-    const doc = invoiceDocument(inv, customer, settings, { stripeReady: stripeConfigured(), payUrl: done.payUrl, today });
+    const doc = invoiceDocument(inv, customer, pay.settings, { stripeReady: stripeConfigured(), payUrl: done.payUrl, today, bank: pay.bank });
     return Buffer.from(await renderInvoicePdf(doc, { title: `Invoice ${inv.number ?? "DRAFT"}` })).toString("base64");
   } catch (e) {
     console.error("[invoices] the PDF for the done state failed", e instanceof Error ? e.message : e);
@@ -1570,12 +1583,13 @@ export async function createAndFinalizeInvoice(input: QuickInvoiceInputT, actor:
   people(actor, "make an invoice");
   const today = opts.today ?? todayNY();
   const plan = await planQuick(input, actor, today, "finalize");
-  const { customer, settings, draft, values } = plan;
+  const { customer, settings, bank, draft, values } = plan;
+  const pay: PaySetup = { settings, bank };
   const stripeReady = stripeConfigured();
   /** The done state for a row that already exists (pressed again): nothing is written. */
   const already = async (inv: schema.Invoice, c: schema.Customer): Promise<InvoiceDone> => {
     const done = buildDone(inv, c, settings, { origin: opts.origin, stripeReady });
-    return opts.withPdf ? { ...done, pdfBase64: await donePdf(inv, c, settings, done, today) } : done;
+    return opts.withPdf ? { ...done, pdfBase64: await donePdf(inv, c, pay, done, today) } : done;
   };
   if (draft && draft.status !== "draft") {
     if (draft.status === "void") throw new OpsError("This invoice is void.");
@@ -1634,7 +1648,7 @@ export async function createAndFinalizeInvoice(input: QuickInvoiceInputT, actor:
   // The log, the deal and the contract link, and (for a phone) the PDF itself, side by side.
   const [, pdfBase64] = await Promise.all([
     afterFinalize(row, customer, actor, "Made invoice"),
-    opts.withPdf ? donePdf(row, customer, settings, done, today) : null,
+    opts.withPdf ? donePdf(row, customer, pay, done, today) : null,
   ]);
   return opts.withPdf ? { ...done, pdfBase64 } : done;
 }
@@ -1689,8 +1703,10 @@ export async function createInvoiceDraft(
   if (customer.archived) throw new OpsError(`${customer.name} is archived.`);
   if (!dealOk) throw new OpsError(`No deal with id "${v.dealId}".`);
   if (!contractOk) throw new OpsError("That contract is gone.");
-  const ways = sortPayWays(v.payWays ?? DEFAULT_PAY_WAYS);
-  const wayError = checkPayWays(ways, v.payNote, draftAvailability(availablePayWays(settings, stripeConfigured())));
+  // No ways given (Claude gives them only when a person said how): the ways Nora ticked in Settings, else Zelle.
+  const avail = availablePayWays(settings, stripeConfigured());
+  const ways = sortPayWays(v.payWays ?? defaultPayWays(settings, avail));
+  const wayError = checkPayWays(ways, v.payNote, draftAvailability(avail));
   if (wayError) throw new OpsError(wayError);
   const totals = invoiceTotals(v.items, v.discountCents ?? 0);
   const termsDays = v.termsDays ?? settings.termsDays;
@@ -2005,7 +2021,7 @@ export async function getInvoiceMessages(id: string, actor: string, opts: { orig
   const stripeReady = stripeConfigured();
   const finalized = inv.status !== "draft";
   const url = finalized ? urlFromEnc(inv.tokenEnc, opts.origin) : null;
-  const options = payOptions(settings, inv, stripeReady);
+  const options = payOptions(settings, inv, stripeReady, maskedBankDetails(settings));
   const online = options.some((o) => o.way === "bank" || o.way === "card");
   const dates = { issueDate: inv.issueDate ?? today, dueDate: inv.dueDate ?? addDaysYmd(inv.issueDate ?? today, inv.termsDays) };
   const number = inv.number ?? "DRAFT";
@@ -2018,7 +2034,8 @@ export async function getInvoiceMessages(id: string, actor: string, opts: { orig
     ...dates,
     today,
     fromName: settings.fromName ?? "Nora",
-    payLines: paymentInfoLines(options, online ? url : null),
+    // Worded like the PDF, but a bank transfer only points at the PDF: never the account or routing number.
+    payLines: paymentMessageLines(options, online ? url : null),
   });
   const done = buildDone({ ...inv, ...dates }, customer, settings, { origin: opts.origin, stripeReady });
   const share = (lang: schema.IntakeLang) =>
@@ -2063,7 +2080,9 @@ export async function getInvoice(id: string, opts: { today?: string; origin?: st
   if (!row) return null;
   const { inv, customer } = row;
   const stripeReady = stripeConfigured();
-  const options = payOptions(settings, inv, stripeReady);
+  // A team page (and what Claude's get_invoice is built from): her bank account masked, never the number.
+  const bank = maskedBankDetails(settings);
+  const options = payOptions(settings, inv, stripeReady, bank);
   const online = options.some((o) => o.way === "bank" || o.way === "card");
   return {
     ...rowOut(inv),
@@ -2079,7 +2098,7 @@ export async function getInvoice(id: string, opts: { today?: string; origin?: st
     contract,
     processing: processing as ProcessingPayment[],
     payOptions: options,
-    document: invoiceDocument(inv, customer, settings, { stripeReady, payUrl: online && inv.status !== "draft" ? urlFromEnc(inv.tokenEnc, opts.origin) : null, today }),
+    document: invoiceDocument(inv, customer, settings, { stripeReady, payUrl: online && inv.status !== "draft" ? urlFromEnc(inv.tokenEnc, opts.origin) : null, today, bank }),
     nextSteps: invoiceNextSteps({ id: inv.id, status: inv.status, contractId: inv.contractId }),
     hasLink: !!inv.tokenHash,
   };
@@ -2115,17 +2134,22 @@ export async function invoicesForDeal(dealId: string, opts: { today?: string } =
   return listInvoices({ dealId, status: "all", today: opts.today });
 }
 
+/**
+ * The PDF: one of the two places that print her real bank account (the other is the customer's page). Both routes
+ * that serve it (/invoices/<id>/pdf for a signed-in person, /i/<token>/pdf for the customer) answer no-store.
+ */
 export async function invoicePdf(id: string, opts: { public?: boolean; today?: string; origin?: string | null } = {}): Promise<{ bytes: Uint8Array; filename: string } | null> {
-  const [row, settings] = await Promise.all([invoiceWithCustomer(id), getInvoiceSettings()]);
+  const [row, { settings, bank }] = await Promise.all([invoiceWithCustomer(id), paySetup()]);
   if (!row) return null;
   const { inv, customer } = row;
   if (opts.public && (inv.status === "draft" || inv.status === "void")) return null;
   const stripeReady = stripeConfigured();
-  const online = payOptions(settings, inv, stripeReady).some((o) => o.way === "bank" || o.way === "card");
+  const online = hasOnlineWay(payOptions(settings, inv, stripeReady, null).map((o) => o.way));
   const doc = invoiceDocument(inv, customer, settings, {
     stripeReady,
     payUrl: online && inv.status !== "draft" ? urlFromEnc(inv.tokenEnc, opts.origin) : null,
     today: opts.today ?? todayNY(),
+    bank,
   });
   const bytes = await renderInvoicePdf(doc, { title: `Invoice ${inv.number ?? "DRAFT"}` });
   return { bytes, filename: doc.fileName };
@@ -2591,7 +2615,7 @@ export async function runRetainers(now = new Date(), opts: { dryRun?: boolean } 
         items,
         ...totals,
         notes: settings.footer,
-        payWays: [...DEFAULT_PAY_WAYS],
+        payWays: newInvoiceWays(settings), // the ways ticked in Settings for new invoices, else Zelle
         retainerId: r.id,
         retainerMonth: month,
         contractId: r.contractId,
@@ -2726,13 +2750,13 @@ export async function getInvoiceByToken(raw: unknown, opts: { today?: string } =
   if (!row || row.inv.status === "draft") return { state: "unknown" };
   const { inv, customer } = row;
   const lang = inv.lang ?? customer.lang ?? null;
-  if (inv.status === "void") return { state: "void", lang };
-  const [payments, processing, settings] = await Promise.all([
+  if (inv.status === "void") return { state: "void", lang }; // before anything about how she gets paid is read
+  const [payments, processing, { settings, bank }] = await Promise.all([
     db.select({ paidOn: schema.invoicePayments.paidOn, amountCents: schema.invoicePayments.amountCents }).from(schema.invoicePayments)
       .where(eq(schema.invoicePayments.invoiceId, inv.id)).orderBy(asc(schema.invoicePayments.paidOn)),
     db.select({ amountCents: schema.invoiceCheckouts.amountCents, startedAt: schema.invoiceCheckouts.createdAt, method: schema.invoiceCheckouts.method })
       .from(schema.invoiceCheckouts).where(and(eq(schema.invoiceCheckouts.invoiceId, inv.id), eq(schema.invoiceCheckouts.status, "processing"))),
-    getInvoiceSettings(),
+    paySetup(),
   ]);
   const issueDate = inv.issueDate ?? today;
   const invoice: PublicInvoice = {
@@ -2756,7 +2780,8 @@ export async function getInvoiceByToken(raw: unknown, opts: { today?: string } =
     notes: inv.notes,
     paidAt: inv.paidAt,
   };
-  return { state: "open", invoice, options: payOptions(settings, inv, stripeConfigured()) };
+  // The customer's own page: the one page that shows her real bank details (only when this invoice chose that way).
+  return { state: "open", invoice, options: payOptions(settings, inv, stripeConfigured(), bank) };
 }
 
 export async function markInvoiceViewed(invoiceId: string, now = new Date()): Promise<void> {
