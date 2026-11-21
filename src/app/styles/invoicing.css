@@ -91,9 +91,15 @@
   .inv-sum .is-total dd { font-family: var(--font-display); font-size: 1.75rem; line-height: 2.25rem; font-weight: 450; letter-spacing: -0.01em; font-variant-numeric: lining-nums tabular-nums; }
   @media (max-width: 639px) { .inv-sum > div { grid-template-columns: auto 9rem; } }
 
-  /* The defaults, one quiet line: "Due on receipt · Zelle · #0000170". */
-  .inv-defaults { display: flex; flex-wrap: wrap; align-items: center; gap: 0 10px; padding: 10px 0 6px; border-top: var(--rule); color: var(--muted); }
-  .inv-defaults > span[aria-hidden] { color: var(--faint); }
+  /* The defaults, one quiet line: "Due on receipt · Zelle · #0000170", or with her three ways
+     "Due on receipt · Zelle, bank transfer (ACH), check · #0000170". With several ways the line wraps on a phone, and a
+     row must not end (or start) with a dot: each dot is drawn in the gap BEFORE the part that follows it, so on a part
+     that starts a new row it falls left of the line, where the clip cuts it off (6px are left for the focus ring).
+     The dots' own spans stay in the page as text (out of the layout, unseen). */
+  .inv-defaults { display: flex; flex-wrap: wrap; align-items: center; gap: 0 22px; padding: 10px 0 6px; border-top: var(--rule); color: var(--muted); clip-path: inset(-8px -8px -8px -6px); }
+  .inv-defaults > span[aria-hidden] { position: absolute; opacity: 0; pointer-events: none; }
+  .inv-defaults > span[aria-hidden] + * { position: relative; }
+  .inv-defaults > span[aria-hidden] + *::before { content: "·"; position: absolute; left: -13px; top: 50%; transform: translateY(-50%); color: var(--faint); font-weight: 400; }
 
   /* What a part of the defaults line opens: inline, between hairlines (no box, no sheet). */
   .inv-panel { margin: 4px 0 8px; padding: 6px 0 14px; border-top: var(--rule); border-bottom: var(--rule); }
@@ -274,7 +280,7 @@
   /* ───────────────────────── Settings: her own bank account (the ACH way) ───────────────────────── */
   /* A group between two hairlines, no box. The saved account shows masked (••••6789), never the number. */
   .inv-bank { display: grid; gap: 12px; padding: 16px 0; border-block: var(--rule); }
-  .inv-bank-saved { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 8px 24px; }
+  .inv-bank-saved { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px 40px; }
   .inv-bank-facts { display: flex; flex-wrap: wrap; gap: 6px 32px; }
   .inv-bank-facts dt { font-size: var(--text-sm); line-height: 1.25rem; color: var(--muted); }
   .inv-bank-facts dd { font-weight: 500; letter-spacing: 0.02em; }
