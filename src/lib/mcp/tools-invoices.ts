@@ -16,10 +16,12 @@ import { INVOICE_DISPLAY_STATUSES, PAY_WAYS, PAY_WAY_LABEL, PAYMENT_METHOD_LABEL
 
 /**
  * Invoices for Claude (docs/invoicing.md "Claude (MCP)"): read invoices and customers, and make a DRAFT invoice when
- * Nora or Cameron asked for one. Never: the link or its token, Stripe ids or fees, payment settings, the next number,
- * saved lines, anything about a contract (contracts are people only), and no tool finalizes (Make PDF), records or
- * deletes a payment, marks paid, voids, deletes, imports or shares an invoice. Ways to pay are Zelle unless a person
- * said otherwise; no way to pay ever adds a fee.
+ * Nora or Cameron asked for one. Never: the link or its token, Stripe ids or fees, payment settings (her Zelle number,
+ * her bank account and routing numbers: no tool reads or changes them, and getInvoice only ever carries the account
+ * masked), the next number, saved lines, anything about a contract (contracts are people only), and no tool finalizes
+ * (Make PDF), records or deletes a payment, marks paid, voids, deletes, imports or shares an invoice. Ways to pay are
+ * the ones Nora ticked in Settings (Zelle unless she chose others) unless a person said otherwise; a tool only ever
+ * names a way ("Bank transfer (ACH)"), never its details; no way to pay ever adds a fee.
  */
 
 class ToolError extends Error {}
@@ -72,7 +74,7 @@ function shapeRow(r: InvoiceListRow) {
 }
 
 const PayWaysArg = z.array(z.enum(PAY_WAYS)).min(1).max(PAY_WAYS.length).optional()
-  .describe(`How this invoice asks to be paid: ${PAY_WAYS.map((w) => `${w} (${PAY_WAY_LABEL[w]})`).join(", ")}. Leave it out (Zelle) unless Nora or Cameron said how this invoice should be paid.`);
+  .describe(`How this invoice asks to be paid: ${PAY_WAYS.map((w) => `${w} (${PAY_WAY_LABEL[w]})`).join(", ")}. Leave it out (the draft then takes the ways Nora ticked in Settings: Zelle unless she chose others) unless Nora or Cameron said how this invoice should be paid. ach is a transfer to Nora's own bank account (its numbers are on the PDF, never in these tools); bank and card are paying online through Stripe.`);
 
 export function registerInvoiceTools(server: McpServer) {
   server.registerTool("list_invoices", {
@@ -148,8 +150,9 @@ export function registerInvoiceTools(server: McpServer) {
       "Make a DRAFT invoice, only when Nora or Cameron asked for one (in chat or in an ask). Who it's for: exactly one of customer_id, " +
       "client_id (a managed business: its customer is made if needed) or deal_id (a collab deal: with no lines it bills the deal's agreed fee as " +
       "\"Collab: Instagram Reel, TikTok\"; a deal that already has a draft or open invoice returns that one). Lines are what they told you: " +
-      "never invent a price, a discount or a due date. Due on receipt unless they gave a due date. Ways to pay: Zelle unless they said how this " +
-      "invoice should be paid (pay_ways, plus pay_note for \"custom\"); never a fee or surcharge for any way. The draft has no number until a " +
+      "never invent a price, a discount or a due date. Due on receipt unless they gave a due date. Ways to pay: the ones Nora ticked in Settings " +
+      "(Zelle unless she chose others) unless they said how this invoice should be paid (pay_ways, plus pay_note for \"custom\"); never a fee or " +
+      "surcharge for any way, and never a bank account, routing or card number in a line or a note. The draft has no number until a " +
       "person reviews it and presses Make PDF. " + NEVER,
     inputSchema: {
       customer_id: z.string().max(80).optional(),

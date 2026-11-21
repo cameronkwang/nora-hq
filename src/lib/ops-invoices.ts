@@ -370,6 +370,9 @@ function guardText(fields: Array<[string, string | null | undefined]>, opts: { s
   }
 }
 
+/** An invoice's lines, for guardText: a line's description is free text like any other. */
+const lineTexts = (items: readonly { description: string }[] | undefined): Array<[string, string]> => (items ?? []).map((i) => ["a line", i.description]);
+
 /** The customer link's token: 32 random bytes; only its sha256 is stored for lookup, plus an encrypted copy. */
 const linkHash = (raw: string) => createHash("sha256").update(raw, "utf8").digest("hex");
 const looksLikeToken = (raw: unknown): raw is string => typeof raw === "string" && /^[A-Za-z0-9_-]{40,60}$/.test(raw);
@@ -1506,7 +1509,7 @@ type QuickPlan = {
 /** Everything Make PDF and Save as draft share: checks, Bill to, settings (with the one-time ask), the row's values. */
 async function planQuick(input: QuickInvoiceInputT, actor: string, today: string, mode: "finalize" | "draft"): Promise<QuickPlan> {
   const v = QuickInvoiceInput.parse(input);
-  guardText([["the notes", v.notes], ["the private note", v.privateNotes], ["the other way to pay", v.payNote], ["the discount", v.discountLabel]]);
+  guardText([["the notes", v.notes], ["the private note", v.privateNotes], ["the other way to pay", v.payNote], ["the discount", v.discountLabel], ...lineTexts(v.items)]);
   // Before anything is written (a new customer included): what the PDF can't print is refused, not printed wrong.
   if (mode === "finalize") checkPrintable({ newName: v.billTo.kind === "new" ? v.billTo.name : null, items: v.items });
   const setup = setupPatch(v.setup);
@@ -1691,7 +1694,7 @@ export async function createInvoiceDraft(
   const claude = isClaude(actor);
   const v = InvoiceDraftInput.parse(input);
   if (claude && v.contractId) throw new OpsError("Contracts are people only: leave contract_id out.");
-  guardText([["the notes", v.notes], ["the private note", v.privateNotes], ["the other way to pay", v.payNote]]);
+  guardText([["the notes", v.notes], ["the private note", v.privateNotes], ["the other way to pay", v.payNote], ...lineTexts(v.items)]);
   const db = await getDb();
   const [customer, settings, dealOk, contractOk] = await Promise.all([
     customerRow(v.customerId),
@@ -1768,7 +1771,7 @@ export async function createInvoiceFromDeal(dealId: string, actor: string, opts:
 export async function updateInvoice(id: string, patch: InvoicePatchT, actor: string): Promise<schema.Invoice> {
   people(actor, "edit an invoice");
   const v = InvoicePatch.parse(patch);
-  guardText([["the notes", v.notes], ["the private note", v.privateNotes], ["the other way to pay", v.payNote]]);
+  guardText([["the notes", v.notes], ["the private note", v.privateNotes], ["the other way to pay", v.payNote], ...lineTexts(v.items)]);
   const [cur, settings] = await Promise.all([invoiceRow(id), getInvoiceSettings()]);
   if (!cur) throw new OpsError("That invoice is gone.");
   if (cur.status === "paid") throw new OpsError("This invoice is paid. Delete a payment first to change it.");
