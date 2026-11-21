@@ -16,7 +16,14 @@ import "server-only";
  *   ─────────────────────────────────────────────────────────────────────────────
  *   Standard Content Creation Package            550.00         1.00      550.00
  *   NOTES: PAYMENT INFORMATION:
- *   (555) 010-0100 [Zelle]
+ *   Sample Bank Checking
+ *   ACH to ACCT#:000123456789
+ *   ROUTING:000000000
+ *
+ *   Please send payment via Zelle to 5550100100.
+ *   Put invoice 0000170 in the Zelle memo
+ *
+ *   Checks Payable to Nora Chen
  *   ─────────────────────────────────────────────────────────────────────────────
  *                                                        Subtotal          550.00
  *                                                        Total             550.00
@@ -261,6 +268,11 @@ export async function renderInvoicePdf(doc: InvoiceDocument, meta: { title?: str
       y -= lead * 1.5;
     }
     for (const p of doc.paymentLines) {
+      if (!p) {
+        // The blank line between two ways to pay (her bank account, Zelle, checks), as she writes them.
+        y -= lead;
+        continue;
+      }
       for (const l of wrap(regular, BODY, printable(regular, p), notesW)) {
         ensure(lead, false);
         text(l, M + 4, y);

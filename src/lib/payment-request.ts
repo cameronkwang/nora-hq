@@ -163,8 +163,9 @@ export type InvoiceMessageInput = {
   /** "Nora Chen" */
   fromName: string;
   /**
-   * The invoice's ways to pay, worded exactly as its PDF prints them (invoices-types paymentInfoLines):
-   * "(555) 010-0100 [Zelle]", "Put invoice 0000170 in the Zelle memo", "Check payable to …", "Pay online …: <link>".
+   * The invoice's ways to pay, worded as its PDF prints them but without her bank account (invoices-types
+   * paymentMessageLines): "Bank transfer (ACH): the account details are on the PDF.", "Please send payment via Zelle
+   * to 5550100100.", "Put invoice 0000170 in the Zelle memo", "Checks Payable to …", "Pay online …: <link>".
    */
   payLines: string[];
 };
