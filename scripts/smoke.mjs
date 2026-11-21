@@ -5,6 +5,9 @@
 // V8_SHOTS=/path saves the nav / schedule / business-tools screenshots (device scale 2) during the v8 flows.
 // V7_SHOTS=/path saves the onboarding-form screenshots (device scale 2) during the v7 flows.
 // Optional: SHOTS_DIR=/path to save screenshots, MCP_TOKEN=... to exercise /api/mcp in the flows.
+// invoicing: start the dev server with STRIPE_WEBHOOK_SECRET=whsec_test (or set SMOKE_STRIPE_WEBHOOK_SECRET to the server's)
+// and CRON_SECRET; on fresh sample data (`rm -rf .data && npm run dev:sample-data`) the first invoice must be 0000170.
+// SMOKE_DEBUG_DIR=/path saves a screenshot when an end-to-end invoicing step fails.
 import { createRequire } from "node:module";
 const require = createRequire(import.meta.url);
 const { chromium } = require("playwright");
